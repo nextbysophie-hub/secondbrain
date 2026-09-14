@@ -1,26 +1,200 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* @NextbySophie brand book */
+  --brand-rust: #892e1a;
+  --brand-cocoa: #462e29;
+  --brand-cream: #f2e7da;
+  --brand-yellow: #ffc73c;
+  --brand-periwinkle: #869eed;
+  --brand-tan: #b0906f;
+
+  --bg: var(--brand-cream);
+  --panel: #fbf5ec;
+  --panel-2: #fffcf7;
+  --line: #e2d2be;
+  --ink: var(--brand-cocoa);
+  --muted: #8b7063;
+  --accent: var(--brand-rust);
+  --accent-2: #4f63c4;
+  --ok: #5c7f45;
+  --warn: #b07d0a;
+  --bad: #b3311b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-brand-yellow: var(--brand-yellow);
+  --color-brand-periwinkle: var(--brand-periwinkle);
+  --color-brand-tan: var(--brand-tan);
+  --color-brand-cream: var(--brand-cream);
+  --color-brand-cocoa: var(--brand-cocoa);
+  --color-brand-rust: var(--brand-rust);
+  --font-sans: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-hand: var(--font-hand), ui-rounded, cursive;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Registered so the per-slide tints cross-fade instead of snapping. */
+@property --tint-a {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+@property --tint-b {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Each slide sets --tint-a / --tint-b so the page shifts colour as you move through. */
+  --tint-a: rgba(134, 158, 237, 0.28);
+  --tint-b: rgba(255, 199, 60, 0.32);
+  background:
+    radial-gradient(820px 560px at 10% -12%, var(--tint-a), transparent 62%),
+    radial-gradient(680px 480px at 94% -4%, var(--tint-b), transparent 58%),
+    var(--bg);
+  transition:
+    --tint-a 700ms ease,
+    --tint-b 700ms ease;
+  color: var(--ink);
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  letter-spacing: -0.011em;
+  min-height: 100dvh;
+}
+
+.font-hand {
+  font-family: var(--font-hand), cursive;
+  letter-spacing: 0;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.slide-in {
+  animation: slide-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.pop {
+  animation: pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(137, 46, 26, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(137, 46, 26, 0);
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-in,
+  .pop,
+  .pulse-ring {
+    animation: none;
+  }
+}
+
+.card {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+}
+
+/* The squircle swatch shape from the brand book. */
+.squircle {
+  border-radius: 42% 42% 42% 42% / 42% 42% 42% 42%;
+}
+
+input,
+textarea,
+select {
+  color-scheme: light;
+}
+
+::selection {
+  background: var(--brand-yellow);
+  color: var(--brand-cocoa);
+}
+
+/* The dashboard is a tool you stare at all day, so it drops the wizard's warm
+   brand for a plain white, near-monochrome sheet. Scoped, so the wizard keeps
+   its own look. */
+.board-theme {
+  --bg: #ffffff;
+  --panel: #fafafa;
+  --panel-2: #ffffff;
+  --line: #ebebeb;
+  --ink: #111214;
+  --muted: #8b9099;
+  --accent: #111214;
+  --accent-2: #3b6cf6;
+  --ok: #111214;
+  --warn: #b07d0a;
+  --bad: #e5484d;
+  --brand-cream: #ffffff;
+  --brand-cocoa: #111214;
+
+  position: relative;
+  z-index: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: "cv01", "ss01";
+  letter-spacing: -0.014em;
+}
+
+/* Nothing in here should be handwritten. */
+.board-theme .font-hand {
+  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.board-theme ::selection {
+  background: #111214;
+  color: #ffffff;
 }

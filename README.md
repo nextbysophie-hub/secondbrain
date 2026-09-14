@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Idea Capture
 
-## Getting Started
+A voice-activated second brain: say "Hey Siri, capture idea", speak the thought, and it lands in your Notion — sorted and tagged — before you finish talking.
 
-First, run the development server:
+This repo is two things at once:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. **A setup wizard** — a slideshow web app that walks a non-technical person through the whole setup in about 10 minutes, with an AI helper on every slide.
+2. **The capture webhook itself** — `/api/capture`, the small piece that translates a flat `{ idea, type }` from an iOS Shortcut into Notion's deeply nested API payload.
+
+## The flow
+
+```
+Siri / Share Sheet / home-screen icon
+    ↓ speaks or types the idea
+iOS Shortcut
+    ↓ POST { idea, type }
+/api/capture
+    ↓ builds Notion's nested payload
+Notion  →  type "content"  → Content Ideas DB, Status = Inbox
+           type "task"      → To-dos DB,         Status = Inbox
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The webhook exists because Shortcuts can't reliably serialize Notion's nested JSON — smart quotes and Dictionary/Text type mismatches break it. Moving the transformation server-side keeps the Shortcut dumb.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What the wizard does for the user
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Step | What happens |
+| --- | --- |
+| Notion key | They paste an internal integration secret; it's verified live against `/users/me`. |
+| Databases | The wizard **creates** Content Ideas and To-dos with the correct columns, statuses and colours. No manual config to get wrong. |
+| Hosting | They choose: a hosted capture link, or deploying their own copy to a free Vercel account. |
+| Shortcuts | Step-by-step build instructions with their personal capture link ready to copy. |
+| Test | One button sends a real capture and links to the row it created in Notion. |
 
-## Learn More
+Progress is saved to `localStorage`, so they can close the tab and come back.
 
-To learn more about Next.js, take a look at the following resources:
+## Two hosting modes, one file
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`/api/capture` resolves credentials from whichever is present:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Hosted** — the Shortcut posts to `…/api/capture?key=<captureKey>`, and the key looks up an encrypted Notion token in the store.
+- **Own Vercel** — no key; the deployment reads `NOTION_TOKEN`, `CONTENT_DB_ID` and `TASK_DB_ID` from its own environment.
 
-## Deploy on Vercel
+## Running it locally
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm install
+cp .env.example .env.local   # set APP_SECRET at minimum
+npm run dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploying the wizard
+
+Set `APP_SECRET`, and set `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` before sharing it publicly — without them, hosted setups fall back to a local file that Vercel's filesystem does not persist. `OPENAI_API_KEY` is optional; without it the in-app helper answers from a built-in FAQ instead.
