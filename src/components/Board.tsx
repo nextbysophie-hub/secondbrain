@@ -775,12 +775,15 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
   // remembered rather than needing the long link every time.
   useEffect(() => {
     if (initialKey) {
-      localStorage.setItem("captureKey", initialKey);
+      // The sample board would otherwise stick and hide the real Notion later.
+      if (initialKey === "demo") localStorage.removeItem("captureKey");
+      else localStorage.setItem("captureKey", initialKey);
       return;
     }
     const saved = localStorage.getItem("captureKey");
-    if (saved) setCaptureKey(saved);
-  }, [initialKey]);
+    // A link that names a database means this Notion, not whatever was opened last.
+    if (saved && saved !== "demo" && !initialTodoDb) setCaptureKey(saved);
+  }, [initialKey, initialTodoDb]);
 
   // Pointing the to-dos at an existing Notion list sticks, so the long
   // ?todos=… only has to be opened once.
@@ -799,7 +802,7 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
   );
 
   const load = useCallback(async () => {
-    if (!captureKey) return;
+    if (!captureKey && !todoDb) return;
     setLoading(true);
     try {
       const res = await fetch(boardUrl());
@@ -815,7 +818,7 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
     } finally {
       setLoading(false);
     }
-  }, [captureKey, boardUrl]);
+  }, [captureKey, todoDb, boardUrl]);
 
   useEffect(() => {
     void load();
@@ -837,7 +840,7 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
     })();
   };
 
-  if (!captureKey) {
+  if (!captureKey && !todoDb) {
     return (
       <div className="board-theme">
         <div className="mx-auto max-w-md space-y-4 px-5 py-16">
