@@ -212,7 +212,8 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
 const HABIT_DB = "Habits";
 const TICK_DB = "Habit Log";
 const GOAL_DB = "Goals";
-const AGENT_DB = "Agent Tasks";
+const AGENT_DB = "Assistant Tasks";
+const AGENT_DB_LEGACY = "Agent Tasks";
 
 export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
 
@@ -295,7 +296,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     findDatabase(token, HABIT_DB),
     findDatabase(token, TICK_DB),
     findDatabase(token, GOAL_DB),
-    findDatabase(token, AGENT_DB),
+    findDatabase(token, AGENT_DB).then((id) => id ?? findDatabase(token, AGENT_DB_LEGACY)),
   ]);
   if (foundHabits && foundTicks && foundGoals && foundAgent)
     return {
@@ -339,6 +340,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
   const agent =
     foundAgent ??
     existing(AGENT_DB) ??
+    existing(AGENT_DB_LEGACY) ??
     (await createDatabase(token, parent, AGENT_DB, "\u{1F916}", {
       Task: { title: {} },
       Details: { rich_text: {} },

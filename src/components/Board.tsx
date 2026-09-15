@@ -139,19 +139,19 @@ function AddRow({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
-        placeholder={bot ? "Tell the bot what to do…" : placeholder}
+        placeholder={bot ? "Tell the assistant what to do…" : placeholder}
         className="min-w-0 flex-1 rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[14px] outline-none transition placeholder:text-muted focus:border-ink/30 focus:bg-panel-2"
       />
       {botToggle ? (
         <button
           type="button"
           onClick={() => setBot(!bot)}
-          title="Hand this one to the bot as well"
+          title="Hand this one to the assistant as well"
           className={`shrink-0 rounded-xl border px-3 text-[13px] transition ${
             bot ? "border-accent-2 bg-accent-2/10 text-accent-2" : "border-line text-muted hover:text-ink"
           }`}
         >
-          🤖 for the bot
+          🤖 for the assistant
         </button>
       ) : null}
       <button
@@ -223,14 +223,14 @@ const queueAgent = (title: string, due: string | null) => (b: Board) => ({
   ],
 });
 
-/** Hands one to-do to the agent's database, where the Grok bot picks it up. */
+/** Hands one to-do to the assistant's database, where the bot picks it up. */
 function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
   const [sent, setSent] = useState(false);
   return (
     <button
       type="button"
-      title="Hand this to the agent"
-      aria-label="Hand this to the agent"
+      title="Hand this to the assistant"
+      aria-label="Hand this to the assistant"
       disabled={sent}
       onClick={() => {
         setSent(true);
@@ -254,7 +254,7 @@ function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
         sent ? "border-ok/40 text-ok" : "border-line text-muted hover:border-ink/30 hover:text-ink"
       }`}
     >
-      {sent ? "🤖 sent" : "🤖 bot"}
+      {sent ? "🤖 sent" : "🤖 assistant"}
     </button>
   );
 }
@@ -652,13 +652,13 @@ function AgentPane({ board, send }: { board: Board; send: Send }) {
   return (
     <div className="space-y-4">
       <Panel
-        title="For the bot"
+        title="For the assistant"
         right={<span className="text-[12px] text-muted">{open.length} waiting</span>}
       >
         <div className="space-y-3">
           <p className="text-[13px] leading-relaxed text-muted">
-            Anything you put here lands in the <span className="text-ink">Agent Tasks</span> database in Notion, which
-            your bot reads. It writes back into Result and flips the status when it&apos;s done.
+            Anything you put here lands in the <span className="text-ink">Assistant Tasks</span> database in Notion,
+            which your assistant reads. It writes back into Result and flips the status when it&apos;s done.
             {dbUrl ? (
               <>
                 {" "}
@@ -684,7 +684,7 @@ function AgentPane({ board, send }: { board: Board; send: Send }) {
             open.map((a) => <AgentRow key={a.id} task={a} send={send} />)
           ) : (
             <p className="py-2 text-[14px] text-muted">
-              Nothing with the bot. Hit 🤖 on any to-do to hand it over.
+              Nothing with the assistant. Hit 🤖 on any to-do to hand it over.
             </p>
           )}
         </div>
@@ -958,7 +958,7 @@ const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
   { id: "todos", label: "To-dos" },
-  { id: "agent", label: "Bot" },
+  { id: "agent", label: "Assistant" },
   { id: "habits", label: "Habits" },
   { id: "goals", label: "Goals" },
 ];
