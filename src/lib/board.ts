@@ -227,6 +227,28 @@ async function findDatabase(token: string, name: string): Promise<string | null>
   return match?.id ?? null;
 }
 
+/** Notion's search index lags a few minutes behind a database being created,
+ *  so the page's own children are the only trustworthy answer to "does this
+ *  already exist" — without it every visit makes another copy. */
+async function childDatabases(token: string, parentPageId: string): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < 5; page++) {
+    const res = await notion<{
+      results: { id: string; type?: string; child_database?: { title?: string } }[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    }>(token, `/blocks/${parentPageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`);
+    for (const block of res.results) {
+      const name = block.child_database?.title?.trim().toLowerCase();
+      if (name && !found.has(name)) found.set(name, block.id);
+    }
+    if (!res.has_more || !res.next_cursor) break;
+    cursor = res.next_cursor;
+  }
+  return found;
+}
+
 /** Habits and goals are created beside whichever of the user's databases lives
  *  in a page — a top-level database has no page to hang them off. */
 async function parentPageOf(token: string, databaseIds: string[]): Promise<string> {
@@ -286,8 +308,11 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     };
 
   const parent = await parentPageOf(token, [taskDbId, contentDbId]);
+  const onPage = await childDatabases(token, parent);
+  const existing = (name: string) => onPage.get(name.toLowerCase()) ?? null;
   const habits =
     foundHabits ??
+    existing(HABIT_DB) ??
     (await createDatabase(token, parent, HABIT_DB, "\u{1F525}", {
       Habit: { title: {} },
       Cadence: selectSchema(CADENCES, ["green", "blue", "purple"]),
@@ -296,6 +321,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     }));
   const ticks =
     foundTicks ??
+    existing(TICK_DB) ??
     (await createDatabase(token, parent, TICK_DB, "\u{2714}\u{FE0F}", {
       Entry: { title: {} },
       HabitId: { rich_text: {} },
@@ -303,6 +329,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     }));
   const goals =
     foundGoals ??
+    existing(GOAL_DB) ??
     (await createDatabase(token, parent, GOAL_DB, "\u{1F3AF}", {
       Goal: { title: {} },
       Area: selectSchema(AREAS, ["blue", "orange", "green", "purple"]),
@@ -311,6 +338,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     }));
   const agent =
     foundAgent ??
+    existing(AGENT_DB) ??
     (await createDatabase(token, parent, AGENT_DB, "\u{1F916}", {
       Task: { title: {} },
       Details: { rich_text: {} },
