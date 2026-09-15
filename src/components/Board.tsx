@@ -33,6 +33,17 @@ function monthDays(): string[] {
   );
 }
 
+/** Monday-first week, offset in whole weeks from the current one. */
+function weekDays(offset = 0): string[] {
+  const now = new Date();
+  const base = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = (new Date(base).getUTCDay() + 6) % 7;
+  return Array.from({ length: 7 }, (_, i) => iso(new Date(base + (i - dow + offset * 7) * 86400000)));
+}
+
+const weekday = (d: string) =>
+  new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+
 const pretty = (d: string | null) =>
   d ? new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
 
@@ -169,48 +180,134 @@ function AddRow({
 
 type Send = (action: Action, optimistic: (b: Board) => Board) => void;
 
-function TodoRow({ todo, send }: { todo: Todo; send: Send }) {
+function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: string[] }) {
   const overdue = !todo.done && todo.due && todo.due < TODAY;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(todo.title);
+  const [picking, setPicking] = useState(false);
+
+  const rename = () => {
+    const value = draft.trim();
+    setEditing(false);
+    if (!value || value === todo.title) return setDraft(todo.title);
+    send({ action: "editTodo", id: todo.id, field: "title", value }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, title: value } : t)),
+    }));
+  };
+
+  const recategorise = (value: string | null) => {
+    setPicking(false);
+    send({ action: "editTodo", id: todo.id, field: "category", value }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, category: value } : t)),
+    }));
+  };
+
   return (
-    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-none">
-      <Box
-        on={todo.done}
-        onChange={(done) =>
-          send({ action: "toggleTodo", id: todo.id, done }, (b) => ({
-            ...b,
-            todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done } : t)),
-          }))
-        }
-      />
-      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: catColour(todo.category) }} />
-      <span className={`min-w-0 flex-1 truncate text-[14px] ${todo.done ? "text-muted line-through" : ""}`}>
-        {todo.title}
-      </span>
-      {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
-      <AgentButton todo={todo} send={send} />
-      <input
-        type="date"
-        value={todo.due ?? ""}
-        onChange={(e) =>
-          send({ action: "editTodo", id: todo.id, field: "due", value: e.target.value || null }, (b) => ({
-            ...b,
-            todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: e.target.value || null } : t)),
-          }))
-        }
-        className={`w-[112px] shrink-0 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
-          overdue ? "text-bad" : "text-muted"
-        } hover:border-line`}
-      />
-      <button
-        type="button"
-        aria-label="Delete"
-        onClick={() =>
-          send({ action: "deleteTodo", id: todo.id }, (b) => ({ ...b, todos: b.todos.filter((t) => t.id !== todo.id) }))
-        }
-        className="shrink-0 text-[13px] text-muted/60 hover:text-bad"
-      >
-        ✕
-      </button>
+    <div className="border-b border-line py-2.5 last:border-none">
+      <div className="flex items-center gap-3">
+        <Box
+          on={todo.done}
+          onChange={(done) =>
+            send({ action: "toggleTodo", id: todo.id, done }, (b) => ({
+              ...b,
+              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done } : t)),
+            }))
+          }
+        />
+        <button
+          type="button"
+          title={`Category: ${todo.category ?? NONE} — tap to change`}
+          aria-label="Change category"
+          onClick={() => setPicking(!picking)}
+          className="h-2.5 w-2.5 shrink-0 rounded-full ring-offset-2 transition hover:ring-2 hover:ring-line"
+          style={{ background: catColour(todo.category) }}
+        />
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={rename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") rename();
+              if (e.key === "Escape") {
+                setDraft(todo.title);
+                setEditing(false);
+              }
+            }}
+            className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-2 py-1 text-[14px] outline-none focus:border-ink/30"
+          />
+        ) : (
+          <button
+            type="button"
+            title="Tap to rename"
+            onClick={() => {
+              setDraft(todo.title);
+              setEditing(true);
+            }}
+            className={`min-w-0 flex-1 truncate text-left text-[14px] ${todo.done ? "text-muted line-through" : ""}`}
+          >
+            {todo.title}
+          </button>
+        )}
+        {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
+        <AgentButton todo={todo} send={send} />
+        <input
+          type="date"
+          value={todo.due ?? ""}
+          onChange={(e) =>
+            send({ action: "editTodo", id: todo.id, field: "due", value: e.target.value || null }, (b) => ({
+              ...b,
+              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: e.target.value || null } : t)),
+            }))
+          }
+          className={`w-[112px] shrink-0 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
+            overdue ? "text-bad" : "text-muted"
+          } hover:border-line`}
+        />
+        <button
+          type="button"
+          aria-label="Delete"
+          onClick={() =>
+            send({ action: "deleteTodo", id: todo.id }, (b) => ({
+              ...b,
+              todos: b.todos.filter((t) => t.id !== todo.id),
+            }))
+          }
+          className="shrink-0 text-[13px] text-muted/60 hover:text-bad"
+        >
+          ✕
+        </button>
+      </div>
+      {picking ? (
+        <div className="flex flex-wrap gap-1.5 pb-1 pl-8 pt-2">
+          {cats.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => recategorise(c)}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                todo.category === c ? "border-ink text-ink" : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              <span
+                className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle"
+                style={{ background: catColour(c) }}
+              />
+              {c}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => recategorise(null)}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted transition hover:text-ink"
+          >
+            none
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -304,12 +401,12 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
             <div>
               <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">Late</div>
               {overdue.map((t) => (
-                <TodoRow key={t.id} todo={t} send={send} />
+                <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />
               ))}
             </div>
           ) : null}
           {today.length ? (
-            today.map((t) => <TodoRow key={t.id} todo={t} send={send} />)
+            today.map((t) => <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />)
           ) : (
             <p className="py-2 text-[14px] text-muted">Nothing scheduled for today.</p>
           )}
@@ -320,7 +417,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
               </summary>
               <div className="mt-2">
                 {inbox.map((t) => (
-                  <TodoRow key={t.id} todo={t} send={send} />
+                  <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />
                 ))}
               </div>
             </details>
@@ -467,9 +564,124 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/** The week as seven stacked days, each with its own add box. */
+function WeekView({
+  send,
+  shown,
+  cats,
+  week,
+  setWeek,
+}: {
+  send: Send;
+  shown: Todo[];
+  cats: string[];
+  week: number;
+  setWeek: (n: number) => void;
+}) {
+  const days = weekDays(week);
+  const start = days[0];
+  const end = days[6];
+  const dayOf = (t: Todo) => t.plan ?? t.due;
+  const late = week === 0 ? shown.filter((t) => !t.done && dayOf(t) && (dayOf(t) as string) < start) : [];
+  const undated = week === 0 ? shown.filter((t) => !t.done && !dayOf(t)) : [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-[13px] font-medium">
+          {pretty(start)} – {pretty(end)}
+          {week === 0 ? <span className="ml-2 text-[12px] text-muted">this week</span> : null}
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setWeek(week - 1)}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            onClick={() => setWeek(0)}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+          >
+            today
+          </button>
+          <button
+            type="button"
+            onClick={() => setWeek(week + 1)}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+          >
+            →
+          </button>
+        </div>
+      </div>
+
+      {late.length ? (
+        <div>
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">Late</div>
+          {late.map((t) => (
+            <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+          ))}
+        </div>
+      ) : null}
+
+      {days.map((d) => {
+        const items = shown.filter((t) => dayOf(t) === d);
+        return (
+          <div key={d} className={`rounded-xl border p-3 ${d === TODAY ? "border-ink/30 bg-panel" : "border-line"}`}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className={`text-[12px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(d)}</span>
+              <span className="text-[11px] text-muted">{items.filter((t) => !t.done).length || ""}</span>
+            </div>
+            {items.map((t) => (
+              <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+            ))}
+            <AddRow
+              placeholder="Add…"
+              onAdd={(title) =>
+                send({ action: "addTodo", title, due: d }, (b) => ({
+                  ...b,
+                  todos: [
+                    ...b.todos,
+                    {
+                      id: `tmp-${Date.now()}`,
+                      title,
+                      done: false,
+                      due: d,
+                      plan: null,
+                      category: null,
+                      priority: null,
+                      link: null,
+                      source: "Manual",
+                      url: "#",
+                    },
+                  ],
+                }))
+              }
+            />
+          </div>
+        );
+      })}
+
+      {undated.length ? (
+        <details>
+          <summary className="cursor-pointer text-[12px] text-muted">{undated.length} with no date</summary>
+          <div className="pt-2">
+            {undated.map((t) => (
+              <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function TodosPane({ board, send }: { board: Board; send: Send }) {
-  const [view, setView] = useState("list");
+  const [view, setView] = useState("week");
   const [cat, setCat] = useState("all");
+  const [week, setWeek] = useState(0);
   const days = monthDays();
   const cats = categoriesOf(board);
   const shown = cat === "all" ? board.todos : board.todos.filter((t) => groupOf(t, cats) === cat);
@@ -481,6 +693,7 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
         right={
           <Pills
             items={[
+              { id: "week", label: "Week" },
               { id: "list", label: "List" },
               { id: "calendar", label: "Month" },
             ]}
@@ -537,13 +750,15 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
                       </span>
                     </div>
                     {items.map((t) => (
-                      <TodoRow key={t.id} todo={t} send={send} />
+                      <TodoRow key={t.id} todo={t} send={send} cats={cats} />
                     ))}
                   </div>
                 );
               })}
               {shown.length === 0 ? <p className="text-[14px] text-muted">Nothing here yet.</p> : null}
             </div>
+          ) : view === "week" ? (
+            <WeekView send={send} shown={shown} cats={cats} week={week} setWeek={setWeek} />
           ) : (
             <div className="grid grid-cols-7 gap-1.5">
               {days.map((d) => {
