@@ -29,19 +29,24 @@ const ticks = habits.flatMap((h, hi) =>
 
 export function demoBoard() {
   const board: Board = {
-    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo" },
+    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo" },
     categories: ["Work", "Personal", "Health", "Money", "Other"],
     todos: [
-      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), category: "Work", priority: "High", link: null, source: "Siri" },
-      { id: "d2", title: "Film the b-roll in the car", done: false, due: iso(0), plan: null, category: "Work", priority: null, link: null, source: "Siri" },
-      { id: "d3", title: "Renew the domain", done: false, due: iso(-2), plan: null, category: "Money", priority: null, link: null, source: "Manual" },
-      { id: "d4", title: "Book the dentist", done: false, due: iso(3), plan: null, category: "Health", priority: null, link: null, source: "Siri" },
-      { id: "d5", title: "Reply to the brand email", done: true, due: iso(-1), plan: null, category: "Work", priority: null, link: null, source: "Manual" },
-      { id: "d6", title: "Buy Patrick a birthday thing", done: false, due: iso(6), plan: null, category: "Personal", priority: null, link: null, source: "Siri" },
-      { id: "d7", title: "Move money to savings", done: false, due: null, plan: null, category: "Money", priority: null, link: null, source: "Siri" },
-      { id: "d8", title: "Call mum back", done: false, due: null, plan: null, category: "Personal", priority: null, link: null, source: "Siri" },
-      { id: "d9", title: "Batch 3 reels", done: false, due: iso(1), plan: iso(1), category: "Work", priority: null, link: null, source: "Manual" },
-      { id: "d10", title: "Stretch before bed", done: true, due: iso(0), plan: null, category: "Health", priority: null, link: null, source: "Manual" },
+      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), category: "Work", priority: "High", link: null, source: "Siri", url: "#" },
+      { id: "d2", title: "Film the b-roll in the car", done: false, due: iso(0), plan: null, category: "Work", priority: null, link: null, source: "Siri", url: "#" },
+      { id: "d3", title: "Renew the domain", done: false, due: iso(-2), plan: null, category: "Money", priority: null, link: null, source: "Manual", url: "#" },
+      { id: "d4", title: "Book the dentist", done: false, due: iso(3), plan: null, category: "Health", priority: null, link: null, source: "Siri", url: "#" },
+      { id: "d5", title: "Reply to the brand email", done: true, due: iso(-1), plan: null, category: "Work", priority: null, link: null, source: "Manual", url: "#" },
+      { id: "d6", title: "Buy Patrick a birthday thing", done: false, due: iso(6), plan: null, category: "Personal", priority: null, link: null, source: "Siri", url: "#" },
+      { id: "d7", title: "Move money to savings", done: false, due: null, plan: null, category: "Money", priority: null, link: null, source: "Siri", url: "#" },
+      { id: "d8", title: "Call mum back", done: false, due: null, plan: null, category: "Personal", priority: null, link: null, source: "Siri", url: "#" },
+      { id: "d9", title: "Batch 3 reels", done: false, due: iso(1), plan: iso(1), category: "Work", priority: null, link: null, source: "Manual", url: "#" },
+      { id: "d10", title: "Stretch before bed", done: true, due: iso(0), plan: null, category: "Health", priority: null, link: null, source: "Manual", url: "#" },
+    ],
+    agent: [
+      { id: "a1", title: "Book car detailing for Saturday", details: "Interior + exterior, somewhere in Austin, under $200.", due: iso(2), status: "Working", result: "", url: "#" },
+      { id: "a2", title: "Find a dentist that takes my insurance", details: "", due: null, status: "Queued", result: "", url: "#" },
+      { id: "a3", title: "Renew the domain", details: "", due: iso(-2), status: "Done", result: "Renewed for 2 years, receipt in your email.", url: "#" },
     ],
     ideas: [
       { id: "i1", title: "Video: the 3 apps I deleted this year", status: "Inbox", link: null, captured: iso(0), url: "#" },

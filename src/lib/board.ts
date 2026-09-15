@@ -41,6 +41,19 @@ export type Todo = {
   priority: string | null;
   link: string | null;
   source: string | null;
+  url: string;
+};
+
+/** A row in the database the Grok agent watches: the dashboard writes the job,
+ *  the agent writes the result back into the same row. */
+export type AgentTask = {
+  id: string;
+  title: string;
+  details: string;
+  due: string | null;
+  status: string;
+  result: string;
+  url: string;
 };
 
 export type Idea = {
@@ -58,6 +71,7 @@ export type Goal = { id: string; name: string; area: string; period: string; don
 
 export type Board = {
   todos: Todo[];
+  agent: AgentTask[];
   ideas: Idea[];
   habits: Habit[];
   ticks: HabitTick[];
@@ -66,7 +80,14 @@ export type Board = {
   dbs: BoardDbs;
 };
 
-export type BoardDbs = { content: string; task: string; habits: string; ticks: string; goals: string };
+export type BoardDbs = {
+  content: string;
+  task: string;
+  habits: string;
+  ticks: string;
+  goals: string;
+  agent: string;
+};
 
 export const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 export const AREAS = ["Business", "Content", "Health", "Life"];
@@ -191,6 +212,9 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
 const HABIT_DB = "Habits";
 const TICK_DB = "Habit Log";
 const GOAL_DB = "Goals";
+const AGENT_DB = "Agent Tasks";
+
+export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
 
 async function findDatabase(token: string, name: string): Promise<string | null> {
   const res = await notion<{ results: { id: string; title?: { plain_text?: string }[] }[] }>(token, "/search", {
@@ -245,13 +269,21 @@ async function ensureTaskColumns(token: string, taskDbId: string) {
 export async function ensureBoardDbs(token: string, contentDbId: string, taskDbId: string): Promise<BoardDbs> {
   await ensureTaskColumns(token, taskDbId);
 
-  const [foundHabits, foundTicks, foundGoals] = await Promise.all([
+  const [foundHabits, foundTicks, foundGoals, foundAgent] = await Promise.all([
     findDatabase(token, HABIT_DB),
     findDatabase(token, TICK_DB),
     findDatabase(token, GOAL_DB),
+    findDatabase(token, AGENT_DB),
   ]);
-  if (foundHabits && foundTicks && foundGoals)
-    return { content: contentDbId, task: taskDbId, habits: foundHabits, ticks: foundTicks, goals: foundGoals };
+  if (foundHabits && foundTicks && foundGoals && foundAgent)
+    return {
+      content: contentDbId,
+      task: taskDbId,
+      habits: foundHabits,
+      ticks: foundTicks,
+      goals: foundGoals,
+      agent: foundAgent,
+    };
 
   const parent = await parentPageOf(token, [taskDbId, contentDbId]);
   const habits =
@@ -277,7 +309,17 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       Period: { rich_text: {} },
       Done: { checkbox: {} },
     }));
-  return { content: contentDbId, task: taskDbId, habits, ticks, goals };
+  const agent =
+    foundAgent ??
+    (await createDatabase(token, parent, AGENT_DB, "\u{1F916}", {
+      Task: { title: {} },
+      Details: { rich_text: {} },
+      Due: { date: {} },
+      Status: selectSchema(AGENT_STATUSES, ["gray", "blue", "green", "red"]),
+      Result: { rich_text: {} },
+      From: { url: {} },
+    }));
+  return { content: contentDbId, task: taskDbId, habits, ticks, goals, agent };
 }
 
 /* --------------------------------------------------------------- the reads */
@@ -331,12 +373,13 @@ export async function readBoard(
       }
     : undefined;
 
-  const [todoRows, ideaRows, habitRows, tickRows, goalRows] = await Promise.all([
+  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows] = await Promise.all([
     query(token, dbs.task, openFilter ? { filter: openFilter } : {}),
     query(token, dbs.content, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
     query(token, dbs.habits),
     query(token, dbs.ticks, { filter: { property: "Date", date: { on_or_after: since } } }),
     query(token, dbs.goals),
+    query(token, dbs.agent, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
   ]);
 
   return {
@@ -351,6 +394,16 @@ export async function readBoard(
       priority: map.priority ? selectOf(r.properties[map.priority]) : null,
       link: map.link ? (r.properties[map.link]?.url ?? null) : null,
       source: map.source ? selectOf(r.properties[map.source]) : null,
+      url: r.url,
+    })),
+    agent: agentRows.map((r) => ({
+      id: r.id,
+      title: titleOf(r),
+      details: textOf(r.properties.Details),
+      due: dateOf(r.properties.Due),
+      status: selectOf(r.properties.Status) ?? AGENT_STATUSES[0],
+      result: textOf(r.properties.Result),
+      url: r.url,
     })),
     ideas: ideaRows.map((r) => ({
       id: r.id,
@@ -406,6 +459,9 @@ export type Action =
   | { action: "editTodo"; id: string; field: "title" | "due" | "plan" | "category"; value: string | null }
   | { action: "toggleTodo"; id: string; done: boolean }
   | { action: "deleteTodo"; id: string }
+  | { action: "sendToAgent"; title: string; details?: string; due?: string | null; from?: string | null }
+  | { action: "agentStatus"; id: string; status: string }
+  | { action: "deleteAgent"; id: string }
   | { action: "ideaStatus"; id: string; status: string }
   | { action: "ideaToTodo"; id: string; title: string; link?: string | null }
   | { action: "deleteIdea"; id: string }
@@ -473,6 +529,20 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
     case "toggleTodo":
       await updatePage(token, body.id, taskProps(map, { done: body.done }));
       return;
+    case "sendToAgent":
+      await createPage(token, dbs.agent, {
+        Task: title(body.title),
+        Details: richText(body.details ?? ""),
+        Due: dateProp(body.due ?? null),
+        Status: selectProp(AGENT_STATUSES[0]),
+        Result: richText(""),
+        From: { url: body.from || null },
+      });
+      return;
+    case "agentStatus":
+      await updatePage(token, body.id, { Status: selectProp(body.status) });
+      return;
+    case "deleteAgent":
     case "deleteTodo":
     case "deleteIdea":
     case "deleteHabit":

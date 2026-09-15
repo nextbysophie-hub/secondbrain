@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Action, Board, Goal, Habit, HabitTick, Idea, Todo } from "@/lib/board";
+import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Todo } from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -165,6 +165,7 @@ function TodoRow({ todo, send }: { todo: Todo; send: Send }) {
         {todo.title}
       </span>
       {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
+      <AgentButton todo={todo} send={send} />
       <input
         type="date"
         value={todo.due ?? ""}
@@ -189,6 +190,42 @@ function TodoRow({ todo, send }: { todo: Todo; send: Send }) {
         ✕
       </button>
     </div>
+  );
+}
+
+/** Hands one to-do to the agent's database, where the Grok bot picks it up. */
+function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
+  const [sent, setSent] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Hand this to the agent"
+      aria-label="Hand this to the agent"
+      disabled={sent}
+      onClick={() => {
+        setSent(true);
+        send({ action: "sendToAgent", title: todo.title, due: todo.due, from: todo.url }, (b) => ({
+          ...b,
+          agent: [
+            {
+              id: `tmp-${Date.now()}`,
+              title: todo.title,
+              details: "",
+              due: todo.due,
+              status: "Queued",
+              result: "",
+              url: "#",
+            },
+            ...b.agent,
+          ],
+        }));
+      }}
+      className={`shrink-0 rounded-lg border px-1.5 py-0.5 text-[12px] transition ${
+        sent ? "border-ok/40 text-ok" : "border-transparent text-muted/50 hover:border-line hover:text-ink"
+      }`}
+    >
+      {sent ? "🤖 sent" : "🤖"}
+    </button>
   );
 }
 
@@ -225,6 +262,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
                     priority: null,
                     link: null,
                     source: "Manual",
+                    url: "#",
                   },
                 ],
               }))
@@ -324,6 +362,7 @@ function IdeaRow({ idea, send }: { idea: Idea; send: Send }) {
                 priority: null,
                 link: idea.link,
                 source: "Manual",
+                url: "#",
               },
             ],
           }))
@@ -436,6 +475,7 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
                     priority: null,
                     link: null,
                     source: "Manual",
+                    url: "#",
                   },
                 ],
               }))
@@ -500,6 +540,131 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
           )}
         </div>
       </Panel>
+    </div>
+  );
+}
+
+const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
+const AGENT_TONE: Record<string, string> = {
+  Queued: "text-muted",
+  Working: "text-accent-2",
+  Done: "text-ok",
+  Failed: "text-bad",
+};
+
+function AgentRow({ task, send }: { task: AgentTask; send: Send }) {
+  return (
+    <div className="border-b border-line py-3 last:border-none">
+      <div className="flex items-center gap-3">
+        <span className={`w-[64px] shrink-0 text-[11px] uppercase tracking-widest ${AGENT_TONE[task.status] ?? "text-muted"}`}>
+          {task.status}
+        </span>
+        <span className="min-w-0 flex-1 text-[14px]">{task.title}</span>
+        <span className="shrink-0 text-[12px] text-muted">{pretty(task.due)}</span>
+        {task.url !== "#" ? (
+          <a href={task.url} target="_blank" rel="noreferrer" className="shrink-0 text-[12px] text-accent-2 underline">
+            open
+          </a>
+        ) : null}
+        <button
+          type="button"
+          aria-label="Delete"
+          onClick={() =>
+            send({ action: "deleteAgent", id: task.id }, (b) => ({
+              ...b,
+              agent: b.agent.filter((a) => a.id !== task.id),
+            }))
+          }
+          className="shrink-0 text-[13px] text-muted/60 hover:text-bad"
+        >
+          ✕
+        </button>
+      </div>
+      {task.details ? <p className="mt-1 pl-[76px] text-[13px] text-muted">{task.details}</p> : null}
+      {task.result ? (
+        <p className="mt-1 pl-[76px] text-[13px]">
+          <span className="text-muted">Bot: </span>
+          {task.result}
+        </p>
+      ) : null}
+      <div className="mt-1.5 flex gap-1 pl-[76px]">
+        {AGENT_STATUSES.filter((s) => s !== task.status).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() =>
+              send({ action: "agentStatus", id: task.id, status: s }, (b) => ({
+                ...b,
+                agent: b.agent.map((a) => (a.id === task.id ? { ...a, status: s } : a)),
+              }))
+            }
+            className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted transition hover:border-ink/30 hover:text-ink"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The hand-off list: anything here is a job for the Grok bot, which reads the
+ *  same Notion database and writes its answer back into the Result column. */
+function AgentPane({ board, send }: { board: Board; send: Send }) {
+  const open = board.agent.filter((a) => a.status !== "Done" && a.status !== "Failed");
+  const closed = board.agent.filter((a) => a.status === "Done" || a.status === "Failed");
+  const dbUrl = board.dbs.agent !== "demo" ? `https://notion.so/${board.dbs.agent.replace(/-/g, "")}` : null;
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="For the bot"
+        right={<span className="text-[12px] text-muted">{open.length} waiting</span>}
+      >
+        <div className="space-y-3">
+          <p className="text-[13px] leading-relaxed text-muted">
+            Anything you put here lands in the <span className="text-ink">Agent Tasks</span> database in Notion, which
+            your bot reads. It writes back into Result and flips the status when it&apos;s done.
+            {dbUrl ? (
+              <>
+                {" "}
+                <a href={dbUrl} target="_blank" rel="noreferrer" className="text-accent-2 underline">
+                  Open it in Notion
+                </a>
+              </>
+            ) : null}
+          </p>
+          <AddRow
+            placeholder="e.g. book a car detail for Saturday morning…"
+            onAdd={(title) =>
+              send({ action: "sendToAgent", title }, (b) => ({
+                ...b,
+                agent: [
+                  { id: `tmp-${Date.now()}`, title, details: "", due: null, status: "Queued", result: "", url: "#" },
+                  ...b.agent,
+                ],
+              }))
+            }
+          />
+          {open.length ? (
+            open.map((a) => <AgentRow key={a.id} task={a} send={send} />)
+          ) : (
+            <p className="py-2 text-[14px] text-muted">
+              Nothing with the bot. Hit 🤖 on any to-do to hand it over.
+            </p>
+          )}
+        </div>
+      </Panel>
+
+      {closed.length ? (
+        <Panel title="Finished" right={<span className="text-[12px] text-muted">{closed.length}</span>}>
+          <div>
+            {closed.map((a) => (
+              <AgentRow key={a.id} task={a} send={send} />
+            ))}
+          </div>
+        </Panel>
+      ) : null}
     </div>
   );
 }
@@ -759,6 +924,7 @@ const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
   { id: "todos", label: "To-dos" },
+  { id: "agent", label: "Bot" },
   { id: "habits", label: "Habits" },
   { id: "goals", label: "Goals" },
 ];
@@ -908,6 +1074,8 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
           <IdeasPane board={board} send={send} />
         ) : tab === "todos" ? (
           <TodosPane board={board} send={send} />
+        ) : tab === "agent" ? (
+          <AgentPane board={board} send={send} />
         ) : tab === "habits" ? (
           <HabitsPane board={board} send={send} />
         ) : (
