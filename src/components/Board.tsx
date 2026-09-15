@@ -115,13 +115,23 @@ function Panel({ title, right, children }: { title: string; right?: React.ReactN
   );
 }
 
-function AddRow({ placeholder, onAdd }: { placeholder: string; onAdd: (v: string) => void }) {
+function AddRow({
+  placeholder,
+  onAdd,
+  botToggle,
+}: {
+  placeholder: string;
+  onAdd: (v: string, bot: boolean) => void;
+  botToggle?: boolean;
+}) {
   const [value, setValue] = useState("");
+  const [bot, setBot] = useState(false);
   const submit = () => {
     const v = value.trim();
     if (!v) return;
-    onAdd(v);
+    onAdd(v, bot);
     setValue("");
+    setBot(false);
   };
   return (
     <div className="flex gap-2">
@@ -129,9 +139,21 @@ function AddRow({ placeholder, onAdd }: { placeholder: string; onAdd: (v: string
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
-        placeholder={placeholder}
+        placeholder={bot ? "Tell the bot what to do…" : placeholder}
         className="min-w-0 flex-1 rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[14px] outline-none transition placeholder:text-muted focus:border-ink/30 focus:bg-panel-2"
       />
+      {botToggle ? (
+        <button
+          type="button"
+          onClick={() => setBot(!bot)}
+          title="Hand this one to the bot as well"
+          className={`shrink-0 rounded-xl border px-3 text-[13px] transition ${
+            bot ? "border-accent-2 bg-accent-2/10 text-accent-2" : "border-line text-muted hover:text-ink"
+          }`}
+        >
+          🤖 for the bot
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={submit}
@@ -193,6 +215,14 @@ function TodoRow({ todo, send }: { todo: Todo; send: Send }) {
   );
 }
 
+const queueAgent = (title: string, due: string | null) => (b: Board) => ({
+  ...b,
+  agent: [
+    { id: `tmp-${Date.now()}`, title, details: "", due, status: "Queued", result: "", url: "#" },
+    ...b.agent,
+  ],
+});
+
 /** Hands one to-do to the agent's database, where the Grok bot picks it up. */
 function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
   const [sent, setSent] = useState(false);
@@ -220,11 +250,11 @@ function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
           ],
         }));
       }}
-      className={`shrink-0 rounded-lg border px-1.5 py-0.5 text-[12px] transition ${
-        sent ? "border-ok/40 text-ok" : "border-transparent text-muted/50 hover:border-line hover:text-ink"
+      className={`shrink-0 rounded-lg border px-2 py-0.5 text-[12px] transition ${
+        sent ? "border-ok/40 text-ok" : "border-line text-muted hover:border-ink/30 hover:text-ink"
       }`}
     >
-      {sent ? "🤖 sent" : "🤖"}
+      {sent ? "🤖 sent" : "🤖 bot"}
     </button>
   );
 }
@@ -247,7 +277,9 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         <div className="space-y-3">
           <AddRow
             placeholder="Add something for today…"
-            onAdd={(title) =>
+            botToggle
+            onAdd={(title, bot) => {
+              if (bot) send({ action: "sendToAgent", title, due: TODAY }, queueAgent(title, TODAY));
               send({ action: "addTodo", title, due: TODAY, category: "Other" }, (b) => ({
                 ...b,
                 todos: [
@@ -265,8 +297,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
                     url: "#",
                   },
                 ],
-              }))
-            }
+              }));
+            }}
           />
           {overdue.length ? (
             <div>
@@ -460,7 +492,9 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
         <div className="space-y-4">
           <AddRow
             placeholder="Add a to-do…"
-            onAdd={(title) =>
+            botToggle
+            onAdd={(title, bot) => {
+              if (bot) send({ action: "sendToAgent", title }, queueAgent(title, null));
               send({ action: "addTodo", title, category: cat === "all" ? undefined : cat }, (b) => ({
                 ...b,
                 todos: [
@@ -478,8 +512,8 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
                     url: "#",
                   },
                 ],
-              }))
-            }
+              }));
+            }}
           />
           <Pills
             items={[{ id: "all", label: "Everything" }, ...cats.map((c) => ({ id: c, label: c }))]}
