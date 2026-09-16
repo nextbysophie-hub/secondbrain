@@ -75,7 +75,7 @@ export type Idea = {
   url: string;
 };
 
-export type Habit = { id: string; name: string; cadence: string; bad: boolean };
+export type Habit = { id: string; name: string; cadence: string; bad: boolean; affirmation?: boolean };
 export type HabitTick = { id: string; habitId: string; date: string };
 export type Goal = { id: string; name: string; area: string; period: string; done: boolean };
 
@@ -401,7 +401,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     (await createDatabase(token, parent, HABIT_DB, "\u{1F525}", {
       Habit: { title: {} },
       Cadence: selectSchema(CADENCES, ["green", "blue", "purple"]),
-      Kind: selectSchema(["Habit", "Bad habit"], ["green", "red"]),
+      Kind: selectSchema(["Habit", "Bad habit", "Affirmation"], ["green", "red", "purple"]),
       Archived: { checkbox: {} },
     }));
   const ticks =
@@ -552,6 +552,7 @@ export async function readBoard(
         name: titleOf(r),
         cadence: selectOf(r.properties.Cadence) ?? "Daily",
         bad: selectOf(r.properties.Kind) === "Bad habit",
+        affirmation: selectOf(r.properties.Kind) === "Affirmation",
       })),
     ticks: tickRows.map((r) => ({
       id: r.id,
@@ -610,7 +611,7 @@ export type Action =
   | { action: "ideaStatus"; id: string; status: string }
   | { action: "ideaToTodo"; id: string; title: string; link?: string | null }
   | { action: "deleteIdea"; id: string }
-  | { action: "addHabit"; name: string; cadence: string; bad: boolean }
+  | { action: "addHabit"; name: string; cadence: string; bad: boolean; affirmation?: boolean }
   | { action: "deleteHabit"; id: string }
   | { action: "tickHabit"; habitId: string; habitName: string; date: string; on: boolean; tickId?: string }
   | { action: "addGoal"; name: string; area: string; period: string }
@@ -734,7 +735,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
       await createPage(token, dbs.habits, {
         Habit: title(body.name),
         Cadence: selectProp(body.cadence),
-        Kind: selectProp(body.bad ? "Bad habit" : "Habit"),
+        Kind: selectProp(body.affirmation ? "Affirmation" : body.bad ? "Bad habit" : "Habit"),
         Archived: { checkbox: false },
       });
       return;

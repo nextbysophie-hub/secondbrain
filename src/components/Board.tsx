@@ -528,10 +528,146 @@ function clearedStreak(todos: Todo[], upTo: string = TODAY): number {
   return n;
 }
 
+/* ------------------------------------------------------------ affirmations */
+
+/** The lines Sophie writes out by hand each day. They live as habits with
+ *  Kind = Affirmation in Notion, so the daily log and streak already work. */
+const affirmationsOf = (board: Board) => board.habits.filter((h) => h.affirmation);
+
+const saidAll = (board: Board, day: string) => {
+  const lines = affirmationsOf(board);
+  if (!lines.length) return false;
+  const said = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
+  return lines.every((h) => said.has(h.id));
+};
+
+function affirmationStreak(board: Board, upTo: string = TODAY): number {
+  let n = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = shiftDay(upTo, -i);
+    if (!saidAll(board, d)) {
+      if (i === 0) continue;
+      break;
+    }
+    n++;
+  }
+  return n;
+}
+
+/** Writing it out is the exercise, punctuation and case aren't. */
+const sameWords = (a: string, b: string) => {
+  const norm = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9$ ]/g, " ").replace(/\s+/g, " ").trim();
+  return norm(a) === norm(b);
+};
+
+/** The line sits there faded; you type it over and it sets for the day. */
+function TraceLine({ board, send, habit }: { board: Board; send: Send; habit: Habit }) {
+  const [text, setText] = useState("");
+  const said = board.ticks.some((t) => t.habitId === habit.id && t.date === TODAY);
+
+  return (
+    <div className="flex items-baseline gap-3 border-b border-line/60 py-3 last:border-none">
+      {said ? (
+        <>
+          <span className="shrink-0 text-[13px] text-accent-2">✓</span>
+          <span className="serif min-w-0 flex-1 text-[19px]">{habit.name}</span>
+        </>
+      ) : (
+        <>
+          <span className="shrink-0 text-[13px] text-muted/50">›</span>
+          <input
+            value={text}
+            onChange={(e) => {
+              const v = e.target.value;
+              setText(v);
+              if (sameWords(v, habit.name)) tickHabit(board, send, habit, TODAY, true);
+            }}
+            placeholder={habit.name}
+            aria-label={`Write out: ${habit.name}`}
+            className="serif min-w-0 flex-1 bg-transparent text-[19px] outline-none placeholder:text-muted/40"
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Two lines typed every morning: one you're working towards, one you already
+ *  have. Both written = the day counts towards their own streak. */
+function Affirmations({ board, send }: { board: Board; send: Send }) {
+  const lines = affirmationsOf(board);
+  const [goal, setGoal] = useState("");
+  const [thanks, setThanks] = useState("");
+  const streak = affirmationStreak(board);
+
+  const keep = (name: string) =>
+    send({ action: "addHabit", name, cadence: "Daily", bad: false, affirmation: true }, (b) => ({
+      ...b,
+      habits: [
+        ...b.habits,
+        { id: `tmp-${name}`, name, cadence: "Daily", bad: false, affirmation: true },
+      ],
+    }));
+
+  if (!lines.length)
+    return (
+      <div className="day-card mb-5 p-6 sm:p-7">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Daily lines</p>
+        <p className="mt-2 text-[14px] text-muted">
+          Two sentences to write out every morning — one you&rsquo;re working towards, one
+          you&rsquo;re grateful for.
+        </p>
+        <input
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder="I make $200k a month"
+          className="serif mt-4 w-full border-b border-line bg-transparent py-2 text-[19px] outline-none placeholder:text-muted/40 focus:border-ink/40"
+        />
+        <input
+          value={thanks}
+          onChange={(e) => setThanks(e.target.value)}
+          placeholder="I'm grateful for the life I'm building"
+          className="serif mt-3 w-full border-b border-line bg-transparent py-2 text-[19px] outline-none placeholder:text-muted/40 focus:border-ink/40"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            keep(goal.trim() || "I make $200k a month");
+            keep(thanks.trim() || "I'm grateful for the life I'm building");
+            setGoal("");
+            setThanks("");
+          }}
+          className="mt-4 rounded-full border border-line px-3 py-1.5 text-[12px] text-muted transition hover:border-ink/30 hover:text-ink"
+        >
+          keep these
+        </button>
+      </div>
+    );
+
+  return (
+    <div className="day-card mb-5 p-6 sm:p-7">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+          {saidAll(board, TODAY) ? "Written today" : "Write them out"}
+        </p>
+        <span className="shrink-0 text-[12px] text-muted">
+          {streak ? `${streak} day${streak === 1 ? "" : "s"} running` : "start it today"}
+        </span>
+      </div>
+      <div className="mt-1">
+        {lines.map((h) => (
+          <TraceLine key={h.id} board={board} send={send} habit={h} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Every daily habit as one dot — filled once it's ticked today, with the
  *  running streak beside it. Quiet enough to live in the header. */
 function StreakDots({ board }: { board: Board }) {
-  const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
+  const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad && !h.affirmation);
   const done = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
   const cleared = clearedStreak(board.todos);
   const clearedToday = dayCleared(board.todos, TODAY);
@@ -545,6 +681,21 @@ function StreakDots({ board }: { board: Board }) {
         <span className={`h-2 w-2 rounded-full ${clearedToday ? "bg-ink" : "border border-line"}`} />
         <span className={`text-[12px] tabular-nums ${clearedToday ? "text-ink" : "text-muted"}`}>{cleared}</span>
       </span>
+      {affirmationsOf(board).length ? (
+        <span
+          title={`Days in a row you wrote your lines out — ${affirmationStreak(board)} running`}
+          className="flex items-center gap-1.5"
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${saidAll(board, TODAY) ? "bg-accent-2" : "border border-line"}`}
+          />
+          <span
+            className={`text-[12px] tabular-nums ${saidAll(board, TODAY) ? "text-ink" : "text-muted"}`}
+          >
+            {affirmationStreak(board)}
+          </span>
+        </span>
+      ) : null}
       {habits.length ? <span className="h-3 w-px bg-line" /> : null}
       {habits.map((h) => {
         const streak = streakOf(board.ticks, h.id);
@@ -1124,7 +1275,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const free = Number(hours) * 60;
   const overloaded = free > 0 && load > free;
 
-  const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
+  const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad && !h.affirmation);
   const doneToday = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
 
   // Evening is when tomorrow is still choosable; morning is too late to plan it.
@@ -1145,7 +1296,9 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     }));
 
   return (
-    <div className="day-card p-7 sm:p-10">
+    <>
+      {day === TODAY ? <Affirmations board={board} send={send} /> : null}
+      <div className="day-card p-7 sm:p-10">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
@@ -1317,7 +1470,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </div>
         </section>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1956,7 +2110,7 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
   const [cadence, setCadence] = useState("Daily");
   const days = monthDays().filter((d) => d <= TODAY);
   const allDays = monthDays();
-  const habits = board.habits.filter((h) => !h.bad && h.cadence === cadence);
+  const habits = board.habits.filter((h) => !h.bad && !h.affirmation && h.cadence === cadence);
   const bad = board.habits.filter((h) => h.bad);
   const isOn = (habitId: string, date: string) => board.ticks.some((t) => t.habitId === habitId && t.date === date);
 
