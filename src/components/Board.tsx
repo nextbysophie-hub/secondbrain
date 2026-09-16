@@ -653,6 +653,113 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   url: "#",
 });
 
+const daysBetween = (from: string, to: string) =>
+  Math.round((new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86400000);
+
+type Suggestion = { todo: Todo; why: string; score: number };
+
+/** What the day should probably hold, read off the dates already in Notion:
+ *  late things first, then what's actually due, then what she'd already
+ *  planned for the day but never slotted. Undated tasks stay out of it —
+ *  they're the pile, not the plan. */
+function suggestFor(board: Board, day: string): Suggestion[] {
+  const rank = (t: Todo): Suggestion | null => {
+    const bump = (t.priority ?? "").toLowerCase().startsWith("high")
+      ? 8
+      : (t.priority ?? "").toLowerCase().startsWith("med")
+        ? 3
+        : 0;
+    if (t.due) {
+      const away = daysBetween(day, t.due);
+      if (away < 0) {
+        const late = -away;
+        return { todo: t, why: late === 1 ? "a day late" : `${late} days late`, score: 100 + Math.min(late, 30) + bump };
+      }
+      if (away === 0) return { todo: t, why: "due that day", score: 95 + bump };
+      if (away <= 14) return { todo: t, why: `due ${pretty(t.due)}`, score: 70 - away * 2 + bump };
+    }
+    if (t.plan === day) return { todo: t, why: "you planned it for that day", score: 80 + bump };
+    return null;
+  };
+
+  return board.todos
+    .filter((t) => !t.done && !(t.slot && pickedOn(t, day)))
+    .map(rank)
+    .filter((s): s is Suggestion => s !== null)
+    .sort((a, b) => b.score - a.score);
+}
+
+/** The three the dates argue for, offered rather than imposed — and trimmed to
+ *  what the hours will hold, since that's the whole point of a cap. */
+function Suggested({
+  board,
+  send,
+  day,
+  room,
+  free,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+  room: number;
+  free: number;
+}) {
+  const [hidden, setHidden] = useState(false);
+  const picks = suggestFor(board, day).slice(0, room);
+  if (hidden || !picks.length) return null;
+
+  const cost = (t: Todo) => t.minutes ?? estimateFor(board.timings, t.title);
+  let running = 0;
+  const fits = picks.filter((p) => {
+    const m = cost(p.todo) ?? 0;
+    if (free > 0 && running + m > free && running > 0) return false;
+    running += m;
+    return true;
+  });
+
+  return (
+    <div className="mt-4 rounded-2xl border border-line bg-panel-2 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className="text-[12px] font-semibold">Suggested from your Notion</h4>
+        <div className="flex shrink-0 items-center gap-3">
+          {fits.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => fits.forEach((p) => pick(p.todo, "deep", send, day))}
+              className="rounded-full border border-line px-2.5 py-1 text-[11px] text-muted transition hover:text-ink"
+            >
+              take these {fits.length}
+            </button>
+          ) : null}
+          <button type="button" onClick={() => setHidden(true)} className="text-[11px] text-muted hover:text-ink">
+            not now
+          </button>
+        </div>
+      </div>
+      <div className="mt-2">
+        {picks.map((p) => {
+          const m = cost(p.todo);
+          return (
+            <button
+              key={p.todo.id}
+              type="button"
+              onClick={() => pick(p.todo, "deep", send, day)}
+              className="flex w-full items-center gap-3 border-b border-line/60 py-2 text-left last:border-none"
+            >
+              <span className="shrink-0 text-[13px] text-muted">+</span>
+              <span className="min-w-0 flex-1 truncate text-[14px]">{p.todo.title}</span>
+              <span className={`shrink-0 text-[11px] ${p.why.includes("late") ? "text-bad" : "text-muted"}`}>
+                {p.why}
+                {m ? ` · ~${spell(m)}` : ""}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** An empty line in the day: type a new task, or pull one out of the list you
  *  already have. */
 function EmptySlot({
@@ -672,7 +779,9 @@ function EmptySlot({
 }) {
   const [draft, setDraft] = useState("");
   const [browsing, setBrowsing] = useState(false);
-  const candidates = board.todos.filter((t) => !t.done && !(t.slot && pickedOn(t, day))).slice(0, 40);
+  const urgent = suggestFor(board, day).map((s) => s.todo);
+  const rest = board.todos.filter((t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.includes(t));
+  const candidates = [...urgent, ...rest].slice(0, 40);
 
   const add = () => {
     const title = draft.trim();
@@ -1010,6 +1119,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
               ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
               : `Based on how long these took before, that's about ${spell(load)} of work.`}
           </p>
+        ) : null}
+
+        {deep.length < DEEP_CAP ? (
+          <Suggested board={board} send={send} day={day} room={DEEP_CAP - deep.length} free={Math.max(0, free - load)} />
         ) : null}
 
         <div className="mt-3">
