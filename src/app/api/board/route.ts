@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Action, applyAction, ensureBoardDbs, readBoard, readTaskMap } from "@/lib/board";
+import { Action, applyAction, ensureBoardDbs, ensurePlanColumn, readBoard, readTaskMap } from "@/lib/board";
 import { demoBoard } from "./demo";
 import { humanizeNotionError } from "@/lib/notion";
 import { resolveCredentials } from "@/lib/store";
@@ -31,7 +31,7 @@ export async function GET(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
-    const map = await readTaskMap(creds.token, dbs.task);
+    const map = await ensurePlanColumn(creds.token, dbs.task, await readTaskMap(creds.token, dbs.task));
     const board = await readBoard(creds.token, dbs, map, since.toISOString().slice(0, 10));
     return NextResponse.json({ ok: true, ...board, dbs });
   } catch (e) {
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
-    const map = await readTaskMap(creds.token, dbs.task);
+    const map = await ensurePlanColumn(creds.token, dbs.task, await readTaskMap(creds.token, dbs.task));
     await applyAction(creds.token, dbs, map, body);
     return NextResponse.json({ ok: true });
   } catch (e) {

@@ -207,6 +207,17 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
   };
 }
 
+/** A deadline and "the day I want to do this" are different dates, and a
+ *  tracker built around deadlines only has the first one. */
+export async function ensurePlanColumn(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+  if (map.plan) return map;
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { Plan: { date: {} } } }),
+  });
+  return { ...map, plan: "Plan" };
+}
+
 /* --------------------------------------------------------- database lookup */
 
 const HABIT_DB = "Habits";

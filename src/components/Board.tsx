@@ -254,19 +254,40 @@ function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: str
         )}
         {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
         <AgentButton todo={todo} send={send} />
-        <input
-          type="date"
-          value={todo.due ?? ""}
-          onChange={(e) =>
-            send({ action: "editTodo", id: todo.id, field: "due", value: e.target.value || null }, (b) => ({
-              ...b,
-              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: e.target.value || null } : t)),
-            }))
-          }
-          className={`w-[112px] shrink-0 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
-            overdue ? "text-bad" : "text-muted"
-          } hover:border-line`}
-        />
+        <span className="flex shrink-0 items-center gap-1">
+          <span className="text-[11px] text-muted/70" title="Deadline">
+            📌
+          </span>
+          <input
+            type="date"
+            title="Deadline"
+            value={todo.due ?? ""}
+            onChange={(e) =>
+              send({ action: "editTodo", id: todo.id, field: "due", value: e.target.value || null }, (b) => ({
+                ...b,
+                todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: e.target.value || null } : t)),
+              }))
+            }
+            className={`w-[108px] rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
+              overdue ? "text-bad" : "text-muted"
+            } hover:border-line`}
+          />
+          <span className="text-[11px] text-muted/70" title="Day you want to do it">
+            ✏️
+          </span>
+          <input
+            type="date"
+            title="Day you want to do it"
+            value={todo.plan ?? ""}
+            onChange={(e) =>
+              send({ action: "editTodo", id: todo.id, field: "plan", value: e.target.value || null }, (b) => ({
+                ...b,
+                todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: e.target.value || null } : t)),
+              }))
+            }
+            className="w-[108px] rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] text-muted hover:border-line"
+          />
+        </span>
         <button
           type="button"
           aria-label="Delete"
@@ -406,7 +427,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
             </div>
           ) : null}
           {today.length ? (
-            today.map((t) => <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />)
+            <Split items={today} send={send} cats={categoriesOf(board)} />
           ) : (
             <p className="py-2 text-[14px] text-muted">Nothing scheduled for today.</p>
           )}
@@ -564,6 +585,39 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+const DEADLINE_LABEL = "📌 Deadlines";
+const WANT_LABEL = "✏️ Want to do";
+
+/** A deadline is something with a date somebody else cares about; everything
+ *  else on the day is a choice, and the two read differently. */
+function Split({ items, send, cats, day }: { items: Todo[]; send: Send; cats: string[]; day?: string }) {
+  const deadlines = items.filter((t) => t.due && (!day || t.due === day));
+  const wanted = items.filter((t) => !deadlines.includes(t));
+  const group = (label: string, list: Todo[]) =>
+    list.length ? (
+      <div>
+        <div className="mb-1 mt-1 text-[10px] font-medium uppercase tracking-widest text-muted">{label}</div>
+        {list.map((t) => (
+          <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+        ))}
+      </div>
+    ) : null;
+  if (!deadlines.length || !wanted.length)
+    return (
+      <div>
+        {items.map((t) => (
+          <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+        ))}
+      </div>
+    );
+  return (
+    <div>
+      {group(DEADLINE_LABEL, deadlines)}
+      {group(WANT_LABEL, wanted)}
+    </div>
+  );
+}
+
 /** The week as seven stacked days, each with its own add box. */
 function WeekView({
   send,
@@ -578,15 +632,28 @@ function WeekView({
   week: number;
   setWeek: (n: number) => void;
 }) {
+  const [mode, setMode] = useState<"all" | "due" | "plan">("all");
+  const wanting = mode === "plan";
   const days = weekDays(week);
   const start = days[0];
   const end = days[6];
   const dayOf = (t: Todo) => t.plan ?? t.due;
+  const onDay = (t: Todo, d: string) =>
+    mode === "due" ? t.due === d : mode === "plan" ? t.plan === d : t.due === d || t.plan === d;
   const late = week === 0 ? shown.filter((t) => !t.done && dayOf(t) && (dayOf(t) as string) < start) : [];
   const undated = week === 0 ? shown.filter((t) => !t.done && !dayOf(t)) : [];
 
   return (
     <div className="space-y-4">
+      <Pills
+        items={[
+          { id: "all", label: "Everything" },
+          { id: "due", label: DEADLINE_LABEL },
+          { id: "plan", label: WANT_LABEL },
+        ]}
+        value={mode}
+        onChange={(v) => setMode(v as "all" | "due" | "plan")}
+      />
       <div className="flex items-center justify-between">
         <div className="text-[13px] font-medium">
           {pretty(start)} – {pretty(end)}
@@ -627,20 +694,18 @@ function WeekView({
       ) : null}
 
       {days.map((d) => {
-        const items = shown.filter((t) => dayOf(t) === d);
+        const items = shown.filter((t) => onDay(t, d));
         return (
           <div key={d} className={`rounded-xl border p-3 ${d === TODAY ? "border-ink/30 bg-panel" : "border-line"}`}>
             <div className="mb-1 flex items-center justify-between">
               <span className={`text-[12px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(d)}</span>
               <span className="text-[11px] text-muted">{items.filter((t) => !t.done).length || ""}</span>
             </div>
-            {items.map((t) => (
-              <TodoRow key={t.id} todo={t} send={send} cats={cats} />
-            ))}
+            <Split items={items} send={send} cats={cats} day={d} />
             <AddRow
-              placeholder="Add…"
+              placeholder={wanting ? "Want to do this day…" : "Due this day…"}
               onAdd={(title) =>
-                send({ action: "addTodo", title, due: d }, (b) => ({
+                send({ action: "addTodo", title, ...(wanting ? { plan: d } : { due: d }) }, (b) => ({
                   ...b,
                   todos: [
                     ...b.todos,
@@ -648,8 +713,8 @@ function WeekView({
                       id: `tmp-${Date.now()}`,
                       title,
                       done: false,
-                      due: d,
-                      plan: null,
+                      due: wanting ? null : d,
+                      plan: wanting ? d : null,
                       category: null,
                       priority: null,
                       link: null,
@@ -778,6 +843,7 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
                         className="mb-0.5 truncate rounded px-1 text-[10px]"
                         style={{ background: `${catColour(t.category)}1f`, color: catColour(t.category) }}
                       >
+                        {t.due === d ? "📌 " : "✏️ "}
                         {t.title}
                       </div>
                     ))}
