@@ -735,11 +735,64 @@ function QuickRow({ todo, send, locked }: { todo: Todo; send: Send; locked?: boo
   );
 }
 
+/** The working day the calendar is measured against: meetings outside it
+ *  aren't what stops three tasks getting done. */
+const WORK_START = 9;
+const WORK_END = 18;
+const WORK_END_LABEL = `${WORK_END % 12 || 12}pm`;
+
+type DayCalendar = { connected: boolean; busy?: number; free?: number; error?: string };
+
+const connectCalendarHref = () =>
+  `/api/google/start?back=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+
+/** What's left of the working day once Google's had its say. Asked from the
+ *  browser, because only it knows what time it is where she is. */
+async function readCalendarDay(): Promise<DayCalendar | null> {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(WORK_START, 0, 0, 0);
+  const end = new Date(now);
+  end.setHours(WORK_END, 0, 0, 0);
+  const from = now > start ? now : start;
+  if (end <= from) return null;
+
+  const params = new URLSearchParams({
+    from: from.toISOString(),
+    to: end.toISOString(),
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  try {
+    const res = await fetch(`/api/google/day?${params}`);
+    const data = (await res.json()) as DayCalendar & { ok: boolean; configured?: boolean };
+    if (data.configured === false) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [hours, setHours] = useState("");
+  const [calendar, setCalendar] = useState<DayCalendar | null>(null);
 
   useEffect(() => {
     setHours(window.localStorage.getItem(`hours:${TODAY}`) ?? "");
+  }, []);
+
+  // The calendar knows the day better than she does at 9am, so what's left
+  // after the meetings fills the box — unless she's typed over it herself.
+  useEffect(() => {
+    let live = true;
+    readCalendarDay().then((day) => {
+      if (!live || !day) return;
+      setCalendar(day);
+      if (day.free !== undefined && !window.localStorage.getItem(`hours:${TODAY}`))
+        setHours(String(Math.round((day.free / 60) * 2) / 2));
+    });
+    return () => {
+      live = false;
+    };
   }, []);
 
   const setAvailable = (v: string) => {
@@ -805,6 +858,26 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
             <span className="text-[14px] text-muted">h</span>
           </span>
         </div>
+
+        {calendar ? (
+          <p className="text-[12px] text-muted">
+            {calendar.connected ? (
+              calendar.busy !== undefined ? (
+                calendar.busy > 0 ? (
+                  `Your calendar already has ${spell(calendar.busy)} booked before ${WORK_END_LABEL}.`
+                ) : (
+                  `Nothing in your calendar before ${WORK_END_LABEL}.`
+                )
+              ) : (
+                calendar.error
+              )
+            ) : (
+              <a className="underline underline-offset-2 hover:text-ink" href={connectCalendarHref()}>
+                {calendar.error ?? "Use my Google Calendar"}
+              </a>
+            )}
+          </p>
+        ) : null}
 
         {load > 0 ? (
           <p className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}>
