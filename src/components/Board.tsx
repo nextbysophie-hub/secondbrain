@@ -506,14 +506,46 @@ function bestStreak(ticks: HabitTick[], habitId: string): number {
   return best;
 }
 
+/** A day counts as cleared when something was picked for it and all of it
+ *  got ticked. */
+function dayCleared(todos: Todo[], day: string): boolean {
+  const picked = todos.filter((t) => t.slot && pickedOn(t, day));
+  return picked.length > 0 && picked.every((t) => t.done);
+}
+
+/** Days in a row of clearing the board, today still open not counting
+ *  against it. */
+function clearedStreak(todos: Todo[], upTo: string = TODAY): number {
+  let n = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = shiftDay(upTo, -i);
+    if (!dayCleared(todos, d)) {
+      if (i === 0) continue;
+      break;
+    }
+    n++;
+  }
+  return n;
+}
+
 /** Every daily habit as one dot — filled once it's ticked today, with the
  *  running streak beside it. Quiet enough to live in the header. */
 function StreakDots({ board }: { board: Board }) {
   const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
-  if (!habits.length) return null;
   const done = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
+  const cleared = clearedStreak(board.todos);
+  const clearedToday = dayCleared(board.todos, TODAY);
+  if (!habits.length && !cleared) return null;
   return (
     <div className="flex items-center gap-3">
+      <span
+        title={`Days in a row you cleared everything you picked — ${cleared} running`}
+        className="flex items-center gap-1.5"
+      >
+        <span className={`h-2 w-2 rounded-full ${clearedToday ? "bg-ink" : "border border-line"}`} />
+        <span className={`text-[12px] tabular-nums ${clearedToday ? "text-ink" : "text-muted"}`}>{cleared}</span>
+      </span>
+      {habits.length ? <span className="h-3 w-px bg-line" /> : null}
       {habits.map((h) => {
         const streak = streakOf(board.ticks, h.id);
         const on = done.has(h.id);
@@ -788,11 +820,15 @@ function NextUp({ board, send, day }: { board: Board; send: Send; day: string })
     .map((s) => s.todo)
     .filter((t) => !picked.includes(t));
   const offer = [...picked, ...rest].slice(0, 3);
+  const streak = clearedStreak(board.todos, day);
 
   return (
     <div className="mt-4 rounded-2xl border border-line bg-panel-2 p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h4 className="serif text-[20px]">Good work — that&rsquo;s the day.</h4>
+        {streak > 1 ? (
+          <span className="shrink-0 text-[12px] text-muted">{streak} days in a row</span>
+        ) : null}
         {offer.length > 1 ? (
           <button
             type="button"
@@ -1100,7 +1136,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
   // Everything picked for the day is done — the moment to offer more rather
   // than let the momentum go.
-  const cleared = deep.length > 0 && [...deep, ...quick].every((t) => t.done);
+  const cleared = dayCleared(board.todos, day);
 
   const addEmails = () =>
     send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: day, kind: "want" }, (b) => ({
