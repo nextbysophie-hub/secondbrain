@@ -561,34 +561,45 @@ const sameWords = (a: string, b: string) => {
   return norm(a) === norm(b);
 };
 
-/** The line sits there faded; you type it over and it sets for the day. */
+/**
+ * Autocomplete-style tracing: the whole line sits greyed out in place and what
+ * you type lands directly on top of it, character for character, so the ghost
+ * ahead of the caret shrinks as you go. The input itself is invisible.
+ */
 function TraceLine({ board, send, habit }: { board: Board; send: Send; habit: Habit }) {
   const [text, setText] = useState("");
   const said = board.ticks.some((t) => t.habitId === habit.id && t.date === TODAY);
+  const line = habit.name;
+  // Typing over the ghost only lines up while you're still on the line.
+  const onTrack = line.toLowerCase().startsWith(text.toLowerCase());
+  const typed = said ? line : text;
+  const ghost = said ? "" : onTrack ? line.slice(text.length) : "";
 
   return (
     <div className="flex items-baseline gap-3 border-b border-line/60 py-3 last:border-none">
-      {said ? (
-        <>
-          <span className="shrink-0 text-[13px] text-accent-2">✓</span>
-          <span className="serif min-w-0 flex-1 text-[19px]">{habit.name}</span>
-        </>
-      ) : (
-        <>
-          <span className="shrink-0 text-[13px] text-muted/50">›</span>
+      <span className={`shrink-0 text-[13px] ${said ? "text-accent-2" : "text-muted/40"}`}>
+        {said ? "✓" : "›"}
+      </span>
+      <div className="relative min-w-0 flex-1">
+        <p className="serif pointer-events-none whitespace-pre-wrap text-[19px] leading-snug">
+          <span className={onTrack ? "" : "text-bad"}>{typed}</span>
+          <span className="text-muted/35">{ghost}</span>
+        </p>
+        {said ? null : (
           <input
             value={text}
             onChange={(e) => {
               const v = e.target.value;
               setText(v);
-              if (sameWords(v, habit.name)) tickHabit(board, send, habit, TODAY, true);
+              if (sameWords(v, line)) tickHabit(board, send, habit, TODAY, true);
             }}
-            placeholder={habit.name}
-            aria-label={`Write out: ${habit.name}`}
-            className="serif min-w-0 flex-1 bg-transparent text-[19px] outline-none placeholder:text-muted/40"
+            spellCheck={false}
+            autoComplete="off"
+            aria-label={`Write out: ${line}`}
+            className="serif absolute inset-0 w-full resize-none bg-transparent text-[19px] leading-snug text-transparent caret-ink outline-none"
           />
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
