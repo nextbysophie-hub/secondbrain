@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Timing, Todo } from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
@@ -451,7 +451,25 @@ const greeting = () => {
   return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening.";
 };
 
-const pickedToday = (t: Todo) => t.plan === TODAY || t.due === TODAY;
+const pickedOn = (t: Todo, day: string) => t.plan === day || t.due === day;
+
+const shiftDay = (day: string, by: number) => iso(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
+
+/** The page is normally about today, so days either side get named rather
+ *  than dated. */
+const dayTitle = (day: string) => {
+  if (day === TODAY) return greeting();
+  if (day === shiftDay(TODAY, 1)) return "Tomorrow.";
+  if (day === shiftDay(TODAY, -1)) return "Yesterday.";
+  return `${pretty(day)}.`;
+};
+
+const dayQuestion = (day: string) =>
+  day === TODAY
+    ? "What still deserves to close out today?"
+    : day > TODAY
+      ? "What does this day need to hold?"
+      : "What that day actually held.";
 
 const spell = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
 const clock = (ms: number) => {
@@ -536,12 +554,12 @@ function Timer({ todo, send }: { todo: Todo; send: Send }) {
 
 /** Taking something off today doesn't delete it — it just stops claiming the
  *  day, which is the only way a cap of three survives contact with a week. */
-function park(todo: Todo, send: Send) {
+function park(todo: Todo, send: Send, day: string) {
   send({ action: "editTodo", id: todo.id, field: "slot", value: null }, (b) => ({
     ...b,
     todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
   }));
-  if (todo.plan === TODAY)
+  if (todo.plan === day)
     send({ action: "editTodo", id: todo.id, field: "plan", value: null }, (b) => ({
       ...b,
       todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: null } : t)),
@@ -549,24 +567,24 @@ function park(todo: Todo, send: Send) {
 }
 
 /** Pulling an existing task into today: it gets the slot and the day. */
-function pick(todo: Todo, slot: "deep" | "quick", send: Send) {
+function pick(todo: Todo, slot: "deep" | "quick", send: Send, day: string) {
   send({ action: "editTodo", id: todo.id, field: "slot", value: slot }, (b) => ({
     ...b,
     todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
   }));
-  if (!pickedToday(todo))
-    send({ action: "editTodo", id: todo.id, field: "plan", value: TODAY }, (b) => ({
+  if (!pickedOn(todo, day))
+    send({ action: "editTodo", id: todo.id, field: "plan", value: day }, (b) => ({
       ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: TODAY } : t)),
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: day } : t)),
     }));
 }
 
-const newTodo = (title: string, slot: "deep" | "quick"): Todo => ({
+const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   id: `tmp-${Date.now()}`,
   title,
   done: false,
   due: null,
-  plan: TODAY,
+  plan: day,
   kind: slot === "deep" ? "deadline" : "want",
   slot,
   minutes: null,
@@ -585,24 +603,26 @@ function EmptySlot({
   slot,
   placeholder,
   dim,
+  day,
 }: {
   board: Board;
   send: Send;
   slot: "deep" | "quick";
   placeholder: string;
   dim?: boolean;
+  day: string;
 }) {
   const [draft, setDraft] = useState("");
   const [browsing, setBrowsing] = useState(false);
-  const candidates = board.todos.filter((t) => !t.done && !(t.slot && pickedToday(t))).slice(0, 40);
+  const candidates = board.todos.filter((t) => !t.done && !(t.slot && pickedOn(t, day))).slice(0, 40);
 
   const add = () => {
     const title = draft.trim();
     if (!title) return;
     setDraft("");
-    send({ action: "addTodo", title, slot, plan: TODAY, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
+    send({ action: "addTodo", title, slot, plan: day, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
       ...b,
-      todos: [...b.todos, newTodo(title, slot)],
+      todos: [...b.todos, newTodo(title, slot, day)],
     }));
   };
 
@@ -640,7 +660,7 @@ function EmptySlot({
                 type="button"
                 onClick={() => {
                   setBrowsing(false);
-                  pick(t, slot, send);
+                  pick(t, slot, send, day);
                 }}
                 className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel"
               >
@@ -659,7 +679,7 @@ function EmptySlot({
 
 /** One of the three deep blocks: what it is, what it usually costs, and a
  *  stopwatch for what it actually cost. */
-function DeepRow({ todo, board, send }: { todo: Todo; board: Board; send: Send }) {
+function DeepRow({ todo, board, send, day }: { todo: Todo; board: Board; send: Send; day: string }) {
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
   return (
@@ -695,7 +715,7 @@ function DeepRow({ todo, board, send }: { todo: Todo; board: Board; send: Send }
         <Timer todo={todo} send={send} />
         <button
           type="button"
-          onClick={() => park(todo, send)}
+          onClick={() => park(todo, send, day)}
           className="shrink-0 text-[12px] text-muted transition hover:text-ink"
         >
           park it
@@ -705,7 +725,7 @@ function DeepRow({ todo, board, send }: { todo: Todo; board: Board; send: Send }
   );
 }
 
-function QuickRow({ todo, send, locked }: { todo: Todo; send: Send; locked?: boolean }) {
+function QuickRow({ todo, send, locked, day }: { todo: Todo; send: Send; locked?: boolean; day: string }) {
   return (
     <div className="flex items-center gap-4 border-b border-line/70 py-2.5 last:border-none">
       <Box
@@ -725,7 +745,7 @@ function QuickRow({ todo, send, locked }: { todo: Todo; send: Send; locked?: boo
       {locked ? null : (
         <button
           type="button"
-          onClick={() => park(todo, send)}
+          onClick={() => park(todo, send, day)}
           className="shrink-0 text-[12px] text-muted transition hover:text-ink"
         >
           park it
@@ -775,37 +795,55 @@ async function readCalendarDay(): Promise<DayCalendar | null> {
   }
 }
 
+function Arrow({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted transition hover:text-ink"
+    >
+      {children}
+    </button>
+  );
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
+  const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
   const [calendar, setCalendar] = useState<DayCalendar | null>(null);
 
   useEffect(() => {
-    setHours(window.localStorage.getItem(`hours:${TODAY}`) ?? "");
-  }, []);
+    setHours(window.localStorage.getItem(`hours:${day}`) ?? "");
+  }, [day]);
 
   // The calendar knows the day better than she does at 9am, so what's left
   // after the meetings fills the box — unless she's typed over it herself.
   useEffect(() => {
+    if (day !== TODAY) {
+      setCalendar(null);
+      return;
+    }
     let live = true;
-    readCalendarDay().then((day) => {
-      if (!live || !day) return;
-      setCalendar(day);
-      if (day.free !== undefined && !window.localStorage.getItem(`hours:${TODAY}`))
-        setHours(String(Math.round((day.free / 60) * 2) / 2));
+    readCalendarDay().then((today) => {
+      if (!live || !today) return;
+      setCalendar(today);
+      if (today.free !== undefined && !window.localStorage.getItem(`hours:${TODAY}`))
+        setHours(String(Math.round((today.free / 60) * 2) / 2));
     });
     return () => {
       live = false;
     };
-  }, []);
+  }, [day]);
 
   const setAvailable = (v: string) => {
     setHours(v);
-    window.localStorage.setItem(`hours:${TODAY}`, v);
+    window.localStorage.setItem(`hours:${day}`, v);
   };
 
-  const open = board.todos.filter((t) => !t.done || pickedToday(t));
-  const deep = open.filter((t) => t.slot === "deep" && pickedToday(t)).slice(0, DEEP_CAP);
-  const quick = open.filter((t) => t.slot === "quick" && pickedToday(t)).slice(0, QUICK_CAP);
+  const open = board.todos.filter((t) => !t.done || pickedOn(t, day));
+  const deep = open.filter((t) => t.slot === "deep" && pickedOn(t, day)).slice(0, DEEP_CAP);
+  const quick = open.filter((t) => t.slot === "quick" && pickedOn(t, day)).slice(0, QUICK_CAP);
   const emails = quick.find((t) => EMAIL_RE.test(t.title));
   const otherQuick = quick.filter((t) => t !== emails);
 
@@ -816,7 +854,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const overloaded = free > 0 && load > free;
 
   const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
-  const doneToday = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
+  const doneToday = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
   const streakOf = (habitId: string) => {
     const dates = new Set(board.ticks.filter((t) => t.habitId === habitId).map((t) => t.date));
     let n = 0;
@@ -832,24 +870,45 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   };
 
   const addEmails = () =>
-    send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: TODAY, kind: "want" }, (b) => ({
+    send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: day, kind: "want" }, (b) => ({
       ...b,
-      todos: [...b.todos, newTodo("Go through emails", "quick")],
+      todos: [...b.todos, newTodo("Go through emails", "quick", day)],
     }));
 
   return (
     <div className="day-card p-7 sm:p-10">
-      <h2 className="serif text-[40px] leading-none sm:text-[46px]">{greeting()}</h2>
-      <p className="mt-3 text-[16px] font-medium text-muted">What still deserves to close out today?</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="serif text-[40px] leading-none sm:text-[46px]">{dayTitle(day)}</h2>
+          <p className="mt-3 text-[16px] font-medium text-muted">{dayQuestion(day)}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 pt-2">
+          <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
+            ←
+          </Arrow>
+          {day === TODAY ? null : (
+            <button
+              type="button"
+              onClick={() => setDay(TODAY)}
+              className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+            >
+              today
+            </button>
+          )}
+          <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
+            →
+          </Arrow>
+        </div>
+      </div>
 
       <section className="mt-9">
         <div className="flex items-baseline justify-between">
-          <h3 className="text-[13px] font-semibold">Today&apos;s three</h3>
+          <h3 className="text-[13px] font-semibold">{day === TODAY ? "Today\u2019s three" : "The three"}</h3>
           <span className="text-[12px] text-muted">{deep.filter((t) => !t.done).length}/3 taken</span>
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-4 pb-1">
-          <span className="text-[15px]">Hours available today</span>
+          <span className="text-[15px]">Hours available {day === TODAY ? "today" : "that day"}</span>
           <span className="flex items-baseline gap-1">
             <input
               value={hours}
@@ -892,7 +951,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
         <div className="mt-3">
           {deep.map((t) => (
-            <DeepRow key={t.id} todo={t} board={board} send={send} />
+            <DeepRow key={t.id} todo={t} board={board} send={send} day={day} />
           ))}
           {Array.from({ length: Math.max(0, DEEP_CAP - deep.length) }, (_, i) => (
             <EmptySlot
@@ -900,6 +959,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
               board={board}
               send={send}
               slot="deep"
+              day={day}
               dim={deep.length + i > 0}
               placeholder={DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"}
             />
@@ -914,7 +974,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         </div>
         <div className="mt-3">
           {emails ? (
-            <QuickRow todo={emails} send={send} locked />
+            <QuickRow todo={emails} send={send} locked day={day} />
           ) : (
             <button
               type="button"
@@ -927,10 +987,17 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
             </button>
           )}
           {otherQuick.map((t) => (
-            <QuickRow key={t.id} todo={t} send={send} />
+            <QuickRow key={t.id} todo={t} send={send} day={day} />
           ))}
           {Array.from({ length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) }, (_, i) => (
-            <EmptySlot key={`quick-${i}`} board={board} send={send} slot="quick" placeholder="Quick thing to clear" />
+            <EmptySlot
+              key={`quick-${i}`}
+              board={board}
+              send={send}
+              slot="quick"
+              day={day}
+              placeholder="Quick thing to clear"
+            />
           ))}
         </div>
       </section>
@@ -943,7 +1010,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
               const on = doneToday.has(h.id);
               const streak = streakOf(h.id);
               return (
-                <button key={h.id} type="button" onClick={() => tickHabit(board, send, h, TODAY, !on)} className="w-20">
+                <button key={h.id} type="button" onClick={() => tickHabit(board, send, h, day, !on)} className="w-20">
                   <span
                     className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
                       on ? "bg-warn text-brand-cream" : "border border-line bg-panel-2 text-muted"
