@@ -675,10 +675,10 @@ function suggestFor(board: Board, day: string): Suggestion[] {
         const late = -away;
         return { todo: t, why: late === 1 ? "a day late" : `${late} days late`, score: 100 + Math.min(late, 30) + bump };
       }
-      if (away === 0) return { todo: t, why: "due that day", score: 95 + bump };
+      if (away === 0) return { todo: t, why: day === TODAY ? "due today" : "due that day", score: 95 + bump };
       if (away <= 14) return { todo: t, why: `due ${pretty(t.due)}`, score: 70 - away * 2 + bump };
     }
-    if (t.plan === day) return { todo: t, why: "you planned it for that day", score: 80 + bump };
+    if (t.plan === day) return { todo: t, why: day === TODAY ? "you planned it for today" : "you planned it for that day", score: 80 + bump };
     return null;
   };
 
