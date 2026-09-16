@@ -471,6 +471,64 @@ const dayQuestion = (day: string) =>
       ? "What does this day need to hold?"
       : "What that day actually held.";
 
+/** Days in a row up to (and including) `upTo`. Today not being ticked yet
+ *  doesn't break a streak — the day isn't over. */
+function streakOf(ticks: HabitTick[], habitId: string, upTo: string = TODAY): number {
+  const dates = new Set(ticks.filter((t) => t.habitId === habitId).map((t) => t.date));
+  let n = 0;
+  for (let i = 0; i < 400; i++) {
+    const d = shiftDay(upTo, -i);
+    if (!dates.has(d)) {
+      if (i === 0) continue;
+      break;
+    }
+    n++;
+  }
+  return n;
+}
+
+/** The longest run it's ever had, so a streak that breaks still has a target. */
+function bestStreak(ticks: HabitTick[], habitId: string): number {
+  const dates = [...new Set(ticks.filter((t) => t.habitId === habitId).map((t) => t.date))].sort();
+  let best = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const d of dates) {
+    run = prev && shiftDay(prev, 1) === d ? run + 1 : 1;
+    prev = d;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+/** Every daily habit's streak, in one line, on every tab. */
+function StreakBar({ board }: { board: Board }) {
+  const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
+  if (!habits.length) return null;
+  const done = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-2">
+      {habits.map((h) => {
+        const streak = streakOf(board.ticks, h.id);
+        const on = done.has(h.id);
+        return (
+          <span
+            key={h.id}
+            title={`${h.name} — best run ${bestStreak(board.ticks, h.id)} days`}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] ${
+              on ? "border-warn/50 bg-warn/10 text-ink" : "border-line text-muted"
+            }`}
+          >
+            <span className={streak ? "" : "opacity-40"}>🔥</span>
+            <span className="tabular-nums font-medium">{streak}</span>
+            <span className="max-w-[9rem] truncate">{h.name}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 const spell = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
 const clock = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -855,19 +913,13 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
   const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
   const doneToday = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
-  const streakOf = (habitId: string) => {
-    const dates = new Set(board.ticks.filter((t) => t.habitId === habitId).map((t) => t.date));
-    let n = 0;
-    for (let i = 0; i < 60; i++) {
-      const d = iso(new Date(Date.now() - i * 86400000));
-      if (!dates.has(d)) {
-        if (i === 0) continue;
-        break;
-      }
-      n++;
-    }
-    return n;
-  };
+
+  // Evening is when tomorrow is still choosable; morning is too late to plan it.
+  const tomorrow = shiftDay(TODAY, 1);
+  const tomorrowEmpty = !board.todos.some((t) => t.slot === "deep" && pickedOn(t, tomorrow));
+  const [evening, setEvening] = useState(false);
+  useEffect(() => setEvening(new Date().getHours() >= 16), []);
+  const nudge = day === TODAY && evening && tomorrowEmpty;
 
   const addEmails = () =>
     send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: day, kind: "want" }, (b) => ({
@@ -900,6 +952,17 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </Arrow>
         </div>
       </div>
+
+      {nudge ? (
+        <button
+          type="button"
+          onClick={() => setDay(tomorrow)}
+          className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+        >
+          <span className="text-[14px]">Tomorrow is still empty. Pick its three while today is fresh.</span>
+          <span className="shrink-0 text-[13px] text-muted">choose →</span>
+        </button>
+      ) : null}
 
       <section className="mt-9">
         <div className="flex items-baseline justify-between">
@@ -1008,7 +1071,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           <div className="mt-4 flex flex-wrap gap-6">
             {dailyHabits.map((h) => {
               const on = doneToday.has(h.id);
-              const streak = streakOf(h.id);
+              const streak = streakOf(board.ticks, h.id, day);
+              const best = bestStreak(board.ticks, h.id);
               return (
                 <button key={h.id} type="button" onClick={() => tickHabit(board, send, h, day, !on)} className="w-20">
                   <span
@@ -1019,6 +1083,9 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
                     {streak || ""}
                   </span>
                   <span className="mt-2 block truncate text-[12px] text-muted">{h.name}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted/80">
+                    {streak ? `🔥 ${streak} day${streak === 1 ? "" : "s"}` : best ? `best ${best}` : "start it"}
+                  </span>
                 </button>
               );
             })}
@@ -2063,6 +2130,8 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
         {error ? (
           <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">{error}</div>
         ) : null}
+
+        {board ? <StreakBar board={board} /> : null}
 
         {!board ? (
           <p className="py-16 text-center text-[15px] text-muted">Reading your Notion…</p>
