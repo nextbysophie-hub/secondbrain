@@ -760,6 +760,67 @@ function Suggested({
   );
 }
 
+/** Pulling tomorrow's work into today: it keeps its slot and simply changes
+ *  the day it's planned for, so tomorrow empties as today grows. */
+function pullForward(todo: Todo, send: Send, day: string) {
+  send({ action: "editTodo", id: todo.id, field: "plan", value: day }, (b) => ({
+    ...b,
+    todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: day } : t)),
+  }));
+  if (!todo.slot)
+    send({ action: "editTodo", id: todo.id, field: "slot", value: "deep" }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: "deep" } : t)),
+    }));
+}
+
+/** The day is done. Rather than end there, offer what the next day already
+ *  holds — taking one moves it, so tomorrow doesn't quietly double up. */
+function NextUp({ board, send, day }: { board: Board; send: Send; day: string }) {
+  const next = shiftDay(day, 1);
+  const picked = board.todos.filter((t) => !t.done && t.slot && pickedOn(t, next));
+  const rest = suggestFor(board, next)
+    .map((s) => s.todo)
+    .filter((t) => !picked.includes(t));
+  const offer = [...picked, ...rest].slice(0, 3);
+
+  return (
+    <div className="mt-4 rounded-2xl border border-line bg-panel-2 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className="serif text-[20px]">Good work — that&rsquo;s the day.</h4>
+        {offer.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => offer.forEach((t) => pullForward(t, send, day))}
+            className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[11px] text-muted transition hover:text-ink"
+          >
+            move all {offer.length}
+          </button>
+        ) : null}
+      </div>
+      <p className="mt-1 text-[13px] text-muted">
+        {offer.length
+          ? "If you\u2019ve got more in you, here\u2019s what\u2019s next up. Taking one moves it off tomorrow."
+          : "Nothing waiting for tomorrow yet. Rest on it."}
+      </p>
+      <div className="mt-2">
+        {offer.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => pullForward(t, send, day)}
+            className="flex w-full items-center gap-3 border-b border-line/60 py-2 text-left last:border-none"
+          >
+            <span className="shrink-0 text-[13px] text-muted">+</span>
+            <span className="min-w-0 flex-1 truncate text-[14px]">{t.title}</span>
+            <span className="shrink-0 text-[11px] text-muted">{t.due ? `due ${pretty(t.due)}` : "tomorrow"}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** An empty line in the day: type a new task, or pull one out of the list you
  *  already have. */
 function EmptySlot({
@@ -1008,9 +1069,11 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     window.localStorage.setItem(`hours:${day}`, v);
   };
 
+  // The cap governs what a day may *take on*, not what it's allowed to show:
+  // once the three are done, anything pulled forward still belongs here.
   const open = board.todos.filter((t) => !t.done || pickedOn(t, day));
-  const deep = open.filter((t) => t.slot === "deep" && pickedOn(t, day)).slice(0, DEEP_CAP);
-  const quick = open.filter((t) => t.slot === "quick" && pickedOn(t, day)).slice(0, QUICK_CAP);
+  const deep = open.filter((t) => t.slot === "deep" && pickedOn(t, day));
+  const quick = open.filter((t) => t.slot === "quick" && pickedOn(t, day));
   const emails = quick.find((t) => EMAIL_RE.test(t.title));
   const otherQuick = quick.filter((t) => t !== emails);
 
@@ -1029,6 +1092,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [evening, setEvening] = useState(false);
   useEffect(() => setEvening(new Date().getHours() >= 16), []);
   const nudge = day === TODAY && evening && tomorrowEmpty;
+
+  // Everything picked for the day is done — the moment to offer more rather
+  // than let the momentum go.
+  const cleared = deep.length > 0 && [...deep, ...quick].every((t) => t.done);
 
   const addEmails = () =>
     send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: day, kind: "want" }, (b) => ({
@@ -1121,7 +1188,9 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </p>
         ) : null}
 
-        {deep.length < DEEP_CAP ? (
+        {cleared ? (
+          <NextUp board={board} send={send} day={day} />
+        ) : deep.length < DEEP_CAP ? (
           <Suggested board={board} send={send} day={day} room={DEEP_CAP - deep.length} free={Math.max(0, free - load)} />
         ) : null}
 
