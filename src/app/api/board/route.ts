@@ -1,5 +1,15 @@
 import { NextResponse } from "next/server";
-import { Action, applyAction, ensureBoardDbs, ensurePlanColumn, readBoard, readTaskMap } from "@/lib/board";
+import {
+  Action,
+  applyAction,
+  ensureBoardDbs,
+  ensureDayColumns,
+  ensureKindColumn,
+  ensurePlanColumn,
+  readBoard,
+  readTaskMap,
+  TaskMap,
+} from "@/lib/board";
 import { demoBoard } from "./demo";
 import { humanizeNotionError } from "@/lib/notion";
 import { resolveCredentials } from "@/lib/store";
@@ -14,6 +24,17 @@ const todoDbOverride = (req: Request) => {
   const raw = new URL(req.url).searchParams.get("todos")?.trim();
   return raw ? raw.replace(/-/g, "") : undefined;
 };
+
+/** The schema as it is, plus the columns the dashboard needs and a
+ *  deadline-shaped tracker won't have. */
+async function taskMap(token: string, taskDbId: string): Promise<TaskMap> {
+  const map = await readTaskMap(token, taskDbId);
+  return ensureDayColumns(
+    token,
+    taskDbId,
+    await ensureKindColumn(token, taskDbId, await ensurePlanColumn(token, taskDbId, map)),
+  );
+}
 
 /** Everything the dashboard renders, in one round trip. */
 export async function GET(req: Request) {
@@ -31,7 +52,7 @@ export async function GET(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
-    const map = await ensurePlanColumn(creds.token, dbs.task, await readTaskMap(creds.token, dbs.task));
+    const map = await taskMap(creds.token, dbs.task);
     const board = await readBoard(creds.token, dbs, map, since.toISOString().slice(0, 10));
     return NextResponse.json({ ok: true, ...board, dbs });
   } catch (e) {
@@ -52,7 +73,7 @@ export async function POST(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
-    const map = await ensurePlanColumn(creds.token, dbs.task, await readTaskMap(creds.token, dbs.task));
+    const map = await taskMap(creds.token, dbs.task);
     await applyAction(creds.token, dbs, map, body);
     return NextResponse.json({ ok: true });
   } catch (e) {

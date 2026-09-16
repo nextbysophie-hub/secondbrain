@@ -37,12 +37,22 @@ export type Todo = {
   done: boolean;
   due: string | null;
   plan: string | null;
+  kind: "deadline" | "want" | null;
+  // Which of the day's two piles a task was picked into: a deep block or a
+  // quick thing to clear.
+  slot: "deep" | "quick" | null;
+  // Minutes actually spent, accumulated by the timer, so the day can be sized
+  // from history instead of optimism.
+  minutes: number | null;
   category: string | null;
   priority: string | null;
   link: string | null;
   source: string | null;
   url: string;
 };
+
+/** How long a finished task really took, kept for estimating the next one. */
+export type Timing = { title: string; minutes: number };
 
 /** A row in the database the Grok agent watches: the dashboard writes the job,
  *  the agent writes the result back into the same row. */
@@ -76,6 +86,7 @@ export type Board = {
   habits: Habit[];
   ticks: HabitTick[];
   goals: Goal[];
+  timings: Timing[];
   categories: string[];
   dbs: BoardDbs;
 };
@@ -105,6 +116,7 @@ type Prop = {
   status?: { name?: string } | null;
   multi_select?: { name?: string }[];
   url?: string | null;
+  number?: number | null;
 };
 
 type Row = { id: string; url: string; properties: Record<string, Prop> };
@@ -119,6 +131,18 @@ const title = (s: string) => ({ title: [{ type: "text", text: { content: s.slice
 const richText = (s: string) => ({ rich_text: [{ type: "text", text: { content: s.slice(0, 1900) } }] });
 const dateProp = (s: string | null) => ({ date: s ? { start: s } : null });
 const selectProp = (s: string | null) => ({ select: s ? { name: s } : null });
+
+const kindOf = (r: Row, map: TaskMap): "deadline" | "want" | null => {
+  if (!map.kindProp) return null;
+  const v = selectOf(r.properties[map.kindProp.prop]);
+  return v === map.kindProp.deadline ? "deadline" : v === map.kindProp.want ? "want" : null;
+};
+
+const slotOf = (r: Row, map: TaskMap): "deep" | "quick" | null => {
+  if (!map.slotProp) return null;
+  const v = selectOf(r.properties[map.slotProp.prop]);
+  return v === map.slotProp.deep ? "deep" : v === map.slotProp.quick ? "quick" : null;
+};
 
 function selectSchema(options: string[], colors: string[]) {
   return { select: { options: options.map((name, i) => ({ name, color: colors[i % colors.length] })) } };
@@ -140,6 +164,11 @@ export type TaskMap = {
     | null;
   due: string | null;
   plan: string | null;
+  // The column that says whether a date is a promise to somebody else or just
+  // an intention, with the user's own wording for each.
+  kindProp: { prop: string; deadline: string; want: string } | null;
+  slotProp: { prop: string; deep: string; quick: string } | null;
+  minutes: string | null;
   category: { prop: string; kind: "select" | "multi_select" } | null;
   categories: string[];
   priority: string | null;
@@ -153,6 +182,7 @@ type SchemaProp = {
   type: string;
   select?: { options: { name: string }[] };
   multi_select?: { options: { name: string }[] };
+  number?: object;
   status?: { options: { id: string; name: string }[]; groups: { name: string; option_ids: string[] }[] };
 };
 
@@ -183,6 +213,14 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
   const checkbox = pick(props, "checkbox", /done|complete/i);
   const status = pick(props, "status");
   const statusPair = status ? statusDone(status) : null;
+  const kindProp = props.find((p) => p.type === "select" && /^kind$/i.test(p.name.trim()));
+  const slotProp = props.find((p) => p.type === "select" && /^slot$/i.test(p.name.trim()));
+  const slotOptions = slotProp?.select?.options ?? [];
+  const slotDeep = slotOptions.find((o) => /deep|focus|big/i.test(o.name))?.name;
+  const slotQuick = slotOptions.find((o) => /quick|batch|small|admin/i.test(o.name))?.name;
+  const kindOptions = kindProp?.select?.options ?? [];
+  const kindDeadline = kindOptions.find((o) => /dead ?line|hard|must/i.test(o.name))?.name;
+  const kindWant = kindOptions.find((o) => /want|wish|maybe|optional|like/i.test(o.name))?.name;
   const category =
     pick(props, "multi_select", /category|type|area|tag|bucket/i) ??
     pick(props, "select", /category|area|bucket/i) ??
@@ -198,6 +236,13 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
         : null,
     due: (dates.find((p) => /due|date/i.test(p.name)) ?? dates[0])?.name ?? null,
     plan: dates.find((p) => /plan|scheduled/i.test(p.name))?.name ?? null,
+    kindProp:
+      kindProp && kindDeadline && kindWant
+        ? { prop: kindProp.name, deadline: kindDeadline, want: kindWant }
+        : null,
+    slotProp:
+      slotProp && slotDeep && slotQuick ? { prop: slotProp.name, deep: slotDeep, quick: slotQuick } : null,
+    minutes: props.find((p) => p.type === "number" && /minutes|time spent|duration/i.test(p.name))?.name ?? null,
     category: category ? { prop: category.name, kind: category.type as "select" | "multi_select" } : null,
     categories: (category?.select?.options ?? category?.multi_select?.options ?? []).map((o) => o.name),
     priority: pick(props, "select", /priority/i)?.name ?? null,
@@ -216,6 +261,34 @@ export async function ensurePlanColumn(token: string, taskDbId: string, map: Tas
     body: JSON.stringify({ properties: { Plan: { date: {} } } }),
   });
   return { ...map, plan: "Plan" };
+}
+
+/** Whether a task is owed to somebody or just wanted isn't a date or a
+ *  category, so it gets its own column. */
+export async function ensureKindColumn(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+  if (map.kindProp) return map;
+  const deadline = "Deadline";
+  const want = "Want to do";
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { Kind: selectSchema([deadline, want], ["red", "blue"]) } }),
+  });
+  return { ...map, kindProp: { prop: "Kind", deadline, want } };
+}
+
+/** The day is picked into a few deep blocks and a few quick ones, and the
+ *  timer needs somewhere to leave how long each really took. */
+export async function ensureDayColumns(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+  const properties: Record<string, object> = {};
+  if (!map.slotProp) properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
+  if (!map.minutes) properties.Minutes = { number: { format: "number" } };
+  if (!Object.keys(properties).length) return map;
+  await notion(token, `/databases/${taskDbId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
+  return {
+    ...map,
+    slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
+    minutes: map.minutes ?? "Minutes",
+  };
 }
 
 /* --------------------------------------------------------- database lookup */
@@ -414,23 +487,41 @@ export async function readBoard(
       }
     : undefined;
 
-  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows] = await Promise.all([
+  // Every row that was ever timed, however old, because an estimate is only
+  // as good as the history behind it.
+  const timedQuery = map.minutes
+    ? query(token, dbs.task, {
+        filter: { property: map.minutes, number: { greater_than: 0 } },
+        page_size: 100,
+      })
+    : Promise.resolve([] as Row[]);
+
+  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows, timedRows] = await Promise.all([
     query(token, dbs.task, openFilter ? { filter: openFilter } : {}),
     query(token, dbs.content, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
     query(token, dbs.habits),
     query(token, dbs.ticks, { filter: { property: "Date", date: { on_or_after: since } } }),
     query(token, dbs.goals),
     query(token, dbs.agent, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
+    timedQuery,
   ]);
 
   return {
     categories: map.categories,
+    timings: map.minutes
+      ? timedRows
+          .map((r) => ({ title: titleOf(r), minutes: r.properties[map.minutes as string]?.number ?? 0 }))
+          .filter((t) => t.title && t.minutes > 0)
+      : [],
     todos: todoRows.map((r) => ({
       id: r.id,
       title: titleOf(r),
       done: doneOf(r),
       due: map.due ? dateOf(r.properties[map.due]) : null,
       plan: map.plan ? dateOf(r.properties[map.plan]) : null,
+      kind: kindOf(r, map),
+      slot: slotOf(r, map),
+      minutes: map.minutes ? (r.properties[map.minutes]?.number ?? null) : null,
       category: map.category ? tagOf(r.properties[map.category.prop]) : null,
       priority: map.priority ? selectOf(r.properties[map.priority]) : null,
       link: map.link ? (r.properties[map.link]?.url ?? null) : null,
@@ -496,8 +587,21 @@ async function archivePage(token: string, pageId: string) {
 }
 
 export type Action =
-  | { action: "addTodo"; title: string; category?: string; due?: string | null; plan?: string | null }
-  | { action: "editTodo"; id: string; field: "title" | "due" | "plan" | "category"; value: string | null }
+  | {
+      action: "addTodo";
+      title: string;
+      category?: string;
+      due?: string | null;
+      plan?: string | null;
+      kind?: "deadline" | "want" | null;
+      slot?: "deep" | "quick" | null;
+    }
+  | {
+      action: "editTodo";
+      id: string;
+      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes";
+      value: string | null;
+    }
   | { action: "toggleTodo"; id: string; done: boolean }
   | { action: "deleteTodo"; id: string }
   | { action: "sendToAgent"; title: string; details?: string; due?: string | null; from?: string | null }
@@ -517,7 +621,18 @@ export type Action =
  *  the wizard's To-dos and on a tracker somebody built years ago. */
 function taskProps(
   map: TaskMap,
-  fields: { title?: string; done?: boolean; due?: string | null; plan?: string | null; category?: string | null; link?: string | null; source?: string },
+  fields: {
+    title?: string;
+    done?: boolean;
+    due?: string | null;
+    plan?: string | null;
+    kind?: "deadline" | "want" | null;
+    slot?: "deep" | "quick" | null;
+    minutes?: number | null;
+    category?: string | null;
+    link?: string | null;
+    source?: string;
+  },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (fields.title !== undefined) out[map.title] = title(fields.title);
@@ -528,6 +643,15 @@ function taskProps(
         : { status: { name: fields.done ? map.done.doneName : map.done.openName } };
   if (fields.due !== undefined && map.due) out[map.due] = dateProp(fields.due);
   if (fields.plan !== undefined && map.plan) out[map.plan] = dateProp(fields.plan);
+  if (fields.kind !== undefined && map.kindProp)
+    out[map.kindProp.prop] = selectProp(
+      fields.kind === "deadline" ? map.kindProp.deadline : fields.kind === "want" ? map.kindProp.want : null,
+    );
+  if (fields.slot !== undefined && map.slotProp)
+    out[map.slotProp.prop] = selectProp(
+      fields.slot === "deep" ? map.slotProp.deep : fields.slot === "quick" ? map.slotProp.quick : null,
+    );
+  if (fields.minutes !== undefined && map.minutes) out[map.minutes] = { number: fields.minutes };
   if (fields.category !== undefined && map.category && (!fields.category || map.categories.includes(fields.category)))
     out[map.category.prop] =
       map.category.kind === "multi_select"
@@ -551,6 +675,8 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
           done: false,
           due: body.due ?? null,
           plan: body.plan ?? null,
+          kind: body.kind ?? null,
+          slot: body.slot ?? null,
           category: body.category ?? null,
           source: "Manual",
         }),
@@ -562,6 +688,9 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
         title: { title: value ?? "" },
         due: { due: value },
         plan: { plan: value },
+        kind: { kind: (value === "deadline" || value === "want" ? value : null) as "deadline" | "want" | null },
+        slot: { slot: (value === "deep" || value === "quick" ? value : null) as "deep" | "quick" | null },
+        minutes: { minutes: value === null ? null : Number(value) || 0 },
         category: { category: value },
       }[body.field];
       await updatePage(token, body.id, taskProps(map, fields));

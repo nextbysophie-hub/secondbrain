@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Todo } from "@/lib/board";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Timing, Todo } from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -33,12 +33,28 @@ function monthDays(): string[] {
   );
 }
 
-/** Monday-first week, offset in whole weeks from the current one. */
+/** Seven days starting today, so a day that's gone never takes up room. */
 function weekDays(offset = 0): string[] {
   const now = new Date();
   const base = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const dow = (new Date(base).getUTCDay() + 6) % 7;
-  return Array.from({ length: 7 }, (_, i) => iso(new Date(base + (i - dow + offset * 7) * 86400000)));
+  return Array.from({ length: 7 }, (_, i) => iso(new Date(base + (i + offset * 7) * 86400000)));
+}
+
+/** A month as Monday-first cells, with blanks where the month hasn't started. */
+function monthGrid(offset = 0): { label: string; cells: (string | null)[] } {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getFullYear(), now.getMonth() + offset, 1));
+  const days = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const lead = (first.getUTCDay() + 6) % 7;
+  return {
+    label: first.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" }),
+    cells: [
+      ...Array.from({ length: lead }, () => null),
+      ...Array.from({ length: days }, (_, i) =>
+        iso(new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), i + 1))),
+      ),
+    ],
+  };
 }
 
 const weekday = (d: string) =>
@@ -114,9 +130,34 @@ function Pills({
   );
 }
 
-function Panel({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Panel({
+  title,
+  right,
+  tone,
+  dropping,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  children,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  tone?: "deadline" | "want";
+  dropping?: boolean;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: React.DragEvent) => void;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-panel-2">
+    <section
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`overflow-hidden rounded-2xl border border-line bg-panel-2 transition ${
+        tone ? `panel-${tone}` : ""
+      } ${dropping ? "panel-dropping" : ""}`}
+    >
       <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
         <h2 className="text-[13px] font-medium tracking-tight text-ink">{title}</h2>
         {right}
@@ -180,11 +221,42 @@ function AddRow({
 
 type Send = (action: Action, optimistic: (b: Board) => Board) => void;
 
-function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: string[] }) {
+function TodoRow({
+  todo,
+  send,
+  cats = [],
+  draggable = false,
+}: {
+  todo: Todo;
+  send: Send;
+  cats?: string[];
+  draggable?: boolean;
+}) {
+  // One date per task: a deadline is owed on its due date, anything else is
+  // only ever planned for a day.
+  const dateField = kindOfTodo(todo) === "deadline" ? "due" : "plan";
   const overdue = !todo.done && todo.due && todo.due < TODAY;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(todo.title);
   const [picking, setPicking] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [sent, setSent] = useState(false);
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const holdStart = () => {
+    if (editing) return;
+    held.current = setTimeout(() => setMenu(true), 500);
+  };
+  const holdEnd = () => {
+    if (held.current) clearTimeout(held.current);
+    held.current = null;
+  };
+
+  const toAssistant = () => {
+    setMenu(false);
+    setSent(true);
+    send({ action: "sendToAgent", title: todo.title, due: todo.due, from: todo.url }, queueAgent(todo.title, todo.due));
+  };
 
   const rename = () => {
     const value = draft.trim();
@@ -205,8 +277,27 @@ function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: str
   };
 
   return (
-    <div className="border-b border-line py-2.5 last:border-none">
+    <div
+      draggable={draggable && !editing}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/todo-id", todo.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onPointerDown={holdStart}
+      onPointerUp={holdEnd}
+      onPointerLeave={holdEnd}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu(true);
+      }}
+      className={`border-b border-line py-2.5 last:border-none ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+    >
       <div className="flex items-center gap-3">
+        {draggable ? (
+          <span className="shrink-0 select-none text-[12px] leading-none text-muted/50" title="Drag me to the other list">
+            ⠿
+          </span>
+        ) : null}
         <Box
           on={todo.done}
           onChange={(done) =>
@@ -253,41 +344,26 @@ function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: str
           </button>
         )}
         {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
-        <AgentButton todo={todo} send={send} />
-        <span className="flex shrink-0 items-center gap-1">
-          <span className="text-[11px] text-muted/70" title="Deadline">
-            📌
+        <KindChip todo={todo} send={send} />
+        {sent ? (
+          <span className="shrink-0 text-[11px] text-ok" title="With the assistant">
+            🤖
           </span>
-          <input
-            type="date"
-            title="Deadline"
-            value={todo.due ?? ""}
-            onChange={(e) =>
-              send({ action: "editTodo", id: todo.id, field: "due", value: e.target.value || null }, (b) => ({
-                ...b,
-                todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: e.target.value || null } : t)),
-              }))
-            }
-            className={`w-[108px] rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
-              overdue ? "text-bad" : "text-muted"
-            } hover:border-line`}
-          />
-          <span className="text-[11px] text-muted/70" title="Day you want to do it">
-            ✏️
-          </span>
-          <input
-            type="date"
-            title="Day you want to do it"
-            value={todo.plan ?? ""}
-            onChange={(e) =>
-              send({ action: "editTodo", id: todo.id, field: "plan", value: e.target.value || null }, (b) => ({
-                ...b,
-                todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: e.target.value || null } : t)),
-              }))
-            }
-            className="w-[108px] rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] text-muted hover:border-line"
-          />
-        </span>
+        ) : null}
+        <input
+          type="date"
+          title={dateField === "due" ? "Due" : "Day you want to do it"}
+          value={todo[dateField] ?? ""}
+          onChange={(e) =>
+            send({ action: "editTodo", id: todo.id, field: dateField, value: e.target.value || null }, (b) => ({
+              ...b,
+              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, [dateField]: e.target.value || null } : t)),
+            }))
+          }
+          className={`w-[108px] shrink-0 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
+            overdue ? "text-bad" : "text-muted"
+          } hover:border-line`}
+        />
         <button
           type="button"
           aria-label="Delete"
@@ -302,6 +378,24 @@ function TodoRow({ todo, send, cats = [] }: { todo: Todo; send: Send; cats?: str
           ✕
         </button>
       </div>
+      {menu ? (
+        <div className="flex flex-wrap items-center gap-1.5 pb-1 pl-8 pt-2">
+          <button
+            type="button"
+            onClick={toAssistant}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted transition hover:text-ink"
+          >
+            🤖 Hand to assistant
+          </button>
+          <button
+            type="button"
+            onClick={() => setMenu(false)}
+            className="rounded-full border border-transparent px-2 py-0.5 text-[11px] text-muted/70 hover:text-ink"
+          >
+            cancel
+          </button>
+        </div>
+      ) : null}
       {picking ? (
         <div className="flex flex-wrap gap-1.5 pb-1 pl-8 pt-2">
           {cats.map((c) => (
@@ -341,142 +435,452 @@ const queueAgent = (title: string, due: string | null) => (b: Board) => ({
   ],
 });
 
-/** Hands one to-do to the assistant's database, where the bot picks it up. */
-function AgentButton({ todo, send }: { todo: Todo; send: Send }) {
-  const [sent, setSent] = useState(false);
+
+/* ------------------------------------------------------------- the day */
+
+/** A day holds three real blocks of work and three things to clear, and
+ *  nothing else. The caps are the whole point of the page. */
+const DEEP_CAP = 3;
+const QUICK_CAP = 3;
+const EMAIL_RE = /e-?mails?|inbox/i;
+
+const DEEP_PLACEHOLDERS = ["The one thing", "Also matters today", "Also matters today"];
+
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening.";
+};
+
+const pickedToday = (t: Todo) => t.plan === TODAY || t.due === TODAY;
+
+const spell = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
+const clock = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** What this kind of task has really taken before, so a day can be sized on
+ *  history rather than hope. Matching is by shared words — "film the intro"
+ *  learns from every other filming day. */
+function estimateFor(timings: Timing[], title: string): number | null {
+  const words = (title.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !STOP_WORDS.has(w));
+  if (!words.length) return null;
+  const hits = timings.filter((t) => {
+    const other = t.title.toLowerCase();
+    return words.some((w) => other.includes(w));
+  });
+  if (!hits.length) return null;
+  return Math.round(hits.reduce((sum, h) => sum + h.minutes, 0) / hits.length);
+}
+
+const STOP_WORDS = new Set(["with", "that", "this", "from", "into", "some", "then", "them", "your", "about", "email"]);
+
+/** The stopwatch: it survives a refresh, and what it measures is added to the
+ *  task's Minutes in Notion so the next estimate is better than the last. */
+function Timer({ todo, send }: { todo: Todo; send: Send }) {
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem(`timer:${todo.id}`);
+    setStartedAt(raw ? Number(raw) : null);
+  }, [todo.id]);
+
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  const start = () => {
+    const at = Date.now();
+    window.localStorage.setItem(`timer:${todo.id}`, String(at));
+    setStartedAt(at);
+    setNow(at);
+  };
+
+  const stop = () => {
+    if (startedAt === null) return;
+    const total = (todo.minutes ?? 0) + Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+    window.localStorage.removeItem(`timer:${todo.id}`);
+    setStartedAt(null);
+    send({ action: "editTodo", id: todo.id, field: "minutes", value: String(total) }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, minutes: total } : t)),
+    }));
+  };
+
+  if (startedAt !== null)
+    return (
+      <button
+        type="button"
+        onClick={stop}
+        title="Stop and save the time to Notion"
+        className="shrink-0 rounded-full border border-accent-2 bg-accent-2/10 px-2.5 py-1 text-[12px] tabular-nums text-accent-2"
+      >
+        ■ {clock(now - startedAt)}
+      </button>
+    );
+
   return (
     <button
       type="button"
-      title="Hand this to the assistant"
-      aria-label="Hand this to the assistant"
-      disabled={sent}
-      onClick={() => {
-        setSent(true);
-        send({ action: "sendToAgent", title: todo.title, due: todo.due, from: todo.url }, (b) => ({
-          ...b,
-          agent: [
-            {
-              id: `tmp-${Date.now()}`,
-              title: todo.title,
-              details: "",
-              due: todo.due,
-              status: "Queued",
-              result: "",
-              url: "#",
-            },
-            ...b.agent,
-          ],
-        }));
-      }}
-      className={`shrink-0 rounded-lg border px-2 py-0.5 text-[12px] transition ${
-        sent ? "border-ok/40 text-ok" : "border-line text-muted hover:border-ink/30 hover:text-ink"
-      }`}
+      onClick={start}
+      title="Time this one"
+      className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:border-ink/30 hover:text-ink"
     >
-      {sent ? "🤖 sent" : "🤖 assistant"}
+      ▶ start
     </button>
   );
 }
 
-function TodayPane({ board, send }: { board: Board; send: Send }) {
-  const open = board.todos.filter((t) => !t.done);
-  const overdue = open.filter((t) => t.due && t.due < TODAY);
-  const today = open.filter((t) => t.due === TODAY || t.plan === TODAY);
-  const inbox = open.filter((t) => !t.due && !t.plan);
-  const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
-  const doneToday = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
-  const freshIdeas = board.ideas.filter((i) => (i.status ?? "Inbox") === "Inbox").slice(0, 5);
+/** Taking something off today doesn't delete it — it just stops claiming the
+ *  day, which is the only way a cap of three survives contact with a week. */
+function park(todo: Todo, send: Send) {
+  send({ action: "editTodo", id: todo.id, field: "slot", value: null }, (b) => ({
+    ...b,
+    todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
+  }));
+  if (todo.plan === TODAY)
+    send({ action: "editTodo", id: todo.id, field: "plan", value: null }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: null } : t)),
+    }));
+}
+
+/** Pulling an existing task into today: it gets the slot and the day. */
+function pick(todo: Todo, slot: "deep" | "quick", send: Send) {
+  send({ action: "editTodo", id: todo.id, field: "slot", value: slot }, (b) => ({
+    ...b,
+    todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
+  }));
+  if (!pickedToday(todo))
+    send({ action: "editTodo", id: todo.id, field: "plan", value: TODAY }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: TODAY } : t)),
+    }));
+}
+
+const newTodo = (title: string, slot: "deep" | "quick"): Todo => ({
+  id: `tmp-${Date.now()}`,
+  title,
+  done: false,
+  due: null,
+  plan: TODAY,
+  kind: slot === "deep" ? "deadline" : "want",
+  slot,
+  minutes: null,
+  category: null,
+  priority: null,
+  link: null,
+  source: "Manual",
+  url: "#",
+});
+
+/** An empty line in the day: type a new task, or pull one out of the list you
+ *  already have. */
+function EmptySlot({
+  board,
+  send,
+  slot,
+  placeholder,
+  dim,
+}: {
+  board: Board;
+  send: Send;
+  slot: "deep" | "quick";
+  placeholder: string;
+  dim?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const candidates = board.todos.filter((t) => !t.done && !(t.slot && pickedToday(t))).slice(0, 40);
+
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    send({ action: "addTodo", title, slot, plan: TODAY, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
+      ...b,
+      todos: [...b.todos, newTodo(title, slot)],
+    }));
+  };
 
   return (
-    <div className="space-y-4">
-      <Panel
-        title={new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
-        right={<span className="text-[12px] text-muted">{today.length + overdue.length} to do</span>}
-      >
-        <div className="space-y-3">
-          <AddRow
-            placeholder="Add something for today…"
-            botToggle
-            onAdd={(title, bot) => {
-              if (bot) send({ action: "sendToAgent", title, due: TODAY }, queueAgent(title, TODAY));
-              send({ action: "addTodo", title, due: TODAY, category: "Other" }, (b) => ({
-                ...b,
-                todos: [
-                  ...b.todos,
-                  {
-                    id: `tmp-${Date.now()}`,
-                    title,
-                    done: false,
-                    due: TODAY,
-                    plan: null,
-                    category: "Other",
-                    priority: null,
-                    link: null,
-                    source: "Manual",
-                    url: "#",
-                  },
-                ],
-              }));
-            }}
-          />
-          {overdue.length ? (
-            <div>
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">Late</div>
-              {overdue.map((t) => (
-                <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />
-              ))}
-            </div>
-          ) : null}
-          {today.length ? (
-            <Split items={today} send={send} cats={categoriesOf(board)} />
+    <div className={`border-b border-line/70 py-3 last:border-none ${dim ? "opacity-60" : ""}`}>
+      <div className="flex items-center gap-4">
+        <span
+          className={`shrink-0 rounded-full border border-line ${
+            slot === "deep" ? "h-6 w-6 rounded-full" : "h-5 w-5 rounded-md"
+          }`}
+        />
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder={placeholder}
+          className={`min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted/70 ${
+            slot === "deep" ? "serif text-[20px]" : "text-[15px]"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => setBrowsing(!browsing)}
+          className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+        >
+          pick one
+        </button>
+      </div>
+      {browsing ? (
+        <div className="mt-2 max-h-44 overflow-auto rounded-xl border border-line bg-panel-2 p-1">
+          {candidates.length ? (
+            candidates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setBrowsing(false);
+                  pick(t, slot, send);
+                }}
+                className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel"
+              >
+                {t.title}
+                {t.due ? <span className="ml-2 text-[11px] text-muted">{pretty(t.due)}</span> : null}
+              </button>
+            ))
           ) : (
-            <p className="py-2 text-[14px] text-muted">Nothing scheduled for today.</p>
+            <p className="px-2 py-1.5 text-[13px] text-muted">Nothing else waiting.</p>
           )}
-          {inbox.length ? (
-            <details>
-              <summary className="cursor-pointer text-[13px] text-muted">
-                {inbox.length} with no date (from Siri and the share sheet)
-              </summary>
-              <div className="mt-2">
-                {inbox.map((t) => (
-                  <TodoRow key={t.id} todo={t} send={send} cats={categoriesOf(board)} />
-                ))}
-              </div>
-            </details>
-          ) : null}
         </div>
-      </Panel>
+      ) : null}
+    </div>
+  );
+}
+
+/** One of the three deep blocks: what it is, what it usually costs, and a
+ *  stopwatch for what it actually cost. */
+function DeepRow({ todo, board, send }: { todo: Todo; board: Board; send: Send }) {
+  const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
+  const learned = todo.minutes === null && estimate !== null;
+  return (
+    <div className="border-b border-line/70 py-3 last:border-none">
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          aria-label={todo.done ? "Mark as not done" : "Mark done"}
+          onClick={() =>
+            send({ action: "toggleTodo", id: todo.id, done: !todo.done }, (b) => ({
+              ...b,
+              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t)),
+            }))
+          }
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[12px] transition ${
+            todo.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+          }`}
+        >
+          {todo.done ? "✓" : ""}
+        </button>
+        <span className={`serif min-w-0 flex-1 truncate text-[20px] ${todo.done ? "text-muted line-through" : ""}`}>
+          {todo.title}
+        </span>
+        {estimate !== null ? (
+          <span
+            title={learned ? "Tasks like this usually take about this long" : "Time logged on this one"}
+            className="shrink-0 rounded-full bg-panel-2 px-2.5 py-1 text-[12px] text-muted"
+          >
+            {learned ? "~" : ""}
+            {spell(estimate)}
+          </span>
+        ) : null}
+        <Timer todo={todo} send={send} />
+        <button
+          type="button"
+          onClick={() => park(todo, send)}
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          park it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuickRow({ todo, send, locked }: { todo: Todo; send: Send; locked?: boolean }) {
+  return (
+    <div className="flex items-center gap-4 border-b border-line/70 py-2.5 last:border-none">
+      <Box
+        on={todo.done}
+        onChange={(done) =>
+          send({ action: "toggleTodo", id: todo.id, done }, (b) => ({
+            ...b,
+            todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done } : t)),
+          }))
+        }
+      />
+      <span className={`min-w-0 flex-1 truncate text-[15px] ${todo.done ? "text-muted line-through" : ""}`}>
+        {todo.title}
+      </span>
+      {locked ? <span className="shrink-0 text-[11px] text-muted">every day</span> : null}
+      <Timer todo={todo} send={send} />
+      {locked ? null : (
+        <button
+          type="button"
+          onClick={() => park(todo, send)}
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          park it
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TodayPane({ board, send }: { board: Board; send: Send }) {
+  const [hours, setHours] = useState("");
+
+  useEffect(() => {
+    setHours(window.localStorage.getItem(`hours:${TODAY}`) ?? "");
+  }, []);
+
+  const setAvailable = (v: string) => {
+    setHours(v);
+    window.localStorage.setItem(`hours:${TODAY}`, v);
+  };
+
+  const open = board.todos.filter((t) => !t.done || pickedToday(t));
+  const deep = open.filter((t) => t.slot === "deep" && pickedToday(t)).slice(0, DEEP_CAP);
+  const quick = open.filter((t) => t.slot === "quick" && pickedToday(t)).slice(0, QUICK_CAP);
+  const emails = quick.find((t) => EMAIL_RE.test(t.title));
+  const otherQuick = quick.filter((t) => t !== emails);
+
+  // What today is really asking for, from what these tasks have cost before.
+  const costed = deep.map((t) => t.minutes ?? estimateFor(board.timings, t.title)).filter((m): m is number => m !== null);
+  const load = costed.reduce((sum, m) => sum + m, 0);
+  const free = Number(hours) * 60;
+  const overloaded = free > 0 && load > free;
+
+  const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
+  const doneToday = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
+  const streakOf = (habitId: string) => {
+    const dates = new Set(board.ticks.filter((t) => t.habitId === habitId).map((t) => t.date));
+    let n = 0;
+    for (let i = 0; i < 60; i++) {
+      const d = iso(new Date(Date.now() - i * 86400000));
+      if (!dates.has(d)) {
+        if (i === 0) continue;
+        break;
+      }
+      n++;
+    }
+    return n;
+  };
+
+  const addEmails = () =>
+    send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: TODAY, kind: "want" }, (b) => ({
+      ...b,
+      todos: [...b.todos, newTodo("Go through emails", "quick")],
+    }));
+
+  return (
+    <div className="day-card p-7 sm:p-10">
+      <h2 className="serif text-[40px] leading-none sm:text-[46px]">{greeting()}</h2>
+      <p className="mt-3 text-[16px] font-medium text-muted">What still deserves to close out today?</p>
+
+      <section className="mt-9">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-[13px] font-semibold">Today&apos;s three</h3>
+          <span className="text-[12px] text-muted">{deep.filter((t) => !t.done).length}/3 taken</span>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-4 pb-1">
+          <span className="text-[15px]">Hours available today</span>
+          <span className="flex items-baseline gap-1">
+            <input
+              value={hours}
+              onChange={(e) => setAvailable(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="—"
+              inputMode="decimal"
+              className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
+            />
+            <span className="text-[14px] text-muted">h</span>
+          </span>
+        </div>
+
+        {load > 0 ? (
+          <p className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}>
+            {overloaded
+              ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
+              : `Based on how long these took before, that's about ${spell(load)} of work.`}
+          </p>
+        ) : null}
+
+        <div className="mt-3">
+          {deep.map((t) => (
+            <DeepRow key={t.id} todo={t} board={board} send={send} />
+          ))}
+          {Array.from({ length: Math.max(0, DEEP_CAP - deep.length) }, (_, i) => (
+            <EmptySlot
+              key={`deep-${i}`}
+              board={board}
+              send={send}
+              slot="deep"
+              dim={deep.length + i > 0}
+              placeholder={DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-[13px] font-semibold">Quick batch</h3>
+          <span className="text-[12px] text-muted">three, and one of them is email</span>
+        </div>
+        <div className="mt-3">
+          {emails ? (
+            <QuickRow todo={emails} send={send} locked />
+          ) : (
+            <button
+              type="button"
+              onClick={addEmails}
+              className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
+            >
+              <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
+              <span className="min-w-0 flex-1 text-[15px] text-muted">Go through emails</span>
+              <span className="shrink-0 text-[11px] text-muted">tap to take it on</span>
+            </button>
+          )}
+          {otherQuick.map((t) => (
+            <QuickRow key={t.id} todo={t} send={send} />
+          ))}
+          {Array.from({ length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) }, (_, i) => (
+            <EmptySlot key={`quick-${i}`} board={board} send={send} slot="quick" placeholder="Quick thing to clear" />
+          ))}
+        </div>
+      </section>
 
       {dailyHabits.length ? (
-        <Panel title="Habits today" right={<span className="text-[12px] text-muted">{doneToday.size}/{dailyHabits.length}</span>}>
-          <div className="flex flex-wrap gap-2">
+        <section className="mt-10">
+          <h3 className="text-[13px] font-semibold">Habits</h3>
+          <div className="mt-4 flex flex-wrap gap-6">
             {dailyHabits.map((h) => {
               const on = doneToday.has(h.id);
+              const streak = streakOf(h.id);
               return (
-                <button
-                  key={h.id}
-                  type="button"
-                  onClick={() => tickHabit(board, send, h, TODAY, !on)}
-                  className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[13px] transition ${
-                    on ? "border-ink bg-ink text-brand-cream" : "border-line bg-panel text-muted hover:border-ink/30"
-                  }`}
-                >
-                  <span>{on ? "✓" : "○"}</span>
-                  {h.name}
+                <button key={h.id} type="button" onClick={() => tickHabit(board, send, h, TODAY, !on)} className="w-20">
+                  <span
+                    className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
+                      on ? "bg-warn text-brand-cream" : "border border-line bg-panel-2 text-muted"
+                    }`}
+                  >
+                    {streak || ""}
+                  </span>
+                  <span className="mt-2 block truncate text-[12px] text-muted">{h.name}</span>
                 </button>
               );
             })}
           </div>
-        </Panel>
-      ) : null}
-
-      {freshIdeas.length ? (
-        <Panel title="Just captured" right={<span className="text-[12px] text-muted">{freshIdeas.length} new</span>}>
-          <div className="space-y-1">
-            {freshIdeas.map((i) => (
-              <IdeaRow key={i.id} idea={i} send={send} />
-            ))}
-          </div>
-        </Panel>
+        </section>
       ) : null}
     </div>
   );
@@ -508,6 +912,9 @@ function IdeaRow({ idea, send }: { idea: Idea; send: Send }) {
                 done: false,
                 due: null,
                 plan: null,
+                kind: null,
+                slot: null,
+                minutes: null,
                 category: null,
                 priority: null,
                 link: idea.link,
@@ -588,15 +995,51 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
 const DEADLINE_LABEL = "📌 Deadlines";
 const WANT_LABEL = "✏️ Want to do";
 
+/** How many things a day can realistically hold once the deadlines are in. */
+const WANT_CAP = 3;
+
+const KIND_FACE: Record<string, string> = { deadline: "📌", want: "✏️" };
+const KIND_WORD: Record<string, string> = { deadline: "Deadline", want: "Want to do" };
+
+/** Deadline → want to do → unset, in one tap, straight into Notion's Kind. */
+function KindChip({ todo, send }: { todo: Todo; send: Send }) {
+  const next = todo.kind === "deadline" ? "want" : todo.kind === "want" ? null : "deadline";
+  return (
+    <button
+      type="button"
+      title={`${todo.kind ? KIND_WORD[todo.kind] : "No kind set"} — tap for ${next ? KIND_WORD[next] : "none"}`}
+      onClick={() =>
+        send({ action: "editTodo", id: todo.id, field: "kind", value: next }, (b) => ({
+          ...b,
+          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, kind: next } : t)),
+        }))
+      }
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] leading-none transition ${
+        todo.kind ? "border-line" : "border-transparent text-muted/50 hover:border-line"
+      }`}
+    >
+      {todo.kind ? KIND_FACE[todo.kind] : "·"}
+    </button>
+  );
+}
+
+/** Untagged rows still have to land somewhere: a date reads as a commitment,
+ *  no date reads as an intention. */
+const kindOfTodo = (t: Todo): "deadline" | "want" => t.kind ?? (t.due ? "deadline" : "want");
+
 /** A deadline is something with a date somebody else cares about; everything
  *  else on the day is a choice, and the two read differently. */
-function Split({ items, send, cats, day }: { items: Todo[]; send: Send; cats: string[]; day?: string }) {
-  const deadlines = items.filter((t) => t.due && (!day || t.due === day));
+function Split({ items, send, cats }: { items: Todo[]; send: Send; cats: string[] }) {
+  const deadlines = items.filter((t) => kindOfTodo(t) === "deadline");
   const wanted = items.filter((t) => !deadlines.includes(t));
-  const group = (label: string, list: Todo[]) =>
+  const over = wanted.filter((t) => !t.done).length - WANT_CAP;
+  const group = (label: string, list: Todo[], note?: string) =>
     list.length ? (
-      <div>
-        <div className="mb-1 mt-1 text-[10px] font-medium uppercase tracking-widest text-muted">{label}</div>
+      <div className={label === DEADLINE_LABEL ? "group-deadline" : "group-want"}>
+        <div className="mb-1 mt-1 flex items-center justify-between text-[10px] font-medium uppercase tracking-widest">
+          <span>{label}</span>
+          {note ? <span className="text-warn">{note}</span> : null}
+        </div>
         {list.map((t) => (
           <TodoRow key={t.id} todo={t} send={send} cats={cats} />
         ))}
@@ -613,7 +1056,7 @@ function Split({ items, send, cats, day }: { items: Todo[]; send: Send; cats: st
   return (
     <div>
       {group(DEADLINE_LABEL, deadlines)}
-      {group(WANT_LABEL, wanted)}
+      {group(WANT_LABEL, wanted, over > 0 ? `${over} more than fits — move ${over} to another day` : undefined)}
     </div>
   );
 }
@@ -632,15 +1075,15 @@ function WeekView({
   week: number;
   setWeek: (n: number) => void;
 }) {
-  const [mode, setMode] = useState<"all" | "due" | "plan">("all");
-  const wanting = mode === "plan";
+  const [mode, setMode] = useState<"all" | "deadline" | "want">("all");
+  const wanting = mode === "want";
   const days = weekDays(week);
   const start = days[0];
   const end = days[6];
   const dayOf = (t: Todo) => t.plan ?? t.due;
-  const onDay = (t: Todo, d: string) =>
-    mode === "due" ? t.due === d : mode === "plan" ? t.plan === d : t.due === d || t.plan === d;
-  const late = week === 0 ? shown.filter((t) => !t.done && dayOf(t) && (dayOf(t) as string) < start) : [];
+  const onDay = (t: Todo, d: string) => dayOf(t) === d && (mode === "all" || kindOfTodo(t) === mode);
+  // Days already gone are only worth the room if something is still owed.
+  const late = week === 0 ? shown.filter((t) => !t.done && dayOf(t) && (dayOf(t) as string) < TODAY) : [];
   const undated = week === 0 ? shown.filter((t) => !t.done && !dayOf(t)) : [];
 
   return (
@@ -648,22 +1091,23 @@ function WeekView({
       <Pills
         items={[
           { id: "all", label: "Everything" },
-          { id: "due", label: DEADLINE_LABEL },
-          { id: "plan", label: WANT_LABEL },
+          { id: "deadline", label: DEADLINE_LABEL },
+          { id: "want", label: WANT_LABEL },
         ]}
         value={mode}
-        onChange={(v) => setMode(v as "all" | "due" | "plan")}
+        onChange={(v) => setMode(v as "all" | "deadline" | "want")}
       />
       <div className="flex items-center justify-between">
         <div className="text-[13px] font-medium">
           {pretty(start)} – {pretty(end)}
-          {week === 0 ? <span className="ml-2 text-[12px] text-muted">this week</span> : null}
+          {week === 0 ? <span className="ml-2 text-[12px] text-muted">from today</span> : null}
         </div>
         <div className="flex gap-1.5">
           <button
             type="button"
-            onClick={() => setWeek(week - 1)}
-            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+            disabled={week === 0}
+            onClick={() => setWeek(Math.max(0, week - 1))}
+            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink disabled:opacity-30"
           >
             ←
           </button>
@@ -685,8 +1129,10 @@ function WeekView({
       </div>
 
       {late.length ? (
-        <div>
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">Late</div>
+        <div className="rounded-xl border border-bad/40 bg-bad/5 p-3">
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">
+            Late · {late.length}
+          </div>
           {late.map((t) => (
             <TodoRow key={t.id} todo={t} send={send} cats={cats} />
           ))}
@@ -701,11 +1147,18 @@ function WeekView({
               <span className={`text-[12px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(d)}</span>
               <span className="text-[11px] text-muted">{items.filter((t) => !t.done).length || ""}</span>
             </div>
-            <Split items={items} send={send} cats={cats} day={d} />
+            <Split items={items} send={send} cats={cats} />
             <AddRow
               placeholder={wanting ? "Want to do this day…" : "Due this day…"}
               onAdd={(title) =>
-                send({ action: "addTodo", title, ...(wanting ? { plan: d } : { due: d }) }, (b) => ({
+                send(
+                  {
+                    action: "addTodo",
+                    title,
+                    kind: wanting ? "want" : "deadline",
+                    ...(wanting ? { plan: d } : { due: d }),
+                  },
+                  (b) => ({
                   ...b,
                   todos: [
                     ...b.todos,
@@ -715,6 +1168,9 @@ function WeekView({
                       done: false,
                       due: wanting ? null : d,
                       plan: wanting ? d : null,
+                      kind: wanting ? ("want" as const) : ("deadline" as const),
+                      slot: null,
+                      minutes: null,
                       category: null,
                       priority: null,
                       link: null,
@@ -722,7 +1178,8 @@ function WeekView({
                       url: "#",
                     },
                   ],
-                }))
+                  }),
+                )
               }
             />
           </div>
@@ -743,11 +1200,66 @@ function WeekView({
   );
 }
 
+/** One month of a single kind of task, so a glance answers "what is actually
+ *  owed this month" without the optional pile in the way. */
+function MonthCal({ kind, items, offset }: { kind: "deadline" | "want"; items: Todo[]; offset: number }) {
+  const { cells } = monthGrid(offset);
+  const mine = items.filter((t) => !t.done && kindOfTodo(t) === kind);
+  const dayOf = (t: Todo) => (kind === "deadline" ? t.due ?? t.plan : t.plan ?? t.due);
+  return (
+    <Panel
+      tone={kind}
+      title={kind === "deadline" ? DEADLINE_LABEL : WANT_LABEL}
+      right={<span className="text-[12px] text-muted">{mine.length || ""}</span>}
+    >
+      <div className="grid grid-cols-7 gap-1">
+        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+          <div key={`${d}${i}`} className="pb-1 text-center text-[10px] text-muted">
+            {d}
+          </div>
+        ))}
+        {cells.map((d, i) =>
+          d === null ? (
+            <div key={`blank-${i}`} />
+          ) : (
+            <div
+              key={d}
+              className={`min-h-[62px] rounded-lg border p-1 ${
+                d === TODAY ? "border-ink/40" : "border-line/70"
+              }`}
+            >
+              <div className={`mb-0.5 text-[10px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>
+                {Number(d.slice(8))}
+              </div>
+              {mine
+                .filter((t) => dayOf(t) === d)
+                .slice(0, 3)
+                .map((t) => (
+                  <div
+                    key={t.id}
+                    title={t.title}
+                    className="mb-0.5 truncate rounded px-1 text-[10px]"
+                    style={{ background: `${catColour(t.category)}1f`, color: catColour(t.category) }}
+                  >
+                    {t.title}
+                  </div>
+                ))}
+              {mine.filter((t) => dayOf(t) === d).length > 3 ? (
+                <div className="text-[9px] text-muted">+{mine.filter((t) => dayOf(t) === d).length - 3}</div>
+              ) : null}
+            </div>
+          ),
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function TodosPane({ board, send }: { board: Board; send: Send }) {
   const [view, setView] = useState("week");
   const [cat, setCat] = useState("all");
   const [week, setWeek] = useState(0);
-  const days = monthDays();
+  const [month, setMonth] = useState(0);
   const cats = categoriesOf(board);
   const shown = cat === "all" ? board.todos : board.todos.filter((t) => groupOf(t, cats) === cat);
 
@@ -758,9 +1270,9 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
         right={
           <Pills
             items={[
-              { id: "week", label: "Week" },
+              { id: "week", label: "Next 7 days" },
               { id: "list", label: "List" },
-              { id: "calendar", label: "Month" },
+              { id: "calendar", label: "Calendars" },
             ]}
             value={view}
             onChange={setView}
@@ -783,6 +1295,9 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
                     done: false,
                     due: null,
                     plan: null,
+                    kind: null,
+                    slot: null,
+                    minutes: null,
                     category: cat === "all" ? null : cat,
                     priority: null,
                     link: null,
@@ -825,32 +1340,37 @@ function TodosPane({ board, send }: { board: Board; send: Send }) {
           ) : view === "week" ? (
             <WeekView send={send} shown={shown} cats={cats} week={week} setWeek={setWeek} />
           ) : (
-            <div className="grid grid-cols-7 gap-1.5">
-              {days.map((d) => {
-                const items = shown.filter((t) => !t.done && (t.due === d || t.plan === d));
-                return (
-                  <div
-                    key={d}
-                    className={`min-h-[68px] rounded-xl border p-1.5 ${
-                      d === TODAY ? "border-ink/40 bg-panel" : "border-line bg-panel-2"
-                    }`}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium">{monthGrid(month).label}</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMonth(month - 1)}
+                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
                   >
-                    <div className="mb-1 text-[10px] text-muted">{Number(d.slice(8))}</div>
-                    {items.slice(0, 3).map((t) => (
-                      <div
-                        key={t.id}
-                        title={t.title}
-                        className="mb-0.5 truncate rounded px-1 text-[10px]"
-                        style={{ background: `${catColour(t.category)}1f`, color: catColour(t.category) }}
-                      >
-                        {t.due === d ? "📌 " : "✏️ "}
-                        {t.title}
-                      </div>
-                    ))}
-                    {items.length > 3 ? <div className="text-[9px] text-muted">+{items.length - 3}</div> : null}
-                  </div>
-                );
-              })}
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMonth(0)}
+                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+                  >
+                    this month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMonth(month + 1)}
+                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
+                  >
+                    →
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <MonthCal kind="deadline" items={shown} offset={month} />
+                <MonthCal kind="want" items={shown} offset={month} />
+              </div>
             </div>
           )}
         </div>
@@ -1244,6 +1764,24 @@ const TABS = [
   { id: "goals", label: "Goals" },
 ];
 
+const QUOTES = [
+  "You do not rise to the level of your goals, you fall to the level of your systems.",
+  "A year from now you'll wish you had started today.",
+  "Done is better than perfect.",
+  "Small things, done daily, beat big things done once.",
+  "You can do anything, but not everything.",
+  "Start where you are. Use what you have. Do what you can.",
+  "The way to get started is to quit talking and begin doing.",
+  "Focus is saying no to a hundred good ideas.",
+  "What gets scheduled gets done.",
+  "Slow is smooth, smooth is fast.",
+  "Discipline is choosing between what you want now and what you want most.",
+  "It always seems impossible until it's done.",
+  "Action is the antidote to anxiety.",
+  "Progress, not perfection.",
+  "The days are long but the decades are short.",
+];
+
 export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: string; initialTodoDb: string }) {
   const [captureKey, setCaptureKey] = useState(initialKey);
   const [todoDb, setTodoDb] = useState(initialTodoDb);
@@ -1251,6 +1789,10 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("today");
+  // Picked after mount so the server and the browser can't disagree on it.
+  const [quote, setQuote] = useState("");
+
+  useEffect(() => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]), []);
 
   // The dashboard is opened from a phone as often as a laptop, so the key is
   // remembered rather than needing the long link every time.
@@ -1348,10 +1890,8 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
       <div className="mx-auto max-w-4xl px-5 pb-20 pt-10">
         <header className="mb-7 flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-[26px] font-semibold leading-none tracking-tight">Second brain</h1>
-            <p className="mt-2 text-[13px] text-muted">
-              Everything here is your Notion — Siri writes to it, this just makes it usable.
-            </p>
+            <h1 className="text-[26px] font-semibold leading-none tracking-tight">Hi Sophie</h1>
+            <p className="mt-2 min-h-[18px] text-[13px] italic text-muted">{quote}</p>
           </div>
           <button
             type="button"

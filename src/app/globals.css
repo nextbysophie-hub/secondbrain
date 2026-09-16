@@ -159,23 +159,23 @@ select {
   color: var(--brand-cocoa);
 }
 
-/* The dashboard is a tool you stare at all day, so it drops the wizard's warm
-   brand for a plain white, near-monochrome sheet. Scoped, so the wizard keeps
+/* The dashboard follows the paper-and-ink palette of the layout Sophie sketched:
+   warm off-white, soft rules, one periwinkle accent. Scoped, so the wizard keeps
    its own look. */
 .board-theme {
-  --bg: #ffffff;
-  --panel: #fafafa;
-  --panel-2: #ffffff;
-  --line: #ebebeb;
-  --ink: #111214;
-  --muted: #8b9099;
-  --accent: #111214;
-  --accent-2: #3b6cf6;
-  --ok: #111214;
-  --warn: #b07d0a;
-  --bad: #e5484d;
-  --brand-cream: #ffffff;
-  --brand-cocoa: #111214;
+  --bg: #faf8f4;
+  --panel: #fff8f0;
+  --panel-2: #f3efe6;
+  --line: #e0d9cc;
+  --ink: #2d2a24;
+  --muted: #a09880;
+  --accent: #2d2a24;
+  --accent-2: #7f77dd;
+  --ok: #1d9e75;
+  --warn: #c07a26;
+  --bad: #d85a30;
+  --brand-cream: #faf8f4;
+  --brand-cocoa: #2d2a24;
 
   position: relative;
   z-index: 0;
@@ -187,6 +187,20 @@ select {
   letter-spacing: -0.014em;
 }
 
+/* The day sheet reads like a page in a notebook, so its headings are set in a
+   serif against the cream card. */
+.board-theme .serif {
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+.board-theme .day-card {
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(45, 42, 36, 0.04);
+}
+
 /* Nothing in here should be handwritten. */
 .board-theme .font-hand {
   font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
@@ -194,7 +208,50 @@ select {
   letter-spacing: -0.03em;
 }
 
+/* The two halves of a day should be telling apart from across the room:
+   deadlines in dark chocolate, the optional pile in periwinkle. Red is kept
+   for things that are actually late. */
+.board-theme .panel-deadline {
+  border-color: #cbb9a6;
+  background: #f6efe6;
+}
+
+.board-theme .panel-deadline > header {
+  border-color: #cbb9a6;
+  background: #e6d9c8;
+  color: #3b2a1c;
+}
+
+.board-theme .panel-want {
+  border-color: #cdcaf0;
+  background: #f4f3fd;
+}
+
+.board-theme .panel-want > header {
+  border-color: #cdcaf0;
+  background: #e7e5f9;
+  color: #4b45a8;
+}
+
+.board-theme .panel-dropping {
+  border-style: dashed;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.06);
+}
+
+.board-theme .group-deadline > div:first-child {
+  color: #3b2a1c;
+}
+
+.board-theme .group-want > div:first-child {
+  color: #4b45a8;
+}
+
+.board-theme .panel-deadline > header h2,
+.board-theme .panel-want > header h2 {
+  color: inherit;
+}
+
 .board-theme ::selection {
-  background: #111214;
-  color: #ffffff;
+  background: #2d2a24;
+  color: #faf8f4;
 }
