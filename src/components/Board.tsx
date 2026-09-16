@@ -739,7 +739,7 @@ function QuickRow({ todo, send, locked }: { todo: Todo; send: Send; locked?: boo
  *  aren't what stops three tasks getting done. */
 const WORK_START = 9;
 const WORK_END = 18;
-const WORK_END_LABEL = `${WORK_END % 12 || 12}pm`;
+const EVENING_END = 22;
 
 type DayCalendar = { connected: boolean; busy?: number; free?: number; error?: string };
 
@@ -750,16 +750,19 @@ const connectCalendarHref = () =>
  *  browser, because only it knows what time it is where she is. */
 async function readCalendarDay(): Promise<DayCalendar | null> {
   const now = new Date();
-  const start = new Date(now);
-  start.setHours(WORK_START, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(WORK_END, 0, 0, 0);
-  const from = now > start ? now : start;
-  if (end <= from) return null;
+  const at = (hour: number) => {
+    const d = new Date(now);
+    d.setHours(hour, 0, 0, 0);
+    return d;
+  };
+  const from = now > at(WORK_START) ? now : at(WORK_START);
+  // Planning at 9pm is still planning: the day just runs to bedtime instead.
+  const end = at(WORK_END) > from ? at(WORK_END) : at(EVENING_END);
+  const to = end > from ? end : new Date(from.getTime() + 3600000);
 
   const params = new URLSearchParams({
     from: from.toISOString(),
-    to: end.toISOString(),
+    to: to.toISOString(),
     tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
   try {
@@ -864,9 +867,9 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
             {calendar.connected ? (
               calendar.busy !== undefined ? (
                 calendar.busy > 0 ? (
-                  `Your calendar already has ${spell(calendar.busy)} booked before ${WORK_END_LABEL}.`
+                  `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
                 ) : (
-                  `Nothing in your calendar before ${WORK_END_LABEL}.`
+                  "Nothing left in your calendar today."
                 )
               ) : (
                 calendar.error
