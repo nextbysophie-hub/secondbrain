@@ -457,11 +457,16 @@ const shiftDay = (day: string, by: number) => iso(new Date(new Date(`${day}T12:0
 
 /** The page is normally about today, so days either side get named rather
  *  than dated. */
-const dayTitle = (day: string) => {
-  if (day === TODAY) return greeting();
-  if (day === shiftDay(TODAY, 1)) return "Tomorrow.";
-  if (day === shiftDay(TODAY, -1)) return "Yesterday.";
-  return `${pretty(day)}.`;
+const dayStamp = (day: string) => {
+  const name =
+    day === TODAY
+      ? "Today"
+      : day === shiftDay(TODAY, 1)
+        ? "Tomorrow"
+        : day === shiftDay(TODAY, -1)
+          ? "Yesterday"
+          : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: "long" });
+  return `${name} · ${pretty(day)}`;
 };
 
 const dayQuestion = (day: string) =>
@@ -501,27 +506,27 @@ function bestStreak(ticks: HabitTick[], habitId: string): number {
   return best;
 }
 
-/** Every daily habit's streak, in one line, on every tab. */
-function StreakBar({ board }: { board: Board }) {
+/** Every daily habit as one dot — filled once it's ticked today, with the
+ *  running streak beside it. Quiet enough to live in the header. */
+function StreakDots({ board }: { board: Board }) {
   const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad);
   if (!habits.length) return null;
   const done = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-2">
+    <div className="flex items-center gap-3">
       {habits.map((h) => {
         const streak = streakOf(board.ticks, h.id);
         const on = done.has(h.id);
         return (
           <span
             key={h.id}
-            title={`${h.name} — best run ${bestStreak(board.ticks, h.id)} days`}
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] ${
-              on ? "border-warn/50 bg-warn/10 text-ink" : "border-line text-muted"
-            }`}
+            title={`${h.name} — ${streak} day${streak === 1 ? "" : "s"} running, best ${bestStreak(board.ticks, h.id)}`}
+            className="flex items-center gap-1.5"
           >
-            <span className={streak ? "" : "opacity-40"}>🔥</span>
-            <span className="tabular-nums font-medium">{streak}</span>
-            <span className="max-w-[9rem] truncate">{h.name}</span>
+            <span
+              className={`h-2 w-2 rounded-full ${on ? "bg-warn" : "border border-line bg-transparent"}`}
+            />
+            <span className={`text-[12px] tabular-nums ${on ? "text-ink" : "text-muted"}`}>{streak}</span>
           </span>
         );
       })}
@@ -1107,10 +1112,12 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     <div className="day-card p-7 sm:p-10">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="serif text-[40px] leading-none sm:text-[46px]">{dayTitle(day)}</h2>
-          <p className="mt-3 text-[16px] font-medium text-muted">{dayQuestion(day)}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+            {dayStamp(day)}
+          </p>
+          <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">{dayQuestion(day)}</h2>
         </div>
-        <div className="flex shrink-0 items-center gap-1 pt-2">
+        <div className="flex shrink-0 items-center gap-1">
           <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
             ←
           </Arrow>
@@ -2280,40 +2287,46 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
   return (
     <div className="board-theme">
       <div className="mx-auto max-w-4xl px-5 pb-20 pt-10">
-        <header className="mb-7 flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-[26px] font-semibold leading-none tracking-tight">Hi Sophie</h1>
-            <p className="mt-2 min-h-[18px] text-[13px] italic text-muted">{quote}</p>
+        <header className="mb-7">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="serif text-[34px] leading-none sm:text-[38px]">
+                {greeting().replace(".", ", Sophie.")}
+              </h1>
+              <p className="mt-2.5 min-h-[18px] text-[13px] italic text-muted">{quote}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-4 pt-1.5">
+              {board ? <StreakDots board={board} /> : null}
+              <button
+                type="button"
+                onClick={() => void load()}
+                aria-label="Sync with Notion"
+                className="text-[13px] text-muted transition hover:text-ink"
+              >
+                {loading ? "syncing…" : "sync"}
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="shrink-0 rounded-xl border border-line bg-panel px-3 py-1.5 text-[13px] text-muted transition hover:border-ink/30 hover:text-ink"
-          >
-            {loading ? "Syncing…" : "Sync"}
-          </button>
-        </header>
 
-        <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-line">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`-mb-px shrink-0 border-b px-3.5 py-2.5 text-[14px] transition ${
-                tab === t.id ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+          <nav className="mt-6 flex gap-5 overflow-x-auto border-b border-line">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className={`-mb-px shrink-0 border-b-2 pb-2.5 text-[13px] tracking-wide transition ${
+                  tab === t.id ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        </header>
 
         {error ? (
           <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">{error}</div>
         ) : null}
-
-        {board ? <StreakBar board={board} /> : null}
 
         {!board ? (
           <p className="py-16 text-center text-[15px] text-muted">Reading your Notion…</p>
