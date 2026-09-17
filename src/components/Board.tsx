@@ -1754,7 +1754,14 @@ const kindOfTodo = (t: Todo): "deadline" | "want" => t.kind ?? (t.due ? "deadlin
  *  way to put it back down. */
 function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
   return (
-    <div className="flex items-center gap-2 py-1">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/todo-id", todo.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="flex cursor-grab items-center gap-2 py-1 active:cursor-grabbing"
+    >
       <button
         type="button"
         aria-label={todo.done ? "Mark as not done" : "Mark done"}
@@ -1790,12 +1797,64 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
   );
 }
 
+/** The pile the week gets planned out of: everything real in Notion that
+ *  hasn't been promised to a day yet, dragged across one at a time. */
+function PlanPile({ board }: { board: Board }) {
+  const [q, setQ] = useState("");
+  const waiting = board.todos
+    .filter((t) => !t.done && !t.slot)
+    .filter((t) => t.title.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+
+  return (
+    <div className="rounded-xl border border-line p-3">
+      <div className="mb-1.5 flex items-baseline justify-between">
+        <span className="text-[12px] font-medium">Waiting in Notion</span>
+        <span className="text-[11px] text-muted">{waiting.length}</span>
+      </div>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Find something…"
+        className="mb-2 w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
+      />
+      <div className="max-h-[520px] space-y-1 overflow-auto">
+        {waiting.length ? (
+          waiting.map((t) => (
+            <div
+              key={t.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/todo-id", t.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              className="flex cursor-grab items-center gap-2 rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
+            >
+              <span className="shrink-0 text-[11px] text-muted">⠿</span>
+              <span className="min-w-0 flex-1 truncate">{t.title}</span>
+              {t.due ? (
+                <span className={`shrink-0 text-[10px] ${t.due < TODAY ? "text-bad" : "text-muted"}`}>
+                  {pretty(t.due)}
+                </span>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <p className="text-[13px] text-muted">Nothing waiting — the pile is empty.</p>
+        )}
+      </div>
+      <p className="mt-2 text-[12px] text-muted">Drag one onto a day. On a phone, use + deep / + quick instead.</p>
+    </div>
+  );
+}
+
 /** One day of the week being planned: the deep blocks, the quick ones, and
  *  room to fill what's still empty — the caps are what make a week plannable
  *  instead of a wish list. */
 function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }) {
   const [open, setOpen] = useState<null | "deep" | "quick">(null);
   const [draft, setDraft] = useState("");
+  const [over, setOver] = useState<null | "deep" | "quick">(null);
   const picked = board.todos.filter((t) => t.slot && pickedOn(t, day));
   const deep = picked.filter((t) => t.slot === "deep");
   const quick = picked.filter((t) => t.slot === "quick");
@@ -1819,6 +1878,48 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
 
   const room = (slot === "deep" ? DEEP_CAP - deep.length : QUICK_CAP - quick.length) > 0;
 
+  const drop = (e: React.DragEvent, into: "deep" | "quick") => {
+    e.preventDefault();
+    setOver(null);
+    const id = e.dataTransfer.getData("text/todo-id");
+    const todo = board.todos.find((t) => t.id === id);
+    if (!todo) return;
+    const full = (into === "deep" ? deep.length : quick.length) >= (into === "deep" ? DEEP_CAP : QUICK_CAP);
+    if (full && !pickedOn(todo, day)) return;
+    pick(todo, into, send, day);
+  };
+
+  /** Each half of a day is its own target, so dropping is also the choice
+   *  between a real block of work and something quick. */
+  const zone = (kind: "deep" | "quick", rows: Todo[]) => {
+    const cap = kind === "deep" ? DEEP_CAP : QUICK_CAP;
+    return (
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(kind);
+        }}
+        onDragLeave={() => setOver(null)}
+        onDrop={(e) => drop(e, kind)}
+        className={`rounded-lg border border-dashed px-1.5 py-1 transition ${
+          over === kind ? "border-ink/40 bg-ink/5" : "border-transparent"
+        }`}
+      >
+        <div className="flex items-baseline justify-between">
+          <span className="text-[10px] uppercase tracking-widest text-muted">{kind}</span>
+          <span className="text-[10px] text-muted">
+            {rows.length}/{cap}
+          </span>
+        </div>
+        {rows.length ? (
+          rows.map((t) => <PlanRow key={t.id} todo={t} send={send} day={day} />)
+        ) : (
+          <p className="py-1 text-[12px] text-muted/70">Drop one here.</p>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div
       className={`rounded-xl border p-3 ${day === TODAY ? "border-ink/30 bg-panel" : "border-line"} ${
@@ -1827,23 +1928,13 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
     >
       <div className="mb-1.5 flex items-baseline justify-between">
         <span className={`text-[12px] ${day === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(day)}</span>
-        <span className="text-[11px] text-muted">
-          {deep.length}/{DEEP_CAP} deep · {quick.length}/{QUICK_CAP} quick
-        </span>
+        <span className="text-[11px] text-muted">{picked.filter((t) => !t.done).length || ""}</span>
       </div>
 
-      {picked.length ? (
-        <div className="mb-1">
-          {deep.map((t) => (
-            <PlanRow key={t.id} todo={t} send={send} day={day} />
-          ))}
-          {quick.map((t) => (
-            <PlanRow key={t.id} todo={t} send={send} day={day} />
-          ))}
-        </div>
-      ) : (
-        <p className="mb-1 text-[12px] text-muted">Nothing planned.</p>
-      )}
+      <div className="mb-1 space-y-1">
+        {zone("deep", deep)}
+        {zone("quick", quick)}
+      </div>
 
       <div className="flex gap-1.5">
         {(["deep", "quick"] as const).map((s) => {
@@ -2046,10 +2137,13 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             </details>
           ) : null}
 
-          <div className="grid gap-2 lg:grid-cols-2">
-            {days.map((d) => (
-              <PlanDay key={d} board={board} send={send} day={d} />
-            ))}
+          <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {days.map((d) => (
+                <PlanDay key={d} board={board} send={send} day={d} />
+              ))}
+            </div>
+            <PlanPile board={board} />
           </div>
 
           <p className="text-[12px] text-muted">
