@@ -2357,27 +2357,41 @@ function EditTitle({
   );
 }
 
-/** The date lives in Notion, so changing it here changes it there. */
+/** The date lives in Notion, so changing it here changes it there — but it
+ *  hides behind an icon so the title keeps the room. */
 function EditDue({ todo, send }: { todo: Todo; send: Send }) {
+  const late = !!todo.due && todo.due < TODAY;
+
   return (
-    <input
-      type="date"
-      value={todo.due ?? ""}
-      title="Due date"
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => {
-        const value = e.target.value || null;
-        send({ action: "editTodo", id: todo.id, field: "due", value }, (b) => ({
-          ...b,
-          todos: b.todos.map((t) =>
-            t.id === todo.id ? { ...t, due: value } : t,
-          ),
-        }));
-      }}
-      className={`w-[104px] shrink-0 rounded border border-transparent bg-transparent text-[10px] outline-none transition hover:border-line ${
-        todo.due && todo.due < TODAY ? "text-bad" : "text-muted"
-      }`}
-    />
+    <span
+      className="relative shrink-0"
+      title={todo.due ? `Due ${pretty(todo.due)} — tap to change` : "Set a date"}
+    >
+      <span
+        className={`text-[11px] ${late ? "text-bad" : todo.due ? "text-muted" : "text-muted/40"}`}
+      >
+        📅
+      </span>
+      <input
+        type="date"
+        value={todo.due ?? ""}
+        aria-label="Due date"
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const value = e.target.value || null;
+          send(
+            { action: "editTodo", id: todo.id, field: "due", value },
+            (b) => ({
+              ...b,
+              todos: b.todos.map((t) =>
+                t.id === todo.id ? { ...t, due: value } : t,
+              ),
+            }),
+          );
+        }}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      />
+    </span>
   );
 }
 
