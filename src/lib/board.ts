@@ -71,6 +71,7 @@ export type AgentTask = {
 export type Idea = {
   id: string;
   title: string;
+  notes: string;
   status: string | null;
   link: string | null;
   captured: string | null;
@@ -341,6 +342,16 @@ export async function ensureGoalColumns(token: string, goalsDbId: string): Promi
   await notion(token, `/databases/${goalsDbId}`, { method: "PATCH", body: JSON.stringify({ properties: missing }) });
 }
 
+/** An idea is a title until there's somewhere to write the rest of it. */
+export async function ensureIdeaNotes(token: string, ideaDbId: string): Promise<void> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${ideaDbId}`);
+  if (db.properties.Notes) return;
+  await notion(token, `/databases/${ideaDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: { Notes: { rich_text: {} } } }),
+  });
+}
+
 /* --------------------------------------------------------- database lookup */
 
 const HABIT_DB = "Habits";
@@ -594,6 +605,7 @@ export async function readBoard(
     ideas: ideaRows.map((r) => ({
       id: r.id,
       title: titleOf(r),
+      notes: textOf(r.properties.Notes),
       status: tagOf(r.properties.Status),
       link: r.properties.Link?.url ?? r.properties.URL?.url ?? null,
       captured: dateOf(r.properties.Captured) ?? r.created_time?.slice(0, 10) ?? null,
@@ -666,7 +678,8 @@ export type Action =
   | { action: "agentStatus"; id: string; status: string }
   | { action: "deleteAgent"; id: string }
   | { action: "ideaStatus"; id: string; status: string }
-  | { action: "ideaToTodo"; id: string; title: string; link?: string | null }
+  | { action: "editIdea"; id: string; title?: string; notes?: string }
+  | { action: "ideaToTodo"; id: string; title: string; link?: string | null; plan?: string | null }
   | { action: "deleteIdea"; id: string }
   | { action: "addHabit"; name: string; cadence: string; bad: boolean; affirmation?: boolean }
   | { action: "deleteHabit"; id: string }
@@ -791,11 +804,29 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
     case "ideaStatus":
       await updatePage(token, body.id, { Status: selectProp(body.status) });
       return;
+    case "editIdea": {
+      const props: Record<string, unknown> = {};
+      if (body.notes !== undefined) props.Notes = richText(body.notes);
+      if (body.title !== undefined) {
+        const page = await notion<Row>(token, `/pages/${body.id}`);
+        const key = Object.entries(page.properties).find(([, p]) => p.type === "title")?.[0];
+        if (key) props[key] = title(body.title);
+      }
+      if (Object.keys(props).length) await updatePage(token, body.id, props);
+      return;
+    }
     case "ideaToTodo":
       await createPage(
         token,
         dbs.task,
-        taskProps(map, { title: body.title, done: false, link: body.link ?? null, source: "Manual" }),
+        taskProps(map, {
+          title: body.title,
+          done: false,
+          plan: body.plan ?? null,
+          kind: "want",
+          link: body.link ?? null,
+          source: "Manual",
+        }),
       );
       await updatePage(token, body.id, { Status: selectProp("Next Up") });
       return;

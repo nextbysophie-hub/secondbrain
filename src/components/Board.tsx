@@ -1479,64 +1479,107 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
-function IdeaRow({ idea, send }: { idea: Idea; send: Send }) {
+/** The next Monday, so an idea that becomes work lands on the week you plan
+ *  rather than in the middle of today. */
+function comingMonday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+  return iso(d);
+}
+
+const ideaToTodo = (idea: Idea, send: Send) => {
+  const plan = comingMonday();
+  send({ action: "ideaToTodo", id: idea.id, title: idea.title, link: idea.link, plan }, (b) => ({
+    ...b,
+    todos: [
+      ...b.todos,
+      {
+        id: `tmp-${Date.now()}`,
+        title: idea.title,
+        done: false,
+        goal: null,
+        due: null,
+        plan,
+        kind: "want" as const,
+        slot: null,
+        minutes: null,
+        category: null,
+        priority: null,
+        link: idea.link,
+        source: "Manual",
+        url: "#",
+      },
+    ],
+  }));
+};
+
+/** An idea opened up: its own title and a page to write the rest of it on,
+ *  both saved back to the same Notion row. */
+function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => void }) {
+  const [title, setTitle] = useState(idea.title);
+  const [notes, setNotes] = useState(idea.notes);
+
+  const save = (fields: { title?: string; notes?: string }) => {
+    if (fields.title !== undefined && fields.title.trim() === idea.title) return;
+    if (fields.notes !== undefined && fields.notes === idea.notes) return;
+    send({ action: "editIdea", id: idea.id, ...fields }, (b) => ({
+      ...b,
+      ideas: b.ideas.map((i) => (i.id === idea.id ? { ...i, ...fields } : i)),
+    }));
+  };
+
   return (
-    <div className="flex items-center gap-3 border-b border-line py-2.5 last:border-none">
-      <span className="min-w-0 flex-1 text-[14px]">
-        {idea.title}
-        {idea.link ? (
-          <a href={idea.link} target="_blank" rel="noreferrer" className="ml-2 text-[12px] text-accent-2 underline">
-            link
-          </a>
-        ) : null}
-      </span>
-      <span className="shrink-0 text-[11px] text-muted">{pretty(idea.captured)}</span>
-      <button
-        type="button"
-        onClick={() =>
-          send({ action: "ideaToTodo", id: idea.id, title: idea.title, link: idea.link }, (b) => ({
-            ...b,
-            ideas: b.ideas.map((i) => (i.id === idea.id ? { ...i, status: "Next Up" } : i)),
-            todos: [
-              ...b.todos,
-              {
-                id: `tmp-${Date.now()}`,
-                title: idea.title,
-                done: false,
-                goal: null,
-                due: null,
-                plan: null,
-                kind: null,
-                slot: null,
-                minutes: null,
-                category: null,
-                priority: null,
-                link: idea.link,
-                source: "Manual",
-                url: "#",
-              },
-            ],
-          }))
-        }
-        className="shrink-0 rounded-lg border border-line px-2 py-1 text-[12px] text-muted transition hover:border-ink/30 hover:text-ink"
-      >
-        → to-do
-      </button>
-      <button
-        type="button"
-        aria-label="Delete"
-        onClick={() =>
-          send({ action: "deleteIdea", id: idea.id }, (b) => ({ ...b, ideas: b.ideas.filter((i) => i.id !== idea.id) }))
-        }
-        className="shrink-0 text-[13px] text-muted/60 hover:text-bad"
-      >
-        ✕
-      </button>
+    <div className="rounded-2xl border border-line bg-panel p-5">
+      <div className="mb-3 flex items-center gap-3">
+        <button type="button" onClick={close} className="text-[12px] text-muted transition hover:text-ink">
+          ← all ideas
+        </button>
+        <span className="flex-1 text-right text-[11px] text-muted">{pretty(idea.captured)}</span>
+        <button
+          type="button"
+          onClick={() => ideaToTodo(idea, send)}
+          className="rounded-lg border border-line px-2 py-1 text-[12px] text-muted transition hover:border-ink/30 hover:text-ink"
+        >
+          → to-do
+        </button>
+        <button
+          type="button"
+          aria-label="Delete idea"
+          onClick={() => {
+            close();
+            send({ action: "deleteIdea", id: idea.id }, (b) => ({
+              ...b,
+              ideas: b.ideas.filter((i) => i.id !== idea.id),
+            }));
+          }}
+          className="text-[13px] text-muted/60 hover:text-bad"
+        >
+          ✕
+        </button>
+      </div>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onBlur={() => save({ title: title.trim() || idea.title })}
+        className="mb-2 w-full bg-transparent font-serif text-[22px] outline-none"
+      />
+      {idea.link ? (
+        <a href={idea.link} target="_blank" rel="noreferrer" className="mb-2 block text-[12px] text-accent-2 underline">
+          {idea.link}
+        </a>
+      ) : null}
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        onBlur={() => save({ notes })}
+        rows={12}
+        placeholder="Write it out…"
+        className="w-full resize-y bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-muted/70"
+      />
+      <p className="text-[11px] text-muted">Saves to this idea in Notion when you click away.</p>
     </div>
   );
 }
-
-const IDEA_STATUSES = ["Inbox", "Next Up", "Making It", "Posted"];
 
 /* ----------------------------------------------------------- idea trends */
 
@@ -1671,52 +1714,32 @@ function Trends({ board, send }: { board: Board; send: Send }) {
 }
 
 function IdeasPane({ board, send }: { board: Board; send: Send }) {
-  const [status, setStatus] = useState("Inbox");
-  const shown = board.ideas.filter((i) => (i.status ?? "Inbox") === status);
+  const [open, setOpen] = useState<string | null>(null);
+  const opened = board.ideas.find((i) => i.id === open) ?? null;
+
+  if (opened) return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
+
   return (
     <div className="space-y-5">
-    <Trends board={board} send={send} />
-    <Panel
-      title="Ideas"
-      right={
-        <Pills
-          items={IDEA_STATUSES.map((s) => ({ id: s, label: s }))}
-          value={status}
-          onChange={setStatus}
-        />
-      }
-    >
-      <div className="space-y-1">
-        {shown.length ? (
-          shown.map((i) => (
-            <div key={i.id} className="space-y-1">
-              <IdeaRow idea={i} send={send} />
-              <div className="flex gap-1 pb-2">
-                {IDEA_STATUSES.filter((s) => s !== status).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() =>
-                      send({ action: "ideaStatus", id: i.id, status: s }, (b) => ({
-                        ...b,
-                        ideas: b.ideas.map((x) => (x.id === i.id ? { ...x, status: s } : x)),
-                      }))
-                    }
-                    className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted transition hover:border-ink/30 hover:text-ink"
-                  >
-                    move to {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))
+      <Panel title="Ideas" right={<span className="text-[12px] text-muted">tap one to open it</span>}>
+        {board.ideas.length ? (
+          <div className="flex flex-wrap gap-2 py-1">
+            {board.ideas.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => setOpen(i.id)}
+                className="max-w-full rounded-full border border-line bg-panel-2 px-3.5 py-2 text-left text-[13px] transition hover:border-ink/30 hover:bg-panel"
+              >
+                <span className="block max-w-[22rem] truncate">{i.title}</span>
+              </button>
+            ))}
+          </div>
         ) : (
-          <p className="py-2 text-[14px] text-muted">
-            Nothing in {status}. Say “Hey Siri, capture idea” and it lands here.
-          </p>
+          <p className="py-2 text-[14px] text-muted">Nothing yet. Say “Hey Siri, capture idea” and it lands here.</p>
         )}
-      </div>
-    </Panel>
+      </Panel>
+      <Trends board={board} send={send} />
     </div>
   );
 }
