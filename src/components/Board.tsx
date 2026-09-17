@@ -4014,11 +4014,33 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
-/** A deal is done when the money arrives, not when the video goes up. */
+/** Only the making of the content: script, film, edit, delivered. Chasing and
+ *  closing the deal is her manager's job, so those rows never reach this tab. */
+const NOT_WORK = /passed|declined|inquiry|negotiat|prospect|contact|testing/i;
+
+/** Her tracker has eleven production stages; the wall has four columns, so
+ *  the in-between waits ("waiting on script approval") hang under the step
+ *  they belong to instead of becoming a column nobody drops into. */
+const LANES = [
+  { id: "script", label: "Script", match: /script|signed/i, verb: "Write the script for" },
+  { id: "film", label: "Film", match: /film|shoot/i, verb: "Film" },
+  { id: "edit", label: "Edit", match: /edit|feedback|approval to post|post/i, verb: "Edit" },
+  { id: "delivered", label: "Delivered", match: /deliver/i, verb: "Send over" },
+] as const;
+
+type Lane = (typeof LANES)[number];
+
+const laneOf = (stage: string | null): Lane | null =>
+  stage ? (LANES.find((l) => l.match.test(stage)) ?? null) : null;
+
+/** Dropping on a column has to choose one of her real stage names, and the
+ *  actionable one ("Need to film") beats the waiting one. */
+const stageFor = (lane: Lane, stages: string[]) =>
+  stages.find((s) => lane.match.test(s) && /need/i.test(s)) ??
+  stages.find((s) => lane.match.test(s)) ??
+  null;
+
 const isPaid = (d: Deal) => (d.paid === null ? d.stage === "Paid" : d.paid);
-const isOwed = (d: Deal) =>
-  !isPaid(d) &&
-  (d.invoiced || (d.stage ? /invoic|deliver/i.test(d.stage) : false));
 
 function MoneyFlag({
   label,
@@ -4032,8 +4054,8 @@ function MoneyFlag({
   return (
     <button
       type="button"
-      onClick={() => onChange(!on)}
-      className={`ml-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
+      onClick={onChange.bind(null, !on)}
+      className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
         on ? "border-ok bg-ok text-brand-cream" : "border-line text-muted hover:text-ink"
       }`}
     >
@@ -4042,26 +4064,33 @@ function MoneyFlag({
   );
 }
 
-/** A deal is only finished when the money lands, so everything short of Paid
- *  still counts as owed to you. */
+/** One deal, as a card on the wall. Everything you can do to it — move it a
+ *  step, give it a date, put the work in your week, write the script — is on
+ *  the card, because the tab is meant to answer "what am I making next". */
 function DealCard({
   deal,
+  lane,
   board,
   send,
+  open,
+  onOpen,
 }: {
   deal: Deal;
+  lane: Lane | null;
   board: Board;
   send: Send;
+  open: boolean;
+  onOpen: (id: string | null) => void;
 }) {
   const [adding, setAdding] = useState("");
-  const stages = productionStages(board.dealStages);
-  const at = deal.stage ? stages.indexOf(deal.stage) : -1;
-  const next = at >= 0 && at < stages.length - 1 ? stages[at + 1] : at < 0 ? stages[0] : null;
+  const [script, setScript] = useState(deal.notes);
+  const stages = board.dealStages.filter((s) => !NOT_WORK.test(s));
   const tasks = board.todos.filter((t) => t.deal === deal.id);
   const left = tasks.filter((t) => !t.done).length;
+  const at = lane ? LANES.indexOf(lane) : -1;
 
   const edit = (
-    field: "brand" | "stage" | "fee" | "due" | "contact" | "invoiced" | "paid",
+    field: "brand" | "stage" | "fee" | "due" | "notes" | "invoiced" | "paid",
     value: string | null,
   ) =>
     send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
@@ -4074,10 +4103,10 @@ function DealCard({
                 ? { fee: value === null ? null : Number(value) || 0 }
                 : field === "brand"
                   ? { brand: value ?? "" }
-                  : field === "contact"
-                    ? { contact: value ?? "" }
-                    : field === "due"
-                      ? { due: value }
+                  : field === "due"
+                    ? { due: value }
+                    : field === "notes"
+                      ? { notes: value ?? "" }
                       : field === "invoiced"
                         ? { invoiced: value === "on" }
                         : field === "paid"
@@ -4088,213 +4117,303 @@ function DealCard({
       ),
     }));
 
-  const addTask = () => {
-    const title = adding.trim();
-    if (!title) return;
-    setAdding("");
+  const move = (by: number) => {
+    const target = LANES[Math.min(LANES.length - 1, Math.max(0, at + by))];
+    const stage = stageFor(target, stages);
+    if (stage && stage !== deal.stage) edit("stage", stage);
+  };
+
+  /** The whole point of the tab: the step on the wall becomes a real task in
+   *  the week, linked back to the deal so the script travels with it. */
+  const planIt = (day: string) => {
+    const title = `${lane?.verb ?? "Work on"} ${deal.brand}`.slice(0, 120);
+    if (tasks.some((t) => !t.done && t.title === title)) return;
     send(
-      { action: "addTodo", title, deal: deal.id, kind: "deadline" },
+      { action: "addTodo", title, deal: deal.id, kind: "deadline", slot: "deep", plan: day, due: deal.due },
       (b) => ({
         ...b,
-        todos: [
-          ...b.todos,
-          {
-            ...newTodo(title, "deep", ""),
-            plan: null,
-            slot: null,
-            deal: deal.id,
-          },
-        ],
+        todos: [...b.todos, { ...newTodo(title, "deep", day), due: deal.due, deal: deal.id }],
       }),
     );
   };
 
+  const addTask = () => {
+    const title = adding.trim();
+    if (!title) return;
+    setAdding("");
+    send({ action: "addTodo", title, deal: deal.id, kind: "deadline" }, (b) => ({
+      ...b,
+      todos: [...b.todos, { ...newTodo(title, "deep", ""), plan: null, slot: null, deal: deal.id }],
+    }));
+  };
+
+  const late = deal.due && deal.due < TODAY && lane?.id !== "delivered";
+
   return (
-    <div className="rounded-xl border border-line p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          defaultValue={deal.brand}
-          onBlur={(e) => {
-            const v = e.target.value.trim();
-            if (v && v !== deal.brand) edit("brand", v);
-          }}
-          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[14px] font-medium outline-none transition hover:border-line focus:border-ink/30"
-        />
-        <input
-          type="number"
-          defaultValue={deal.fee ?? ""}
-          placeholder="fee"
-          onBlur={(e) => edit("fee", e.target.value || null)}
-          className="w-[86px] rounded border border-transparent bg-transparent px-1 py-0.5 text-right text-[13px] outline-none transition hover:border-line focus:border-ink/30"
-        />
+    <div
+      draggable
+      onDragStart={(e) => e.dataTransfer.setData("text/deal", deal.id)}
+      className="rounded-xl border border-line bg-brand-cream/40 p-3 transition hover:border-ink/25"
+    >
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={() => onOpen(open ? null : deal.id)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <span className="block truncate text-[14px] font-medium">{deal.brand}</span>
+          {deal.notes ? (
+            <span className="block truncate text-[11px] text-muted">
+              {deal.notes.split("\n")[0]}
+            </span>
+          ) : null}
+        </button>
+        <span className="shrink-0 text-[11px] text-muted">{deal.fee ? money(deal.fee) : ""}</span>
+      </div>
+
+      <div className="mt-2 flex items-center gap-1">
         <input
           type="date"
           value={deal.due ?? ""}
-          aria-label="Deliverable due"
+          aria-label="Post date"
           onChange={(e) => edit("due", e.target.value || null)}
-          className={`w-[126px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none transition hover:border-line ${
-            deal.due && deal.due < TODAY && !deal.paid ? "text-bad" : "text-muted"
+          className={`w-[112px] rounded-full border border-line bg-transparent px-2 py-0.5 text-[10px] outline-none ${
+            late ? "text-bad" : "text-muted"
           }`}
         />
+        <span className="flex-1 truncate text-[10px] text-muted">
+          {tasks.length ? `${left} to-do${left === 1 ? "" : "s"}` : ""}
+        </span>
         <button
           type="button"
-          onClick={() =>
-            send({ action: "deleteDeal", id: deal.id }, (b) => ({
-              ...b,
-              deals: b.deals.filter((d) => d.id !== deal.id),
-            }))
-          }
-          title="Remove this deal"
-          className="text-[12px] text-muted transition hover:text-bad"
+          onClick={() => move(-1)}
+          disabled={at <= 0}
+          aria-label="Move a step back"
+          className="rounded-full border border-line px-1.5 text-[11px] text-muted transition hover:text-ink disabled:opacity-30"
         >
-          ×
+          ‹
+        </button>
+        <button
+          type="button"
+          onClick={() => move(1)}
+          disabled={at >= LANES.length - 1}
+          aria-label="Move a step on"
+          className="rounded-full border border-line px-1.5 text-[11px] text-muted transition hover:text-ink disabled:opacity-30"
+        >
+          ›
         </button>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        <select
-          value={deal.stage ?? ""}
-          aria-label="What this deal needs next"
-          onChange={(e) => edit("stage", e.target.value || null)}
-          className="rounded-full border border-line bg-transparent px-2 py-0.5 text-[11px] outline-none"
-        >
-          <option value="">no step yet</option>
-          {stages.map((s) => (
-            <option key={s} value={s}>
-              {s.toLowerCase()}
-            </option>
-          ))}
-        </select>
-        {next ? (
-          <button
-            type="button"
-            onClick={() => edit("stage", next)}
-            className="rounded-full border border-ink bg-ink px-2 py-0.5 text-[11px] text-brand-cream transition hover:opacity-90"
-          >
-            done → {next.toLowerCase()}
-          </button>
-        ) : null}
-        {deal.invoiced !== null ? (
-          <MoneyFlag
-            label="invoiced"
-            on={deal.invoiced}
-            onChange={(on) => edit("invoiced", on ? "on" : "off")}
-          />
-        ) : null}
-        {deal.paid !== null ? (
-          <MoneyFlag
-            label="paid"
-            on={deal.paid}
-            onChange={(on) => edit("paid", on ? "on" : "off")}
-          />
-        ) : null}
-      </div>
+      {open ? (
+        <div className="mt-3 space-y-3 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-1">
+            <select
+              value={deal.stage ?? ""}
+              aria-label="Production stage"
+              onChange={(e) => edit("stage", e.target.value || null)}
+              className="rounded-full border border-line bg-transparent px-2 py-0.5 text-[10px] outline-none"
+            >
+              <option value="">no step yet</option>
+              {stages.map((s) => (
+                <option key={s} value={s}>
+                  {s.toLowerCase()}
+                </option>
+              ))}
+            </select>
+            {deal.invoiced !== null ? (
+              <MoneyFlag
+                label="invoiced"
+                on={deal.invoiced}
+                onChange={(on) => edit("invoiced", on ? "on" : "off")}
+              />
+            ) : null}
+            {deal.paid !== null ? (
+              <MoneyFlag
+                label="paid"
+                on={deal.paid}
+                onChange={(on) => edit("paid", on ? "on" : "off")}
+              />
+            ) : null}
+            <a
+              href={deal.url}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-[10px] text-muted hover:text-ink"
+            >
+              notion ↗
+            </a>
+          </div>
 
-      <div className="mt-2 space-y-0.5">
-        {tasks.map((t) => (
-          <div key={t.id} className="flex items-center gap-2">
+          <div>
+            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted">
+              Script / brief — stays with the deal through filming
+            </label>
+            <textarea
+              value={script}
+              onChange={(e) => setScript(e.target.value)}
+              onBlur={() => script !== deal.notes && edit("notes", script)}
+              rows={script ? 6 : 3}
+              placeholder="Hook, talking points, what the brand asked for…"
+              className="w-full rounded-lg border border-line bg-transparent p-2 text-[12px] leading-relaxed outline-none placeholder:text-muted/70"
+            />
+          </div>
+
+          <div className="space-y-0.5">
+            {tasks.map((t) => (
+              <div key={t.id} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label={t.done ? "Mark as not done" : "Mark done"}
+                  onClick={() =>
+                    send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+                      ...b,
+                      todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
+                    }))
+                  }
+                  className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
+                    t.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+                  }`}
+                >
+                  {t.done ? "✓" : ""}
+                </button>
+                <span className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}>
+                  {t.title}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted">
+                  {t.plan ? pretty(t.plan) : "no day"}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={adding}
+              onChange={(e) => setAdding(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addTask()}
+              placeholder="+ a to-do for this deal…"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2 py-1 text-[12px] outline-none placeholder:text-muted/70"
+            />
             <button
               type="button"
-              aria-label={t.done ? "Mark as not done" : "Mark done"}
+              onClick={() => planIt(TODAY)}
+              className="rounded-full border border-ink bg-ink px-2 py-1 text-[10px] text-brand-cream transition hover:opacity-90"
+            >
+              do it today
+            </button>
+            <button
+              type="button"
+              onClick={() => planIt(comingMonday())}
+              className="rounded-full border border-line px-2 py-1 text-[10px] text-muted transition hover:text-ink"
+            >
+              plan for Monday
+            </button>
+            <button
+              type="button"
               onClick={() =>
-                send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+                send({ action: "deleteDeal", id: deal.id }, (b) => ({
                   ...b,
-                  todos: b.todos.map((x) =>
-                    x.id === t.id ? { ...x, done: !t.done } : x,
-                  ),
+                  deals: b.deals.filter((d) => d.id !== deal.id),
                 }))
               }
-              className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
-                t.done
-                  ? "border-ink bg-ink text-brand-cream"
-                  : "border-line hover:border-ink/40"
-              }`}
+              className="text-[10px] text-muted transition hover:text-bad"
             >
-              {t.done ? "✓" : ""}
+              remove
             </button>
-            <span
-              className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? "text-muted line-through" : ""}`}
-            >
-              {t.title}
-            </span>
-            <span className="shrink-0 text-[10px] text-muted">
-              {t.plan ? pretty(t.plan) : "no day"}
-            </span>
           </div>
-        ))}
-      </div>
-
-      <div className="mt-2 flex items-baseline justify-between gap-2">
-        <input
-          value={adding}
-          onChange={(e) => setAdding(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addTask()}
-          placeholder="+ a to-do for this deal…"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2 py-1 text-[13px] outline-none placeholder:text-muted/70"
-        />
-        <span className="shrink-0 text-[11px] text-muted">
-          {tasks.length ? `${left} left` : "no to-dos yet"}
-        </span>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Only the making of the content: whether something needs a script, a shoot,
- *  an edit or a round of revisions. Chasing and closing the deal is her
- *  manager's job, so those rows never reach this tab. */
-const NOT_WORK = /passed|declined|inquiry|negotiat|prospect|contact|testing/i;
-
-const productionStages = (stages: string[]) => stages.filter((s) => !NOT_WORK.test(s));
-
+/** The wall: four columns of work, everything else about the deal left in
+ *  Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
-  const stages = productionStages(board.dealStages);
+  const [open, setOpen] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const stages = board.dealStages.filter((s) => !NOT_WORK.test(s));
   const working = board.deals.filter(
     (d) => !isPaid(d) && d.stage !== null && !NOT_WORK.test(d.stage),
   );
-  const owed = working.filter(isOwed).reduce((n, d) => n + (d.fee ?? 0), 0);
   const booked = working.reduce((n, d) => n + (d.fee ?? 0), 0);
-  const paid = board.deals.filter(isPaid);
   const loose = board.todos.filter(
-    (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc/i.test(t.title),
+    (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc|film|script/i.test(t.title),
   );
-  const buckets = stages
-    .map((stage) => ({ stage, deals: working.filter((d) => d.stage === stage) }))
-    .filter((b) => b.deals.length);
+
+  const drop = (lane: Lane, id: string) => {
+    setOver(null);
+    const stage = stageFor(lane, stages);
+    const deal = board.deals.find((d) => d.id === id);
+    if (!stage || !deal || deal.stage === stage) return;
+    send({ action: "editDeal", id, field: "stage", value: stage }, (b) => ({
+      ...b,
+      deals: b.deals.map((d) => (d.id === id ? { ...d, stage } : d)),
+    }));
+  };
 
   return (
     <div className="space-y-4">
-      {buckets.map(({ stage, deals }, i) => (
-        <Panel
-          key={stage}
-          title={stage}
-          right={
-            <span className="text-[12px] text-muted">
-              {i === 0
-                ? `${working.length} in progress · ${money(booked)}${owed ? ` · ${money(owed)} unpaid` : ""}`
-                : deals.length}
-            </span>
-          }
-        >
-          <div className="space-y-2">
-            {deals.map((d) => (
-              <DealCard key={d.id} deal={d} board={board} send={send} />
-            ))}
-          </div>
-        </Panel>
-      ))}
-
       <Panel
-        title={buckets.length ? "Add a signed deal" : "Brand deals"}
+        title="Production hub"
         right={
-          buckets.length ? null : (
-            <span className="text-[12px] text-muted">nothing in production</span>
-          )
+          <span className="text-[12px] text-muted">
+            {working.length} in production{booked ? ` · ${money(booked)}` : ""}
+          </span>
         }
       >
-        <div className="mt-1">
+        <p className="mb-3 text-[12px] text-muted">
+          Just the making-of — script, film, edit, delivered. Drag a card to move it a step, open
+          one to write the script or drop the work into your week.
+        </p>
+        <div className="grid gap-3 md:grid-cols-4">
+          {LANES.map((lane) => {
+            const cards = working.filter((d) => laneOf(d.stage)?.id === lane.id);
+            return (
+              <div
+                key={lane.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setOver(lane.id);
+                }}
+                onDragLeave={() => setOver((o) => (o === lane.id ? null : o))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData("text/deal");
+                  if (id) drop(lane, id);
+                }}
+                className={`rounded-2xl border p-2 transition ${
+                  over === lane.id ? "border-ink bg-ink/5" : "border-line"
+                }`}
+              >
+                <header className="flex items-baseline justify-between px-1 pb-2">
+                  <h3 className="text-[13px] font-medium">{lane.label}</h3>
+                  <span className="text-[11px] text-muted">{cards.length}</span>
+                </header>
+                <div className="space-y-2">
+                  {cards.length ? (
+                    cards.map((d) => (
+                      <DealCard
+                        key={d.id}
+                        deal={d}
+                        lane={lane}
+                        board={board}
+                        send={send}
+                        open={open === d.id}
+                        onOpen={setOpen}
+                      />
+                    ))
+                  ) : (
+                    <p className="px-1 py-2 text-[11px] italic text-muted">Nothing here yet.</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3">
           <AddRow
-            placeholder="New deal — the brand's name…"
+            placeholder="New signed deal — the brand's name…"
             onAdd={(brand) =>
               send({ action: "addDeal", brand, stage: stages[0] }, (b) => ({
                 ...b,
@@ -4321,32 +4440,9 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
         </div>
       </Panel>
 
-      {paid.length ? (
-        <Panel title="Paid" right={<span className="text-[12px] text-muted">{paid.length}</span>}>
-          <div className="space-y-1">
-            {paid.map((d) => (
-              <div key={d.id} className="flex items-center gap-2 text-[13px]">
-                <span className="min-w-0 flex-1 truncate">{d.brand}</span>
-                <span className="shrink-0 text-muted">
-                  {d.fee ? money(d.fee) : ""}
-                </span>
-                <a
-                  href={d.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="shrink-0 text-[11px] text-muted hover:text-ink"
-                >
-                  open
-                </a>
-              </div>
-            ))}
-          </div>
-        </Panel>
-      ) : null}
-
       {loose.length ? (
         <Panel
-          title="Brand to-dos with no deal"
+          title="Content to-dos with no deal"
           right={<span className="text-[12px] text-muted">{loose.length}</span>}
         >
           <div className="space-y-1">
@@ -4359,12 +4455,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                   onChange={(e) =>
                     e.target.value &&
                     send(
-                      {
-                        action: "editTodo",
-                        id: t.id,
-                        field: "deal",
-                        value: e.target.value,
-                      },
+                      { action: "editTodo", id: t.id, field: "deal", value: e.target.value },
                       (b) => ({
                         ...b,
                         todos: b.todos.map((x) =>
@@ -4376,7 +4467,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                   className="shrink-0 rounded-lg border border-line bg-transparent px-2 py-1 text-[11px] outline-none"
                 >
                   <option value="">attach to…</option>
-                  {board.deals.map((d) => (
+                  {working.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.brand}
                     </option>
