@@ -4011,18 +4011,36 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
 
 /* -------------------------------------------------------------- brand deals */
 
-const STAGES = [
-  "Pitched",
-  "Negotiating",
-  "Signed",
-  "Filming",
-  "Delivered",
-  "Invoiced",
-  "Paid",
-];
-
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+/** A deal is done when the money arrives, not when the video goes up. */
+const isPaid = (d: Deal) => (d.paid === null ? d.stage === "Paid" : d.paid);
+const isOwed = (d: Deal) =>
+  !isPaid(d) &&
+  (d.invoiced || (d.stage ? /invoic|deliver/i.test(d.stage) : false));
+
+function MoneyFlag({
+  label,
+  on,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className={`ml-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
+        on ? "border-ok bg-ok text-brand-cream" : "border-line text-muted hover:text-ink"
+      }`}
+    >
+      {on ? `✓ ${label}` : label}
+    </button>
+  );
+}
 
 /** A deal is only finished when the money lands, so everything short of Paid
  *  still counts as owed to you. */
@@ -4036,11 +4054,12 @@ function DealCard({
   send: Send;
 }) {
   const [adding, setAdding] = useState("");
+  const stages = board.dealStages;
   const tasks = board.todos.filter((t) => t.deal === deal.id);
   const left = tasks.filter((t) => !t.done).length;
 
   const edit = (
-    field: "brand" | "stage" | "fee" | "due" | "contact",
+    field: "brand" | "stage" | "fee" | "due" | "contact" | "invoiced" | "paid",
     value: string | null,
   ) =>
     send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
@@ -4057,7 +4076,11 @@ function DealCard({
                     ? { contact: value ?? "" }
                     : field === "due"
                       ? { due: value }
-                      : { stage: value ?? d.stage }),
+                      : field === "invoiced"
+                        ? { invoiced: value === "on" }
+                        : field === "paid"
+                          ? { paid: value === "on" }
+                          : { stage: value }),
             }
           : d,
       ),
@@ -4108,9 +4131,7 @@ function DealCard({
           aria-label="Deliverable due"
           onChange={(e) => edit("due", e.target.value || null)}
           className={`w-[126px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none transition hover:border-line ${
-            deal.due && deal.due < TODAY && deal.stage !== "Paid"
-              ? "text-bad"
-              : "text-muted"
+            deal.due && deal.due < TODAY && !deal.paid ? "text-bad" : "text-muted"
           }`}
         />
         <button
@@ -4128,8 +4149,8 @@ function DealCard({
         </button>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-1">
-        {STAGES.map((s) => (
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {stages.map((s) => (
           <button
             key={s}
             type="button"
@@ -4143,6 +4164,20 @@ function DealCard({
             {s.toLowerCase()}
           </button>
         ))}
+        {deal.invoiced !== null ? (
+          <MoneyFlag
+            label="invoiced"
+            on={deal.invoiced}
+            onChange={(on) => edit("invoiced", on ? "on" : "off")}
+          />
+        ) : null}
+        {deal.paid !== null ? (
+          <MoneyFlag
+            label="paid"
+            on={deal.paid}
+            onChange={(on) => edit("paid", on ? "on" : "off")}
+          />
+        ) : null}
       </div>
 
       <div className="mt-2 space-y-0.5">
@@ -4197,12 +4232,13 @@ function DealCard({
 
 /** Deals, and the work each one is actually waiting on. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
-  const paid = board.deals.filter((d) => d.stage === "Paid");
-  const live = board.deals.filter((d) => d.stage !== "Paid");
-  const owed = live
-    .filter((d) => d.stage === "Delivered" || d.stage === "Invoiced")
-    .reduce((n, d) => n + (d.fee ?? 0), 0);
+  const paid = board.deals.filter(isPaid);
+  const live = board.deals.filter((d) => !isPaid(d));
+  const owed = live.filter(isOwed).reduce((n, d) => n + (d.fee ?? 0), 0);
   const booked = board.deals.reduce((n, d) => n + (d.fee ?? 0), 0);
+  const loose = board.todos.filter(
+    (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc/i.test(t.title),
+  );
 
   return (
     <div className="space-y-4">
@@ -4237,12 +4273,14 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                   {
                     id: `tmp-${Date.now()}`,
                     brand,
-                    stage: STAGES[0],
+                    stage: board.dealStages[0] ?? null,
                     fee: null,
                     due: null,
                     contact: "",
                     link: null,
                     notes: "",
+                    invoiced: false,
+                    paid: false,
                     url: "#",
                   },
                 ],
@@ -4261,28 +4299,58 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                 <span className="shrink-0 text-muted">
                   {d.fee ? money(d.fee) : ""}
                 </span>
-                <button
-                  type="button"
-                  onClick={() =>
+                <a
+                  href={d.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 text-[11px] text-muted hover:text-ink"
+                >
+                  open
+                </a>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      {loose.length ? (
+        <Panel
+          title="Brand to-dos with no deal"
+          right={<span className="text-[12px] text-muted">{loose.length}</span>}
+        >
+          <div className="space-y-1">
+            {loose.map((t) => (
+              <div key={t.id} className="flex items-center gap-2 text-[13px]">
+                <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                <select
+                  value=""
+                  aria-label="Attach to a deal"
+                  onChange={(e) =>
+                    e.target.value &&
                     send(
                       {
-                        action: "editDeal",
-                        id: d.id,
-                        field: "stage",
-                        value: "Invoiced",
+                        action: "editTodo",
+                        id: t.id,
+                        field: "deal",
+                        value: e.target.value,
                       },
                       (b) => ({
                         ...b,
-                        deals: b.deals.map((x) =>
-                          x.id === d.id ? { ...x, stage: "Invoiced" } : x,
+                        todos: b.todos.map((x) =>
+                          x.id === t.id ? { ...x, deal: e.target.value } : x,
                         ),
                       }),
                     )
                   }
-                  className="shrink-0 text-[11px] text-muted hover:text-ink"
+                  className="shrink-0 rounded-lg border border-line bg-transparent px-2 py-1 text-[11px] outline-none"
                 >
-                  not paid after all
-                </button>
+                  <option value="">attach to…</option>
+                  {board.deals.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.brand}
+                    </option>
+                  ))}
+                </select>
               </div>
             ))}
           </div>

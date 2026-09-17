@@ -76,9 +76,10 @@ export function demoBoard() {
       { id: "g5", name: "Gym 4× a week", area: "Health", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
       { id: "g6", name: "Weekend off the laptop", area: "Life", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
     ],
+    dealStages: ["Prospecting", "Contacted", "Negotiating", "Signed", "Delivered", "Paid"],
     deals: [
-      { id: "b1", brand: "Vercel", stage: "Filming", fee: 4500, due: iso(4), contact: "maya@", link: null, notes: "", url: "#" },
-      { id: "b2", brand: "Notion", stage: "Invoiced", fee: 3000, due: iso(-8), contact: "", link: null, notes: "", url: "#" },
+      { id: "b1", brand: "Vercel", stage: "Signed", fee: 4500, due: iso(4), contact: "maya@", link: null, notes: "", invoiced: false, paid: false, url: "#" },
+      { id: "b2", brand: "Notion", stage: "Delivered", fee: 3000, due: iso(-8), contact: "", link: null, notes: "", invoiced: true, paid: false, url: "#" },
     ],
   };
   return NextResponse.json({ ok: true, ...board });

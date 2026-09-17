@@ -99,13 +99,30 @@ export type Goal = {
 export type Deal = {
   id: string;
   brand: string;
-  stage: string;
+  stage: string | null;
   fee: number | null;
   due: string | null;
   contact: string;
   link: string | null;
   notes: string;
+  invoiced: boolean | null;
+  paid: boolean | null;
   url: string;
+};
+
+/** A brand-deal tracker somebody keeps by hand has its own column names and
+ *  its own list of stages, so every role is matched against the real schema
+ *  rather than assumed. */
+export type DealMap = {
+  title: string;
+  stage: { prop: string; kind: "select" | "status"; options: string[] } | null;
+  fee: string | null;
+  due: string | null;
+  contact: string | null;
+  link: string | null;
+  notes: string | null;
+  invoiced: string | null;
+  paid: string | null;
 };
 
 export type Board = {
@@ -116,6 +133,7 @@ export type Board = {
   ticks: HabitTick[];
   goals: Goal[];
   deals: Deal[];
+  dealStages: string[];
   timings: Timing[];
   categories: string[];
   dbs: BoardDbs;
@@ -253,6 +271,37 @@ function statusDone(prop: SchemaProp): { doneName: string; openName: string } | 
   return { doneName, openName };
 }
 
+/** Her tracker's stage list is the source of truth; DEAL_STAGES is only the
+ *  fallback for a deals table this app had to create itself. */
+export async function readDealMap(token: string, dealsDbId: string): Promise<DealMap> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${dealsDbId}`);
+  const props = Object.entries(db.properties).map(([name, p]) => ({ ...p, name }));
+  const stageProp =
+    pick(props, "status", /status|stage/i) ??
+    pick(props, "select", /stage|status/i) ??
+    pick(props, "select");
+  const checkbox = (match: RegExp) => pick(props, "checkbox", match)?.name ?? null;
+  return {
+    title: pick(props, "title")?.name ?? "Name",
+    stage: stageProp
+      ? {
+          prop: stageProp.name,
+          kind: stageProp.type === "status" ? "status" : "select",
+          options: (stageProp.type === "status" ? stageProp.status?.options : stageProp.select?.options)?.map(
+            (o) => o.name,
+          ) ?? [],
+        }
+      : null,
+    fee: pick(props, "number", /amount|fee|rate|price|value|\$/i)?.name ?? pick(props, "number")?.name ?? null,
+    due: pick(props, "date", /post|deliver|due|deadline|film/i)?.name ?? pick(props, "date")?.name ?? null,
+    contact: pick(props, "rich_text", /contact|person|manager/i)?.name ?? null,
+    link: pick(props, "url")?.name ?? null,
+    notes: pick(props, "rich_text", /note|detail|deliverable/i)?.name ?? null,
+    invoiced: checkbox(/invoice/i),
+    paid: checkbox(/paid|payment received|received/i),
+  };
+}
+
 export async function readTaskMap(token: string, taskDbId: string): Promise<TaskMap> {
   const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${taskDbId}`);
   const props = Object.entries(db.properties).map(([name, p]) => ({ ...p, name }));
@@ -368,7 +417,17 @@ export async function ensureDealLink(
   dealsDbId: string,
   map: TaskMap,
 ): Promise<TaskMap> {
-  if (map.deal) return map;
+  if (map.deal) {
+    const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${taskDbId}`);
+    const target = db.properties[map.deal]?.relation?.database_id ?? "";
+    // A relation left pointing at an older deals table would quietly hide the
+    // deal's to-dos, so it's rebuilt against the table actually in use.
+    if (target.replace(/-/g, "") === dealsDbId.replace(/-/g, "")) return map;
+    await notion(token, `/databases/${taskDbId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties: { [map.deal]: null } }),
+    });
+  }
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
     body: JSON.stringify({
@@ -412,6 +471,17 @@ const DEAL_DB = "Brand Deals";
 const AGENT_DB_LEGACY = "Agent Tasks";
 
 export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
+
+/** A tracker somebody named "\u{1F4B0} Brand Deals \u2014 Tracker" is still the brand deals
+ *  table, so the deals side matches on the words rather than the exact name. */
+async function findDatabaseLike(token: string, query: string, match: RegExp): Promise<string | null> {
+  const res = await notion<{ results: { id: string; title?: { plain_text?: string }[] }[] }>(token, "/search", {
+    method: "POST",
+    body: JSON.stringify({ query, filter: { value: "database", property: "object" }, page_size: 20 }),
+  });
+  const found = res.results.find((d) => match.test((d.title ?? []).map((t) => t.plain_text ?? "").join("")));
+  return found?.id ?? null;
+}
 
 async function findDatabase(token: string, name: string): Promise<string | null> {
   const res = await notion<{ results: { id: string; title?: { plain_text?: string }[] }[] }>(token, "/search", {
@@ -493,7 +563,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     findDatabase(token, TICK_DB),
     findDatabase(token, GOAL_DB),
     findDatabase(token, AGENT_DB).then((id) => id ?? findDatabase(token, AGENT_DB_LEGACY)),
-    findDatabase(token, DEAL_DB),
+    findDatabaseLike(token, "brand deals", /brand\s*deals?/i),
   ]);
   if (foundHabits && foundTicks && foundGoals && foundAgent && foundDeals)
     return {
@@ -601,6 +671,7 @@ export async function readBoard(
   token: string,
   dbs: BoardDbs,
   map: TaskMap,
+  deals: DealMap,
   since: string,
 ): Promise<Omit<Board, "dbs">> {
   const doneOf = (r: Row) => {
@@ -709,15 +780,18 @@ export async function readBoard(
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
     })),
+    dealStages: deals.stage?.options.length ? deals.stage.options : DEAL_STAGES,
     deals: dealRows.map((r) => ({
       id: r.id,
       brand: titleOf(r),
-      stage: tagOf(r.properties.Stage) ?? DEAL_STAGES[0],
-      fee: r.properties.Fee?.number ?? null,
-      due: dateOf(r.properties.Due),
-      contact: textOf(r.properties.Contact),
-      link: r.properties.Link?.url ?? null,
-      notes: textOf(r.properties.Notes),
+      stage: deals.stage ? tagOf(r.properties[deals.stage.prop]) : null,
+      fee: deals.fee ? (r.properties[deals.fee]?.number ?? null) : null,
+      due: deals.due ? dateOf(r.properties[deals.due]) : null,
+      contact: deals.contact ? textOf(r.properties[deals.contact]) : "",
+      link: deals.link ? (r.properties[deals.link]?.url ?? null) : null,
+      notes: deals.notes ? textOf(r.properties[deals.notes]) : "",
+      invoiced: deals.invoiced ? (r.properties[deals.invoiced]?.checkbox ?? false) : null,
+      paid: deals.paid ? (r.properties[deals.paid]?.checkbox ?? false) : null,
       url: r.url,
     })),
   };
@@ -793,7 +867,7 @@ export type Action =
   | {
       action: "editDeal";
       id: string;
-      field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes";
+      field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid";
       value: string | null;
     }
   | { action: "deleteDeal"; id: string };
@@ -849,7 +923,39 @@ function taskProps(
   return out;
 }
 
-export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, body: Action): Promise<void> {
+/** Writes only the columns her deals table actually has, under its own names. */
+function dealProps(
+  deals: DealMap,
+  field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid",
+  value: string | null,
+): Record<string, unknown> {
+  switch (field) {
+    case "brand":
+      return { [deals.title]: title(value ?? "") };
+    case "stage":
+      if (!deals.stage) return {};
+      return {
+        [deals.stage.prop]:
+          deals.stage.kind === "status" ? { status: value ? { name: value } : null } : selectProp(value),
+      };
+    case "fee":
+      return deals.fee ? { [deals.fee]: { number: value === null ? null : Number(value) || 0 } } : {};
+    case "due":
+      return deals.due ? { [deals.due]: dateProp(value) } : {};
+    case "contact":
+      return deals.contact ? { [deals.contact]: richText(value ?? "") } : {};
+    case "link":
+      return deals.link ? { [deals.link]: { url: value || null } } : {};
+    case "notes":
+      return deals.notes ? { [deals.notes]: richText(value ?? "") } : {};
+    case "invoiced":
+      return deals.invoiced ? { [deals.invoiced]: { checkbox: value === "on" } } : {};
+    case "paid":
+      return deals.paid ? { [deals.paid]: { checkbox: value === "on" } } : {};
+  }
+}
+
+export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, deals: DealMap, body: Action): Promise<void> {
   switch (body.action) {
     case "addTodo":
       await createPage(
@@ -972,27 +1078,17 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
       return;
     case "addDeal":
       await createPage(token, dbs.deals, {
-        Brand: title(body.brand),
-        Stage: selectProp(body.stage ?? DEAL_STAGES[0]),
-        Fee: { number: body.fee ?? null },
-        Due: dateProp(body.due ?? null),
-        Contact: richText(body.contact ?? ""),
-        Link: { url: body.link || null },
-        Notes: richText(""),
+        ...dealProps(deals, "brand", body.brand),
+        ...dealProps(deals, "stage", body.stage ?? deals.stage?.options[0] ?? DEAL_STAGES[0]),
+        ...(body.fee === undefined || body.fee === null ? {} : dealProps(deals, "fee", String(body.fee))),
+        ...(body.due ? dealProps(deals, "due", body.due) : {}),
+        ...(body.contact ? dealProps(deals, "contact", body.contact) : {}),
+        ...(body.link ? dealProps(deals, "link", body.link) : {}),
       });
       return;
     case "editDeal": {
-      const value = body.value || null;
-      const props: Record<string, unknown> = {
-        brand: { Brand: title(value ?? "") },
-        stage: { Stage: selectProp(value) },
-        fee: { Fee: { number: value === null ? null : Number(value) || 0 } },
-        due: { Due: dateProp(value) },
-        contact: { Contact: richText(value ?? "") },
-        link: { Link: { url: value } },
-        notes: { Notes: richText(value ?? "") },
-      }[body.field];
-      await updatePage(token, body.id, props);
+      const props = dealProps(deals, body.field, body.value);
+      if (Object.keys(props).length) await updatePage(token, body.id, props);
       return;
     }
   }
