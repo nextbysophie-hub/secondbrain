@@ -1,14 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Timing, Todo } from "@/lib/board";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type {
+  Action,
+  AgentTask,
+  Board,
+  Goal,
+  Habit,
+  HabitTick,
+  Idea,
+  Timing,
+  Todo,
+} from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
 const CADENCES = ["Daily", "Weekly", "Monthly"];
 
 const NONE = "Uncategorised";
-const PALETTE = ["#3b6cf6", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899", "#0ea5e9", "#84cc16", "#f43f5e"];
+const PALETTE = [
+  "#3b6cf6",
+  "#8b5cf6",
+  "#10b981",
+  "#f59e0b",
+  "#ec4899",
+  "#0ea5e9",
+  "#84cc16",
+  "#f43f5e",
+];
 
 /** Categories come from whichever Notion column the to-dos use, so the colours
  *  are derived from the name rather than a fixed list. */
@@ -19,14 +44,17 @@ function catColour(name: string | null): string {
   return PALETTE[hash % PALETTE.length];
 }
 
-const categoriesOf = (board: Board) => (board.categories?.length ? board.categories : CATEGORIES);
+const categoriesOf = (board: Board) =>
+  board.categories?.length ? board.categories : CATEGORIES;
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const TODAY = iso(new Date());
 
 function monthDays(): string[] {
   const now = new Date();
-  const days = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).getUTCDate();
+  const days = new Date(
+    Date.UTC(now.getFullYear(), now.getMonth() + 1, 0),
+  ).getUTCDate();
   return Array.from({ length: days }, (_, i) =>
     iso(new Date(Date.UTC(now.getFullYear(), now.getMonth(), i + 1))),
   );
@@ -35,29 +63,60 @@ function monthDays(): string[] {
 /** A month as Monday-first cells, with blanks where the month hasn't started. */
 function monthGrid(offset = 0): { label: string; cells: (string | null)[] } {
   const now = new Date();
-  const first = new Date(Date.UTC(now.getFullYear(), now.getMonth() + offset, 1));
-  const days = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const first = new Date(
+    Date.UTC(now.getFullYear(), now.getMonth() + offset, 1),
+  );
+  const days = new Date(
+    Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0),
+  ).getUTCDate();
   const lead = (first.getUTCDay() + 6) % 7;
   return {
-    label: first.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" }),
+    label: first.toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }),
     cells: [
       ...Array.from({ length: lead }, () => null),
       ...Array.from({ length: days }, (_, i) =>
-        iso(new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), i + 1))),
+        iso(
+          new Date(
+            Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), i + 1),
+          ),
+        ),
       ),
     ],
   };
 }
 
 const weekday = (d: string) =>
-  new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+  new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
 
 const pretty = (d: string | null) =>
-  d ? new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+  d
+    ? new Date(`${d}T12:00:00Z`).toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+      })
+    : "";
 
 /* ------------------------------------------------------------ small pieces */
 
-function Tick({ on, onChange, dim, ring }: { on: boolean; onChange: (v: boolean) => void; dim?: boolean; ring?: boolean }) {
+function Tick({
+  on,
+  onChange,
+  dim,
+  ring,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  dim?: boolean;
+  ring?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -74,7 +133,15 @@ function Tick({ on, onChange, dim, ring }: { on: boolean; onChange: (v: boolean)
   );
 }
 
-function Box({ on, onChange, tone = "ok" }: { on: boolean; onChange: (v: boolean) => void; tone?: "ok" | "bad" }) {
+function Box({
+  on,
+  onChange,
+  tone = "ok",
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  tone?: "ok" | "bad";
+}) {
   return (
     <button
       type="button"
@@ -151,7 +218,9 @@ function Panel({
       } ${dropping ? "panel-dropping" : ""}`}
     >
       <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-        <h2 className="text-[13px] font-medium tracking-tight text-ink">{title}</h2>
+        <h2 className="text-[13px] font-medium tracking-tight text-ink">
+          {title}
+        </h2>
         {right}
       </header>
       <div className="p-5">{children}</div>
@@ -192,7 +261,9 @@ function AddRow({
           onClick={() => setBot(!bot)}
           title="Hand this one to the assistant as well"
           className={`shrink-0 rounded-xl border px-3 text-[13px] transition ${
-            bot ? "border-accent-2 bg-accent-2/10 text-accent-2" : "border-line text-muted hover:text-ink"
+            bot
+              ? "border-accent-2 bg-accent-2/10 text-accent-2"
+              : "border-line text-muted hover:text-ink"
           }`}
         >
           🤖 for the assistant
@@ -247,7 +318,15 @@ function TodoRow({
   const toAssistant = () => {
     setMenu(false);
     setSent(true);
-    send({ action: "sendToAgent", title: todo.title, due: todo.due, from: todo.url }, queueAgent(todo.title, todo.due));
+    send(
+      {
+        action: "sendToAgent",
+        title: todo.title,
+        due: todo.due,
+        from: todo.url,
+      },
+      queueAgent(todo.title, todo.due),
+    );
   };
 
   const rename = () => {
@@ -256,16 +335,23 @@ function TodoRow({
     if (!value || value === todo.title) return setDraft(todo.title);
     send({ action: "editTodo", id: todo.id, field: "title", value }, (b) => ({
       ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, title: value } : t)),
+      todos: b.todos.map((t) =>
+        t.id === todo.id ? { ...t, title: value } : t,
+      ),
     }));
   };
 
   const recategorise = (value: string | null) => {
     setPicking(false);
-    send({ action: "editTodo", id: todo.id, field: "category", value }, (b) => ({
-      ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, category: value } : t)),
-    }));
+    send(
+      { action: "editTodo", id: todo.id, field: "category", value },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) =>
+          t.id === todo.id ? { ...t, category: value } : t,
+        ),
+      }),
+    );
   };
 
   return (
@@ -286,7 +372,10 @@ function TodoRow({
     >
       <div className="flex items-center gap-3">
         {draggable ? (
-          <span className="shrink-0 select-none text-[12px] leading-none text-muted/50" title="Drag me to the other list">
+          <span
+            className="shrink-0 select-none text-[12px] leading-none text-muted/50"
+            title="Drag me to the other list"
+          >
             ⠿
           </span>
         ) : null}
@@ -295,7 +384,9 @@ function TodoRow({
           onChange={(done) =>
             send({ action: "toggleTodo", id: todo.id, done }, (b) => ({
               ...b,
-              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done } : t)),
+              todos: b.todos.map((t) =>
+                t.id === todo.id ? { ...t, done } : t,
+              ),
             }))
           }
         />
@@ -335,10 +426,15 @@ function TodoRow({
             {todo.title}
           </button>
         )}
-        {todo.source === "Siri" ? <span className="shrink-0 text-[11px] text-muted">🎙</span> : null}
+        {todo.source === "Siri" ? (
+          <span className="shrink-0 text-[11px] text-muted">🎙</span>
+        ) : null}
         <KindChip todo={todo} send={send} />
         {sent ? (
-          <span className="shrink-0 text-[11px] text-ok" title="With the assistant">
+          <span
+            className="shrink-0 text-[11px] text-ok"
+            title="With the assistant"
+          >
             🤖
           </span>
         ) : null}
@@ -347,10 +443,22 @@ function TodoRow({
           title={dateField === "due" ? "Due" : "Day you want to do it"}
           value={todo[dateField] ?? ""}
           onChange={(e) =>
-            send({ action: "editTodo", id: todo.id, field: dateField, value: e.target.value || null }, (b) => ({
-              ...b,
-              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, [dateField]: e.target.value || null } : t)),
-            }))
+            send(
+              {
+                action: "editTodo",
+                id: todo.id,
+                field: dateField,
+                value: e.target.value || null,
+              },
+              (b) => ({
+                ...b,
+                todos: b.todos.map((t) =>
+                  t.id === todo.id
+                    ? { ...t, [dateField]: e.target.value || null }
+                    : t,
+                ),
+              }),
+            )
           }
           className={`w-[108px] shrink-0 rounded-lg border border-transparent bg-transparent px-1 py-1 text-right text-[12px] ${
             overdue ? "text-bad" : "text-muted"
@@ -396,7 +504,9 @@ function TodoRow({
               type="button"
               onClick={() => recategorise(c)}
               className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
-                todo.category === c ? "border-ink text-ink" : "border-line text-muted hover:text-ink"
+                todo.category === c
+                  ? "border-ink text-ink"
+                  : "border-line text-muted hover:text-ink"
               }`}
             >
               <span
@@ -422,11 +532,18 @@ function TodoRow({
 const queueAgent = (title: string, due: string | null) => (b: Board) => ({
   ...b,
   agent: [
-    { id: `tmp-${Date.now()}`, title, details: "", due, status: "Queued", result: "", url: "#" },
+    {
+      id: `tmp-${Date.now()}`,
+      title,
+      details: "",
+      due,
+      status: "Queued",
+      result: "",
+      url: "#",
+    },
     ...b.agent,
   ],
 });
-
 
 /* ------------------------------------------------------------- the day */
 
@@ -436,16 +553,26 @@ const DEEP_CAP = 3;
 const QUICK_CAP = 3;
 const EMAIL_RE = /e-?mails?|inbox/i;
 
-const DEEP_PLACEHOLDERS = ["The one thing", "Also matters today", "Also matters today"];
+const DEEP_PLACEHOLDERS = [
+  "The one thing",
+  "Also matters today",
+  "Also matters today",
+];
 
 const greeting = () => {
   const h = new Date().getHours();
-  return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening.";
+  return h < 12
+    ? "Good morning."
+    : h < 17
+      ? "Good afternoon."
+      : "Good evening.";
 };
 
-const pickedOn = (t: Todo, day: string) => (t.plan ? t.plan === day : t.due === day);
+const pickedOn = (t: Todo, day: string) =>
+  t.plan ? t.plan === day : t.due === day;
 
-const shiftDay = (day: string, by: number) => iso(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
+const shiftDay = (day: string, by: number) =>
+  iso(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
 
 /** The page is normally about today, so days either side get named rather
  *  than dated. */
@@ -457,7 +584,9 @@ const dayStamp = (day: string) => {
         ? "Tomorrow"
         : day === shiftDay(TODAY, -1)
           ? "Yesterday"
-          : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: "long" });
+          : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
+              weekday: "long",
+            });
   return `${name} · ${pretty(day)}`;
 };
 
@@ -470,8 +599,14 @@ const dayQuestion = (day: string) =>
 
 /** Days in a row up to (and including) `upTo`. Today not being ticked yet
  *  doesn't break a streak — the day isn't over. */
-function streakOf(ticks: HabitTick[], habitId: string, upTo: string = TODAY): number {
-  const dates = new Set(ticks.filter((t) => t.habitId === habitId).map((t) => t.date));
+function streakOf(
+  ticks: HabitTick[],
+  habitId: string,
+  upTo: string = TODAY,
+): number {
+  const dates = new Set(
+    ticks.filter((t) => t.habitId === habitId).map((t) => t.date),
+  );
   let n = 0;
   for (let i = 0; i < 400; i++) {
     const d = shiftDay(upTo, -i);
@@ -486,7 +621,9 @@ function streakOf(ticks: HabitTick[], habitId: string, upTo: string = TODAY): nu
 
 /** The longest run it's ever had, so a streak that breaks still has a target. */
 function bestStreak(ticks: HabitTick[], habitId: string): number {
-  const dates = [...new Set(ticks.filter((t) => t.habitId === habitId).map((t) => t.date))].sort();
+  const dates = [
+    ...new Set(ticks.filter((t) => t.habitId === habitId).map((t) => t.date)),
+  ].sort();
   let best = 0;
   let run = 0;
   let prev: string | null = null;
@@ -524,12 +661,15 @@ function clearedStreak(todos: Todo[], upTo: string = TODAY): number {
 
 /** The lines Sophie writes out by hand each day. They live as habits with
  *  Kind = Affirmation in Notion, so the daily log and streak already work. */
-const affirmationsOf = (board: Board) => board.habits.filter((h) => h.affirmation);
+const affirmationsOf = (board: Board) =>
+  board.habits.filter((h) => h.affirmation);
 
 const saidAll = (board: Board, day: string) => {
   const lines = affirmationsOf(board);
   if (!lines.length) return false;
-  const said = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
+  const said = new Set(
+    board.ticks.filter((t) => t.date === day).map((t) => t.habitId),
+  );
   return lines.every((h) => said.has(h.id));
 };
 
@@ -549,7 +689,11 @@ function affirmationStreak(board: Board, upTo: string = TODAY): number {
 /** Writing it out is the exercise, punctuation and case aren't. */
 const sameWords = (a: string, b: string) => {
   const norm = (s: string) =>
-    s.toLowerCase().replace(/[^a-z0-9$ ]/g, " ").replace(/\s+/g, " ").trim();
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9$ ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   return norm(a) === norm(b);
 };
 
@@ -558,9 +702,19 @@ const sameWords = (a: string, b: string) => {
  * you type lands directly on top of it, character for character, so the ghost
  * ahead of the caret shrinks as you go. The input itself is invisible.
  */
-function TraceLine({ board, send, habit }: { board: Board; send: Send; habit: Habit }) {
+function TraceLine({
+  board,
+  send,
+  habit,
+}: {
+  board: Board;
+  send: Send;
+  habit: Habit;
+}) {
   const [text, setText] = useState("");
-  const said = board.ticks.some((t) => t.habitId === habit.id && t.date === TODAY);
+  const said = board.ticks.some(
+    (t) => t.habitId === habit.id && t.date === TODAY,
+  );
   const line = habit.name;
   // Typing over the ghost only lines up while you're still on the line.
   const onTrack = line.toLowerCase().startsWith(text.toLowerCase());
@@ -569,7 +723,9 @@ function TraceLine({ board, send, habit }: { board: Board; send: Send; habit: Ha
 
   return (
     <div className="flex items-baseline gap-3 border-b border-line/60 py-3 last:border-none">
-      <span className={`shrink-0 text-[13px] ${said ? "text-accent-2" : "text-muted/40"}`}>
+      <span
+        className={`shrink-0 text-[13px] ${said ? "text-accent-2" : "text-muted/40"}`}
+      >
         {said ? "✓" : "›"}
       </span>
       <div className="relative min-w-0 flex-1">
@@ -583,7 +739,8 @@ function TraceLine({ board, send, habit }: { board: Board; send: Send; habit: Ha
             onChange={(e) => {
               const v = e.target.value;
               setText(v);
-              if (sameWords(v, line)) tickHabit(board, send, habit, TODAY, true);
+              if (sameWords(v, line))
+                tickHabit(board, send, habit, TODAY, true);
             }}
             spellCheck={false}
             autoComplete="off"
@@ -605,21 +762,38 @@ function Affirmations({ board, send }: { board: Board; send: Send }) {
   const streak = affirmationStreak(board);
 
   const keep = (name: string) =>
-    send({ action: "addHabit", name, cadence: "Daily", bad: false, affirmation: true }, (b) => ({
-      ...b,
-      habits: [
-        ...b.habits,
-        { id: `tmp-${name}`, name, cadence: "Daily", bad: false, affirmation: true },
-      ],
-    }));
+    send(
+      {
+        action: "addHabit",
+        name,
+        cadence: "Daily",
+        bad: false,
+        affirmation: true,
+      },
+      (b) => ({
+        ...b,
+        habits: [
+          ...b.habits,
+          {
+            id: `tmp-${name}`,
+            name,
+            cadence: "Daily",
+            bad: false,
+            affirmation: true,
+          },
+        ],
+      }),
+    );
 
   if (!lines.length)
     return (
       <div className="day-card mb-5 p-6 sm:p-7">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Daily lines</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+          Daily lines
+        </p>
         <p className="mt-2 text-[14px] text-muted">
-          Two sentences to write out every morning — one you&rsquo;re working towards, one
-          you&rsquo;re grateful for.
+          Two sentences to write out every morning — one you&rsquo;re working
+          towards, one you&rsquo;re grateful for.
         </p>
         <input
           value={goal}
@@ -655,7 +829,9 @@ function Affirmations({ board, send }: { board: Board; send: Send }) {
           {saidAll(board, TODAY) ? "Written today" : "Write them out"}
         </p>
         <span className="shrink-0 text-[12px] text-muted">
-          {streak ? `${streak} day${streak === 1 ? "" : "s"} running` : "start it today"}
+          {streak
+            ? `${streak} day${streak === 1 ? "" : "s"} running`
+            : "start it today"}
         </span>
       </div>
       <div className="mt-1">
@@ -670,8 +846,12 @@ function Affirmations({ board, send }: { board: Board; send: Send }) {
 /** Every daily habit as one dot — filled once it's ticked today, with the
  *  running streak beside it. Quiet enough to live in the header. */
 function StreakDots({ board }: { board: Board }) {
-  const habits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad && !h.affirmation);
-  const done = new Set(board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId));
+  const habits = board.habits.filter(
+    (h) => h.cadence === "Daily" && !h.bad && !h.affirmation,
+  );
+  const done = new Set(
+    board.ticks.filter((t) => t.date === TODAY).map((t) => t.habitId),
+  );
   const cleared = clearedStreak(board.todos);
   const clearedToday = dayCleared(board.todos, TODAY);
   if (!habits.length && !cleared) return null;
@@ -681,8 +861,14 @@ function StreakDots({ board }: { board: Board }) {
         title={`Days in a row you cleared everything you picked — ${cleared} running`}
         className="flex items-center gap-1.5"
       >
-        <span className={`h-2 w-2 rounded-full ${clearedToday ? "bg-ink" : "border border-line"}`} />
-        <span className={`text-[12px] tabular-nums ${clearedToday ? "text-ink" : "text-muted"}`}>{cleared}</span>
+        <span
+          className={`h-2 w-2 rounded-full ${clearedToday ? "bg-ink" : "border border-line"}`}
+        />
+        <span
+          className={`text-[12px] tabular-nums ${clearedToday ? "text-ink" : "text-muted"}`}
+        >
+          {cleared}
+        </span>
       </span>
       {affirmationsOf(board).length ? (
         <span
@@ -712,7 +898,11 @@ function StreakDots({ board }: { board: Board }) {
             <span
               className={`h-2 w-2 rounded-full ${on ? "bg-warn" : "border border-line bg-transparent"}`}
             />
-            <span className={`text-[12px] tabular-nums ${on ? "text-ink" : "text-muted"}`}>{streak}</span>
+            <span
+              className={`text-[12px] tabular-nums ${on ? "text-ink" : "text-muted"}`}
+            >
+              {streak}
+            </span>
           </span>
         );
       })}
@@ -720,7 +910,8 @@ function StreakDots({ board }: { board: Board }) {
   );
 }
 
-const spell = (m: number) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`);
+const spell = (m: number) =>
+  m >= 60 ? `${Math.round((m / 60) * 10) / 10}h` : `${m}m`;
 const clock = (ms: number) => {
   const s = Math.floor(ms / 1000);
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -730,7 +921,9 @@ const clock = (ms: number) => {
  *  history rather than hope. Matching is by shared words — "film the intro"
  *  learns from every other filming day. */
 function estimateFor(timings: Timing[], title: string): number | null {
-  const words = (title.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !STOP_WORDS.has(w));
+  const words = (title.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter(
+    (w) => !STOP_WORDS.has(w),
+  );
   if (!words.length) return null;
   const hits = timings.filter((t) => {
     const other = t.title.toLowerCase();
@@ -740,7 +933,19 @@ function estimateFor(timings: Timing[], title: string): number | null {
   return Math.round(hits.reduce((sum, h) => sum + h.minutes, 0) / hits.length);
 }
 
-const STOP_WORDS = new Set(["with", "that", "this", "from", "into", "some", "then", "them", "your", "about", "email"]);
+const STOP_WORDS = new Set([
+  "with",
+  "that",
+  "this",
+  "from",
+  "into",
+  "some",
+  "then",
+  "them",
+  "your",
+  "about",
+  "email",
+]);
 
 /** The stopwatch: it survives a refresh, and what it measures is added to the
  *  task's Minutes in Notion so the next estimate is better than the last. */
@@ -768,13 +973,25 @@ function Timer({ todo, send }: { todo: Todo; send: Send }) {
 
   const stop = () => {
     if (startedAt === null) return;
-    const total = (todo.minutes ?? 0) + Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+    const total =
+      (todo.minutes ?? 0) +
+      Math.max(1, Math.round((Date.now() - startedAt) / 60000));
     window.localStorage.removeItem(`timer:${todo.id}`);
     setStartedAt(null);
-    send({ action: "editTodo", id: todo.id, field: "minutes", value: String(total) }, (b) => ({
-      ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, minutes: total } : t)),
-    }));
+    send(
+      {
+        action: "editTodo",
+        id: todo.id,
+        field: "minutes",
+        value: String(total),
+      },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) =>
+          t.id === todo.id ? { ...t, minutes: total } : t,
+        ),
+      }),
+    );
   };
 
   if (startedAt !== null)
@@ -804,28 +1021,42 @@ function Timer({ todo, send }: { todo: Todo; send: Send }) {
 /** Taking something off today doesn't delete it — it just stops claiming the
  *  day, which is the only way a cap of three survives contact with a week. */
 function park(todo: Todo, send: Send, day: string) {
-  send({ action: "editTodo", id: todo.id, field: "slot", value: null }, (b) => ({
-    ...b,
-    todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
-  }));
-  if (todo.plan === day)
-    send({ action: "editTodo", id: todo.id, field: "plan", value: null }, (b) => ({
+  send(
+    { action: "editTodo", id: todo.id, field: "slot", value: null },
+    (b) => ({
       ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: null } : t)),
-    }));
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
+    }),
+  );
+  if (todo.plan === day)
+    send(
+      { action: "editTodo", id: todo.id, field: "plan", value: null },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) =>
+          t.id === todo.id ? { ...t, plan: null } : t,
+        ),
+      }),
+    );
 }
 
 /** Pulling an existing task into today: it gets the slot and the day. */
 function pick(todo: Todo, slot: "deep" | "quick", send: Send, day: string) {
-  send({ action: "editTodo", id: todo.id, field: "slot", value: slot }, (b) => ({
-    ...b,
-    todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
-  }));
-  if (!pickedOn(todo, day))
-    send({ action: "editTodo", id: todo.id, field: "plan", value: day }, (b) => ({
+  send(
+    { action: "editTodo", id: todo.id, field: "slot", value: slot },
+    (b) => ({
       ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: day } : t)),
-    }));
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
+    }),
+  );
+  if (!pickedOn(todo, day))
+    send(
+      { action: "editTodo", id: todo.id, field: "plan", value: day },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: day } : t)),
+      }),
+    );
 }
 
 const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
@@ -846,7 +1077,11 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
 });
 
 const daysBetween = (from: string, to: string) =>
-  Math.round((new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86400000);
+  Math.round(
+    (new Date(`${to}T12:00:00`).getTime() -
+      new Date(`${from}T12:00:00`).getTime()) /
+      86400000,
+  );
 
 type Suggestion = { todo: Todo; why: string; score: number };
 
@@ -865,12 +1100,34 @@ function suggestFor(board: Board, day: string): Suggestion[] {
       const away = daysBetween(day, t.due);
       if (away < 0) {
         const late = -away;
-        return { todo: t, why: late === 1 ? "a day late" : `${late} days late`, score: 100 + Math.min(late, 30) + bump };
+        return {
+          todo: t,
+          why: late === 1 ? "a day late" : `${late} days late`,
+          score: 100 + Math.min(late, 30) + bump,
+        };
       }
-      if (away === 0) return { todo: t, why: day === TODAY ? "due today" : "due that day", score: 95 + bump };
-      if (away <= 14) return { todo: t, why: `due ${pretty(t.due)}`, score: 70 - away * 2 + bump };
+      if (away === 0)
+        return {
+          todo: t,
+          why: day === TODAY ? "due today" : "due that day",
+          score: 95 + bump,
+        };
+      if (away <= 14)
+        return {
+          todo: t,
+          why: `due ${pretty(t.due)}`,
+          score: 70 - away * 2 + bump,
+        };
     }
-    if (t.plan === day) return { todo: t, why: day === TODAY ? "you planned it for today" : "you planned it for that day", score: 80 + bump };
+    if (t.plan === day)
+      return {
+        todo: t,
+        why:
+          day === TODAY
+            ? "you planned it for today"
+            : "you planned it for that day",
+        score: 80 + bump,
+      };
     return null;
   };
 
@@ -912,18 +1169,26 @@ function Suggested({
   return (
     <div className="mt-4 rounded-2xl border border-line bg-panel-2 p-4">
       <div className="flex items-baseline justify-between gap-3">
-        <h4 className="text-[12px] font-semibold">Suggested from your Notion</h4>
+        <h4 className="text-[12px] font-semibold">
+          Suggested from your Notion
+        </h4>
         <div className="flex shrink-0 items-center gap-3">
           {fits.length > 1 ? (
             <button
               type="button"
-              onClick={() => fits.forEach((p) => pick(p.todo, "deep", send, day))}
+              onClick={() =>
+                fits.forEach((p) => pick(p.todo, "deep", send, day))
+              }
               className="rounded-full border border-line px-2.5 py-1 text-[11px] text-muted transition hover:text-ink"
             >
               take these {fits.length}
             </button>
           ) : null}
-          <button type="button" onClick={() => setHidden(true)} className="text-[11px] text-muted hover:text-ink">
+          <button
+            type="button"
+            onClick={() => setHidden(true)}
+            className="text-[11px] text-muted hover:text-ink"
+          >
             not now
           </button>
         </div>
@@ -939,8 +1204,12 @@ function Suggested({
               className="flex w-full items-center gap-3 border-b border-line/60 py-2 text-left last:border-none"
             >
               <span className="shrink-0 text-[13px] text-muted">+</span>
-              <span className="min-w-0 flex-1 truncate text-[14px]">{p.todo.title}</span>
-              <span className={`shrink-0 text-[11px] ${p.why.includes("late") ? "text-bad" : "text-muted"}`}>
+              <span className="min-w-0 flex-1 truncate text-[14px]">
+                {p.todo.title}
+              </span>
+              <span
+                className={`shrink-0 text-[11px] ${p.why.includes("late") ? "text-bad" : "text-muted"}`}
+              >
                 {p.why}
                 {m ? ` · ~${spell(m)}` : ""}
               </span>
@@ -960,17 +1229,32 @@ function pullForward(todo: Todo, send: Send, day: string) {
     todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: day } : t)),
   }));
   if (!todo.slot)
-    send({ action: "editTodo", id: todo.id, field: "slot", value: "deep" }, (b) => ({
-      ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: "deep" } : t)),
-    }));
+    send(
+      { action: "editTodo", id: todo.id, field: "slot", value: "deep" },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) =>
+          t.id === todo.id ? { ...t, slot: "deep" } : t,
+        ),
+      }),
+    );
 }
 
 /** The day is done. Rather than end there, offer what the next day already
  *  holds — taking one moves it, so tomorrow doesn't quietly double up. */
-function NextUp({ board, send, day }: { board: Board; send: Send; day: string }) {
+function NextUp({
+  board,
+  send,
+  day,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+}) {
   const next = shiftDay(day, 1);
-  const picked = board.todos.filter((t) => !t.done && t.slot && pickedOn(t, next));
+  const picked = board.todos.filter(
+    (t) => !t.done && t.slot && pickedOn(t, next),
+  );
   const rest = suggestFor(board, next)
     .map((s) => s.todo)
     .filter((t) => !picked.includes(t));
@@ -982,7 +1266,9 @@ function NextUp({ board, send, day }: { board: Board; send: Send; day: string })
       <div className="flex items-baseline justify-between gap-3">
         <h4 className="serif text-[20px]">Good work — that&rsquo;s the day.</h4>
         {streak > 1 ? (
-          <span className="shrink-0 text-[12px] text-muted">{streak} days in a row</span>
+          <span className="shrink-0 text-[12px] text-muted">
+            {streak} days in a row
+          </span>
         ) : null}
         {offer.length > 1 ? (
           <button
@@ -1008,8 +1294,12 @@ function NextUp({ board, send, day }: { board: Board; send: Send; day: string })
             className="flex w-full items-center gap-3 border-b border-line/60 py-2 text-left last:border-none"
           >
             <span className="shrink-0 text-[13px] text-muted">+</span>
-            <span className="min-w-0 flex-1 truncate text-[14px]">{t.title}</span>
-            <span className="shrink-0 text-[11px] text-muted">{t.due ? `due ${pretty(t.due)}` : "tomorrow"}</span>
+            <span className="min-w-0 flex-1 truncate text-[14px]">
+              {t.title}
+            </span>
+            <span className="shrink-0 text-[11px] text-muted">
+              {t.due ? `due ${pretty(t.due)}` : "tomorrow"}
+            </span>
           </button>
         ))}
       </div>
@@ -1037,21 +1327,34 @@ function EmptySlot({
   const [draft, setDraft] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const urgent = suggestFor(board, day).map((s) => s.todo);
-  const rest = board.todos.filter((t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.includes(t));
+  const rest = board.todos.filter(
+    (t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.includes(t),
+  );
   const candidates = [...urgent, ...rest].slice(0, 40);
 
   const add = () => {
     const title = draft.trim();
     if (!title) return;
     setDraft("");
-    send({ action: "addTodo", title, slot, plan: day, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
-      ...b,
-      todos: [...b.todos, newTodo(title, slot, day)],
-    }));
+    send(
+      {
+        action: "addTodo",
+        title,
+        slot,
+        plan: day,
+        kind: slot === "deep" ? "deadline" : "want",
+      },
+      (b) => ({
+        ...b,
+        todos: [...b.todos, newTodo(title, slot, day)],
+      }),
+    );
   };
 
   return (
-    <div className={`border-b border-line/70 py-3 last:border-none ${dim ? "opacity-60" : ""}`}>
+    <div
+      className={`border-b border-line/70 py-3 last:border-none ${dim ? "opacity-60" : ""}`}
+    >
       <div className="flex items-center gap-4">
         <span
           className={`shrink-0 rounded-full border border-line ${
@@ -1089,11 +1392,17 @@ function EmptySlot({
                 className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-panel"
               >
                 {t.title}
-                {t.due ? <span className="ml-2 text-[11px] text-muted">{pretty(t.due)}</span> : null}
+                {t.due ? (
+                  <span className="ml-2 text-[11px] text-muted">
+                    {pretty(t.due)}
+                  </span>
+                ) : null}
               </button>
             ))
           ) : (
-            <p className="px-2 py-1.5 text-[13px] text-muted">Nothing else waiting.</p>
+            <p className="px-2 py-1.5 text-[13px] text-muted">
+              Nothing else waiting.
+            </p>
           )}
         </div>
       ) : null}
@@ -1103,7 +1412,17 @@ function EmptySlot({
 
 /** One of the three deep blocks: what it is, what it usually costs, and a
  *  stopwatch for what it actually cost. */
-function DeepRow({ todo, board, send, day }: { todo: Todo; board: Board; send: Send; day: string }) {
+function DeepRow({
+  todo,
+  board,
+  send,
+  day,
+}: {
+  todo: Todo;
+  board: Board;
+  send: Send;
+  day: string;
+}) {
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
   return (
@@ -1113,23 +1432,36 @@ function DeepRow({ todo, board, send, day }: { todo: Todo; board: Board; send: S
           type="button"
           aria-label={todo.done ? "Mark as not done" : "Mark done"}
           onClick={() =>
-            send({ action: "toggleTodo", id: todo.id, done: !todo.done }, (b) => ({
-              ...b,
-              todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t)),
-            }))
+            send(
+              { action: "toggleTodo", id: todo.id, done: !todo.done },
+              (b) => ({
+                ...b,
+                todos: b.todos.map((t) =>
+                  t.id === todo.id ? { ...t, done: !todo.done } : t,
+                ),
+              }),
+            )
           }
           className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[12px] transition ${
-            todo.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+            todo.done
+              ? "border-ink bg-ink text-brand-cream"
+              : "border-line hover:border-ink/40"
           }`}
         >
           {todo.done ? "✓" : ""}
         </button>
-        <span className={`serif min-w-0 flex-1 truncate text-[20px] ${todo.done ? "text-muted line-through" : ""}`}>
+        <span
+          className={`serif min-w-0 flex-1 truncate text-[20px] ${todo.done ? "text-muted line-through" : ""}`}
+        >
           {todo.title}
         </span>
         {estimate !== null ? (
           <span
-            title={learned ? "Tasks like this usually take about this long" : "Time logged on this one"}
+            title={
+              learned
+                ? "Tasks like this usually take about this long"
+                : "Time logged on this one"
+            }
             className="shrink-0 rounded-full bg-panel-2 px-2.5 py-1 text-[12px] text-muted"
           >
             {learned ? "~" : ""}
@@ -1149,7 +1481,17 @@ function DeepRow({ todo, board, send, day }: { todo: Todo; board: Board; send: S
   );
 }
 
-function QuickRow({ todo, send, locked, day }: { todo: Todo; send: Send; locked?: boolean; day: string }) {
+function QuickRow({
+  todo,
+  send,
+  locked,
+  day,
+}: {
+  todo: Todo;
+  send: Send;
+  locked?: boolean;
+  day: string;
+}) {
   return (
     <div className="flex items-center gap-4 border-b border-line/70 py-2.5 last:border-none">
       <Box
@@ -1161,10 +1503,14 @@ function QuickRow({ todo, send, locked, day }: { todo: Todo; send: Send; locked?
           }))
         }
       />
-      <span className={`min-w-0 flex-1 truncate text-[15px] ${todo.done ? "text-muted line-through" : ""}`}>
+      <span
+        className={`min-w-0 flex-1 truncate text-[15px] ${todo.done ? "text-muted line-through" : ""}`}
+      >
         {todo.title}
       </span>
-      {locked ? <span className="shrink-0 text-[11px] text-muted">every day</span> : null}
+      {locked ? (
+        <span className="shrink-0 text-[11px] text-muted">every day</span>
+      ) : null}
       <Timer todo={todo} send={send} />
       {locked ? null : (
         <button
@@ -1185,7 +1531,12 @@ const WORK_START = 9;
 const WORK_END = 18;
 const EVENING_END = 22;
 
-type DayCalendar = { connected: boolean; busy?: number; free?: number; error?: string };
+type DayCalendar = {
+  connected: boolean;
+  busy?: number;
+  free?: number;
+  error?: string;
+};
 
 const connectCalendarHref = () =>
   `/api/google/start?back=${encodeURIComponent(window.location.pathname + window.location.search)}`;
@@ -1211,7 +1562,10 @@ async function readCalendarDay(): Promise<DayCalendar | null> {
   });
   try {
     const res = await fetch(`/api/google/day?${params}`);
-    const data = (await res.json()) as DayCalendar & { ok: boolean; configured?: boolean };
+    const data = (await res.json()) as DayCalendar & {
+      ok: boolean;
+      configured?: boolean;
+    };
     if (data.configured === false) return null;
     return data;
   } catch {
@@ -1219,7 +1573,15 @@ async function readCalendarDay(): Promise<DayCalendar | null> {
   }
 }
 
-function Arrow({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+function Arrow({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
@@ -1252,7 +1614,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     readCalendarDay().then((today) => {
       if (!live || !today) return;
       setCalendar(today);
-      if (today.free !== undefined && !window.localStorage.getItem(`hours:${TODAY}`))
+      if (
+        today.free !== undefined &&
+        !window.localStorage.getItem(`hours:${TODAY}`)
+      )
         setHours(String(Math.round((today.free / 60) * 2) / 2));
     });
     return () => {
@@ -1274,17 +1639,25 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const otherQuick = quick.filter((t) => t !== emails);
 
   // What today is really asking for, from what these tasks have cost before.
-  const costed = deep.map((t) => t.minutes ?? estimateFor(board.timings, t.title)).filter((m): m is number => m !== null);
+  const costed = deep
+    .map((t) => t.minutes ?? estimateFor(board.timings, t.title))
+    .filter((m): m is number => m !== null);
   const load = costed.reduce((sum, m) => sum + m, 0);
   const free = Number(hours) * 60;
   const overloaded = free > 0 && load > free;
 
-  const dailyHabits = board.habits.filter((h) => h.cadence === "Daily" && !h.bad && !h.affirmation);
-  const doneToday = new Set(board.ticks.filter((t) => t.date === day).map((t) => t.habitId));
+  const dailyHabits = board.habits.filter(
+    (h) => h.cadence === "Daily" && !h.bad && !h.affirmation,
+  );
+  const doneToday = new Set(
+    board.ticks.filter((t) => t.date === day).map((t) => t.habitId),
+  );
 
   // Evening is when tomorrow is still choosable; morning is too late to plan it.
   const tomorrow = shiftDay(TODAY, 1);
-  const tomorrowEmpty = !board.todos.some((t) => t.slot === "deep" && pickedOn(t, tomorrow));
+  const tomorrowEmpty = !board.todos.some(
+    (t) => t.slot === "deep" && pickedOn(t, tomorrow),
+  );
   const [evening, setEvening] = useState(false);
   useEffect(() => setEvening(new Date().getHours() >= 16), []);
   const nudge = day === TODAY && evening && tomorrowEmpty;
@@ -1294,186 +1667,251 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const cleared = dayCleared(board.todos, day);
 
   const addEmails = () =>
-    send({ action: "addTodo", title: "Go through emails", slot: "quick", plan: day, kind: "want" }, (b) => ({
-      ...b,
-      todos: [...b.todos, newTodo("Go through emails", "quick", day)],
-    }));
+    send(
+      {
+        action: "addTodo",
+        title: "Go through emails",
+        slot: "quick",
+        plan: day,
+        kind: "want",
+      },
+      (b) => ({
+        ...b,
+        todos: [...b.todos, newTodo("Go through emails", "quick", day)],
+      }),
+    );
 
   return (
     <>
       {day === TODAY ? <Affirmations board={board} send={send} /> : null}
       <div className="day-card p-7 sm:p-10">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-            {dayStamp(day)}
-          </p>
-          <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">{dayQuestion(day)}</h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
-            ←
-          </Arrow>
-          {day === TODAY ? null : (
-            <button
-              type="button"
-              onClick={() => setDay(TODAY)}
-              className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
-            >
-              today
-            </button>
-          )}
-          <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
-            →
-          </Arrow>
-        </div>
-      </div>
-
-      {nudge ? (
-        <button
-          type="button"
-          onClick={() => setDay(tomorrow)}
-          className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
-        >
-          <span className="text-[14px]">Tomorrow is still empty. Pick its three while today is fresh.</span>
-          <span className="shrink-0 text-[13px] text-muted">choose →</span>
-        </button>
-      ) : null}
-
-      <section className="mt-9">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-[13px] font-semibold">{day === TODAY ? "Today\u2019s three" : "The three"}</h3>
-          <span className="text-[12px] text-muted">{deep.filter((t) => !t.done).length}/3 taken</span>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+              {dayStamp(day)}
+            </p>
+            <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">
+              {dayQuestion(day)}
+            </h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
+              ←
+            </Arrow>
+            {day === TODAY ? null : (
+              <button
+                type="button"
+                onClick={() => setDay(TODAY)}
+                className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+              >
+                today
+              </button>
+            )}
+            <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
+              →
+            </Arrow>
+          </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-4 pb-1">
-          <span className="text-[15px]">Hours available {day === TODAY ? "today" : "that day"}</span>
-          <span className="flex items-baseline gap-1">
-            <input
-              value={hours}
-              onChange={(e) => setAvailable(e.target.value.replace(/[^\d.]/g, ""))}
-              placeholder="—"
-              inputMode="decimal"
-              className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
-            />
-            <span className="text-[14px] text-muted">h</span>
-          </span>
-        </div>
+        {nudge ? (
+          <button
+            type="button"
+            onClick={() => setDay(tomorrow)}
+            className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+          >
+            <span className="text-[14px]">
+              Tomorrow is still empty. Pick its three while today is fresh.
+            </span>
+            <span className="shrink-0 text-[13px] text-muted">choose →</span>
+          </button>
+        ) : null}
 
-        {calendar ? (
-          <p className="text-[12px] text-muted">
-            {calendar.connected ? (
-              calendar.busy !== undefined ? (
-                calendar.busy > 0 ? (
-                  `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
+        <section className="mt-9">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-[13px] font-semibold">
+              {day === TODAY ? "Today\u2019s three" : "The three"}
+            </h3>
+            <span className="text-[12px] text-muted">
+              {deep.filter((t) => !t.done).length}/3 taken
+            </span>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-4 pb-1">
+            <span className="text-[15px]">
+              Hours available {day === TODAY ? "today" : "that day"}
+            </span>
+            <span className="flex items-baseline gap-1">
+              <input
+                value={hours}
+                onChange={(e) =>
+                  setAvailable(e.target.value.replace(/[^\d.]/g, ""))
+                }
+                placeholder="—"
+                inputMode="decimal"
+                className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
+              />
+              <span className="text-[14px] text-muted">h</span>
+            </span>
+          </div>
+
+          {calendar ? (
+            <p className="text-[12px] text-muted">
+              {calendar.connected ? (
+                calendar.busy !== undefined ? (
+                  calendar.busy > 0 ? (
+                    `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
+                  ) : (
+                    "Nothing left in your calendar today."
+                  )
                 ) : (
-                  "Nothing left in your calendar today."
+                  calendar.error
                 )
               ) : (
-                calendar.error
-              )
-            ) : (
-              <a className="underline underline-offset-2 hover:text-ink" href={connectCalendarHref()}>
-                {calendar.error ?? "Use my Google Calendar"}
-              </a>
-            )}
-          </p>
-        ) : null}
+                <a
+                  className="underline underline-offset-2 hover:text-ink"
+                  href={connectCalendarHref()}
+                >
+                  {calendar.error ?? "Use my Google Calendar"}
+                </a>
+              )}
+            </p>
+          ) : null}
 
-        {load > 0 ? (
-          <p className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}>
-            {overloaded
-              ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
-              : `Based on how long these took before, that's about ${spell(load)} of work.`}
-          </p>
-        ) : null}
-
-        {cleared ? (
-          <NextUp board={board} send={send} day={day} />
-        ) : deep.length < DEEP_CAP ? (
-          <Suggested board={board} send={send} day={day} room={DEEP_CAP - deep.length} free={Math.max(0, free - load)} />
-        ) : null}
-
-        <div className="mt-3">
-          {deep.map((t) => (
-            <DeepRow key={t.id} todo={t} board={board} send={send} day={day} />
-          ))}
-          {Array.from({ length: Math.max(0, DEEP_CAP - deep.length) }, (_, i) => (
-            <EmptySlot
-              key={`deep-${i}`}
-              board={board}
-              send={send}
-              slot="deep"
-              day={day}
-              dim={deep.length + i > 0}
-              placeholder={DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-[13px] font-semibold">Quick batch</h3>
-          <span className="text-[12px] text-muted">three, and one of them is email</span>
-        </div>
-        <div className="mt-3">
-          {emails ? (
-            <QuickRow todo={emails} send={send} locked day={day} />
-          ) : (
-            <button
-              type="button"
-              onClick={addEmails}
-              className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
+          {load > 0 ? (
+            <p
+              className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}
             >
-              <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
-              <span className="min-w-0 flex-1 text-[15px] text-muted">Go through emails</span>
-              <span className="shrink-0 text-[11px] text-muted">tap to take it on</span>
-            </button>
-          )}
-          {otherQuick.map((t) => (
-            <QuickRow key={t.id} todo={t} send={send} day={day} />
-          ))}
-          {Array.from({ length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) }, (_, i) => (
-            <EmptySlot
-              key={`quick-${i}`}
+              {overloaded
+                ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
+                : `Based on how long these took before, that's about ${spell(load)} of work.`}
+            </p>
+          ) : null}
+
+          {cleared ? (
+            <NextUp board={board} send={send} day={day} />
+          ) : deep.length < DEEP_CAP ? (
+            <Suggested
               board={board}
               send={send}
-              slot="quick"
               day={day}
-              placeholder="Quick thing to clear"
+              room={DEEP_CAP - deep.length}
+              free={Math.max(0, free - load)}
             />
-          ))}
-        </div>
-      </section>
+          ) : null}
 
-      {dailyHabits.length ? (
-        <section className="mt-10">
-          <h3 className="text-[13px] font-semibold">Habits</h3>
-          <div className="mt-4 flex flex-wrap gap-6">
-            {dailyHabits.map((h) => {
-              const on = doneToday.has(h.id);
-              const streak = streakOf(board.ticks, h.id, day);
-              const best = bestStreak(board.ticks, h.id);
-              return (
-                <button key={h.id} type="button" onClick={() => tickHabit(board, send, h, day, !on)} className="w-20">
-                  <span
-                    className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
-                      on ? "bg-warn text-brand-cream" : "border border-line bg-panel-2 text-muted"
-                    }`}
-                  >
-                    {streak || ""}
-                  </span>
-                  <span className="mt-2 block truncate text-[12px] text-muted">{h.name}</span>
-                  <span className="mt-0.5 block text-[10px] text-muted/80">
-                    {streak ? `🔥 ${streak} day${streak === 1 ? "" : "s"}` : best ? `best ${best}` : "start it"}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="mt-3">
+            {deep.map((t) => (
+              <DeepRow
+                key={t.id}
+                todo={t}
+                board={board}
+                send={send}
+                day={day}
+              />
+            ))}
+            {Array.from(
+              { length: Math.max(0, DEEP_CAP - deep.length) },
+              (_, i) => (
+                <EmptySlot
+                  key={`deep-${i}`}
+                  board={board}
+                  send={send}
+                  slot="deep"
+                  day={day}
+                  dim={deep.length + i > 0}
+                  placeholder={
+                    DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"
+                  }
+                />
+              ),
+            )}
           </div>
         </section>
-      ) : null}
+
+        <section className="mt-10">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-[13px] font-semibold">Quick batch</h3>
+            <span className="text-[12px] text-muted">
+              three, and one of them is email
+            </span>
+          </div>
+          <div className="mt-3">
+            {emails ? (
+              <QuickRow todo={emails} send={send} locked day={day} />
+            ) : (
+              <button
+                type="button"
+                onClick={addEmails}
+                className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
+              >
+                <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
+                <span className="min-w-0 flex-1 text-[15px] text-muted">
+                  Go through emails
+                </span>
+                <span className="shrink-0 text-[11px] text-muted">
+                  tap to take it on
+                </span>
+              </button>
+            )}
+            {otherQuick.map((t) => (
+              <QuickRow key={t.id} todo={t} send={send} day={day} />
+            ))}
+            {Array.from(
+              { length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) },
+              (_, i) => (
+                <EmptySlot
+                  key={`quick-${i}`}
+                  board={board}
+                  send={send}
+                  slot="quick"
+                  day={day}
+                  placeholder="Quick thing to clear"
+                />
+              ),
+            )}
+          </div>
+        </section>
+
+        {dailyHabits.length ? (
+          <section className="mt-10">
+            <h3 className="text-[13px] font-semibold">Habits</h3>
+            <div className="mt-4 flex flex-wrap gap-6">
+              {dailyHabits.map((h) => {
+                const on = doneToday.has(h.id);
+                const streak = streakOf(board.ticks, h.id, day);
+                const best = bestStreak(board.ticks, h.id);
+                return (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => tickHabit(board, send, h, day, !on)}
+                    className="w-20"
+                  >
+                    <span
+                      className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
+                        on
+                          ? "bg-warn text-brand-cream"
+                          : "border border-line bg-panel-2 text-muted"
+                      }`}
+                    >
+                      {streak || ""}
+                    </span>
+                    <span className="mt-2 block truncate text-[12px] text-muted">
+                      {h.name}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-muted/80">
+                      {streak
+                        ? `🔥 ${streak} day${streak === 1 ? "" : "s"}`
+                        : best
+                          ? `best ${best}`
+                          : "start it"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
     </>
   );
@@ -1489,38 +1927,56 @@ function comingMonday(): string {
 
 const ideaToTodo = (idea: Idea, send: Send) => {
   const plan = comingMonday();
-  send({ action: "ideaToTodo", id: idea.id, title: idea.title, link: idea.link, plan }, (b) => ({
-    ...b,
-    todos: [
-      ...b.todos,
-      {
-        id: `tmp-${Date.now()}`,
-        title: idea.title,
-        done: false,
-        goal: null,
-        due: null,
-        plan,
-        kind: "want" as const,
-        slot: null,
-        minutes: null,
-        category: null,
-        priority: null,
-        link: idea.link,
-        source: "Manual",
-        url: "#",
-      },
-    ],
-  }));
+  send(
+    {
+      action: "ideaToTodo",
+      id: idea.id,
+      title: idea.title,
+      link: idea.link,
+      plan,
+    },
+    (b) => ({
+      ...b,
+      todos: [
+        ...b.todos,
+        {
+          id: `tmp-${Date.now()}`,
+          title: idea.title,
+          done: false,
+          goal: null,
+          due: null,
+          plan,
+          kind: "want" as const,
+          slot: null,
+          minutes: null,
+          category: null,
+          priority: null,
+          link: idea.link,
+          source: "Manual",
+          url: "#",
+        },
+      ],
+    }),
+  );
 };
 
 /** An idea opened up: its own title and a page to write the rest of it on,
  *  both saved back to the same Notion row. */
-function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => void }) {
+function IdeaPage({
+  idea,
+  send,
+  close,
+}: {
+  idea: Idea;
+  send: Send;
+  close: () => void;
+}) {
   const [title, setTitle] = useState(idea.title);
   const [notes, setNotes] = useState(idea.notes);
 
   const save = (fields: { title?: string; notes?: string }) => {
-    if (fields.title !== undefined && fields.title.trim() === idea.title) return;
+    if (fields.title !== undefined && fields.title.trim() === idea.title)
+      return;
     if (fields.notes !== undefined && fields.notes === idea.notes) return;
     send({ action: "editIdea", id: idea.id, ...fields }, (b) => ({
       ...b,
@@ -1531,10 +1987,16 @@ function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => 
   return (
     <div className="rounded-2xl border border-line bg-panel p-5">
       <div className="mb-3 flex items-center gap-3">
-        <button type="button" onClick={close} className="text-[12px] text-muted transition hover:text-ink">
+        <button
+          type="button"
+          onClick={close}
+          className="text-[12px] text-muted transition hover:text-ink"
+        >
           ← all ideas
         </button>
-        <span className="flex-1 text-right text-[11px] text-muted">{pretty(idea.captured)}</span>
+        <span className="flex-1 text-right text-[11px] text-muted">
+          {pretty(idea.captured)}
+        </span>
         <button
           type="button"
           onClick={() => ideaToTodo(idea, send)}
@@ -1564,7 +2026,12 @@ function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => 
         className="mb-2 w-full bg-transparent font-serif text-[22px] outline-none"
       />
       {idea.link ? (
-        <a href={idea.link} target="_blank" rel="noreferrer" className="mb-2 block text-[12px] text-accent-2 underline">
+        <a
+          href={idea.link}
+          target="_blank"
+          rel="noreferrer"
+          className="mb-2 block text-[12px] text-accent-2 underline"
+        >
           {idea.link}
         </a>
       ) : null}
@@ -1576,7 +2043,9 @@ function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => 
         placeholder="Write it out…"
         className="w-full resize-y bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-muted/70"
       />
-      <p className="text-[11px] text-muted">Saves to this idea in Notion when you click away.</p>
+      <p className="text-[11px] text-muted">
+        Saves to this idea in Notion when you click away.
+      </p>
     </div>
   );
 }
@@ -1584,15 +2053,17 @@ function IdeaPage({ idea, send, close }: { idea: Idea; send: Send; close: () => 
 /* ----------------------------------------------------------- idea trends */
 
 const STOPWORDS = new Set(
-  ("a an and are as at be but by for from get go have how i if in into is it its just like make me my new not"
-    + " of on one or our out so some that the their them then there they this to up us want was we what when"
-    + " where which who why will with you your do does did can could should would need needs about more than"
-    + " thing things stuff idea ideas post content video reel")
-    .split(" "),
+  (
+    "a an and are as at be but by for from get go have how i if in into is it its just like make me my new not" +
+    " of on one or our out so some that the their them then there they this to up us want was we what when" +
+    " where which who why will with you your do does did can could should would need needs about more than" +
+    " thing things stuff idea ideas post content video reel"
+  ).split(" "),
 );
 
 /** Loose stemming so "detailing" and "detail" land in the same pile. */
-const stem = (w: string) => w.replace(/(ings|ing|ies|ed|es|s)$/, (m) => (m === "ies" ? "y" : ""));
+const stem = (w: string) =>
+  w.replace(/(ings|ing|ies|ed|es|s)$/, (m) => (m === "ies" ? "y" : ""));
 
 type Trend = { term: string; ideas: Idea[] };
 
@@ -1655,7 +2126,10 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
       <div className="flex items-baseline justify-between gap-3">
         <p className="min-w-0 text-[14px]">
           <span className="font-medium capitalize">{term}</span>
-          <span className="text-muted"> came up in {trend.ideas.length} ideas</span>
+          <span className="text-muted">
+            {" "}
+            came up in {trend.ideas.length} ideas
+          </span>
         </p>
         <button
           type="button"
@@ -1675,7 +2149,11 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
         </ul>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {[`Research ${term}`, `Block an hour on ${term}`, `Decide what to do about ${term}`].map((t) => (
+        {[
+          `Research ${term}`,
+          `Block an hour on ${term}`,
+          `Decide what to do about ${term}`,
+        ].map((t) => (
           <button
             key={t}
             type="button"
@@ -1695,7 +2173,9 @@ function Trends({ board, send }: { board: Board; send: Send }) {
   return (
     <Panel
       title="Trends"
-      right={<span className="text-[12px] text-muted">what keeps coming back</span>}
+      right={
+        <span className="text-[12px] text-muted">what keeps coming back</span>
+      }
     >
       {trends.length ? (
         <div>
@@ -1705,8 +2185,8 @@ function Trends({ board, send }: { board: Board; send: Send }) {
         </div>
       ) : (
         <p className="py-2 text-[14px] text-muted">
-          Nothing repeating yet — once a subject shows up in a couple of ideas it lands here with
-          something to do about it.
+          Nothing repeating yet — once a subject shows up in a couple of ideas
+          it lands here with something to do about it.
         </p>
       )}
     </Panel>
@@ -1717,11 +2197,17 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const opened = board.ideas.find((i) => i.id === open) ?? null;
 
-  if (opened) return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
+  if (opened)
+    return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
 
   return (
     <div className="space-y-5">
-      <Panel title="Ideas" right={<span className="text-[12px] text-muted">tap one to open it</span>}>
+      <Panel
+        title="Ideas"
+        right={
+          <span className="text-[12px] text-muted">tap one to open it</span>
+        }
+      >
         {board.ideas.length ? (
           <div className="flex flex-wrap gap-2 py-1">
             {board.ideas.map((i) => (
@@ -1736,7 +2222,9 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
             ))}
           </div>
         ) : (
-          <p className="py-2 text-[14px] text-muted">Nothing yet. Say “Hey Siri, capture idea” and it lands here.</p>
+          <p className="py-2 text-[14px] text-muted">
+            Nothing yet. Say “Hey Siri, capture idea” and it lands here.
+          </p>
         )}
       </Panel>
       <Trends board={board} send={send} />
@@ -1748,23 +2236,38 @@ const DEADLINE_LABEL = "📌 Deadlines";
 const WANT_LABEL = "✏️ Want to do";
 
 const KIND_FACE: Record<string, string> = { deadline: "📌", want: "✏️" };
-const KIND_WORD: Record<string, string> = { deadline: "Deadline", want: "Want to do" };
+const KIND_WORD: Record<string, string> = {
+  deadline: "Deadline",
+  want: "Want to do",
+};
 
 /** Deadline → want to do → unset, in one tap, straight into Notion's Kind. */
 function KindChip({ todo, send }: { todo: Todo; send: Send }) {
-  const next = todo.kind === "deadline" ? "want" : todo.kind === "want" ? null : "deadline";
+  const next =
+    todo.kind === "deadline"
+      ? "want"
+      : todo.kind === "want"
+        ? null
+        : "deadline";
   return (
     <button
       type="button"
       title={`${todo.kind ? KIND_WORD[todo.kind] : "No kind set"} — tap for ${next ? KIND_WORD[next] : "none"}`}
       onClick={() =>
-        send({ action: "editTodo", id: todo.id, field: "kind", value: next }, (b) => ({
-          ...b,
-          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, kind: next } : t)),
-        }))
+        send(
+          { action: "editTodo", id: todo.id, field: "kind", value: next },
+          (b) => ({
+            ...b,
+            todos: b.todos.map((t) =>
+              t.id === todo.id ? { ...t, kind: next } : t,
+            ),
+          }),
+        )
       }
       className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] leading-none transition ${
-        todo.kind ? "border-line" : "border-transparent text-muted/50 hover:border-line"
+        todo.kind
+          ? "border-line"
+          : "border-transparent text-muted/50 hover:border-line"
       }`}
     >
       {todo.kind ? KIND_FACE[todo.kind] : "·"}
@@ -1774,7 +2277,8 @@ function KindChip({ todo, send }: { todo: Todo; send: Send }) {
 
 /** Untagged rows still have to land somewhere: a date reads as a commitment,
  *  no date reads as an intention. */
-const kindOfTodo = (t: Todo): "deadline" | "want" => t.kind ?? (t.due ? "deadline" : "want");
+const kindOfTodo = (t: Todo): "deadline" | "want" =>
+  t.kind ?? (t.due ? "deadline" : "want");
 
 /** One picked line inside a day of the week: enough to recognise it, and a
  *  way to put it back down. */
@@ -1792,10 +2296,15 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         type="button"
         aria-label={todo.done ? "Mark as not done" : "Mark done"}
         onClick={() =>
-          send({ action: "toggleTodo", id: todo.id, done: !todo.done }, (b) => ({
-            ...b,
-            todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t)),
-          }))
+          send(
+            { action: "toggleTodo", id: todo.id, done: !todo.done },
+            (b) => ({
+              ...b,
+              todos: b.todos.map((t) =>
+                t.id === todo.id ? { ...t, done: !todo.done } : t,
+              ),
+            }),
+          )
         }
         className={`grid h-4 w-4 shrink-0 place-items-center text-[9px] transition ${
           todo.slot === "deep" ? "rounded-full" : "rounded"
@@ -1803,11 +2312,15 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
       >
         {todo.done ? "✓" : ""}
       </button>
-      <span className={`min-w-0 flex-1 truncate text-[13px] ${todo.done ? "text-muted line-through" : ""}`}>
+      <span
+        className={`min-w-0 flex-1 truncate text-[13px] ${todo.done ? "text-muted line-through" : ""}`}
+      >
         {todo.title}
       </span>
       {todo.due && todo.due !== day ? (
-        <span className={`shrink-0 text-[10px] ${todo.due < day ? "text-bad" : "text-muted"}`}>
+        <span
+          className={`shrink-0 text-[10px] ${todo.due < day ? "text-bad" : "text-muted"}`}
+        >
           due {pretty(todo.due)}
         </span>
       ) : null}
@@ -1829,8 +2342,11 @@ function PlanPile({ board }: { board: Board }) {
   const [q, setQ] = useState("");
   const [goal, setGoal] = useState("");
   const open = board.todos.filter((t) => !t.done && !t.slot);
-  const goals = board.goals.filter((g) => !g.done && open.some((t) => t.goal === g.id));
-  const nameOf = (id: string | null) => board.goals.find((g) => g.id === id)?.name ?? null;
+  const goals = board.goals.filter(
+    (g) => !g.done && open.some((t) => t.goal === g.id),
+  );
+  const nameOf = (id: string | null) =>
+    board.goals.find((g) => g.id === id)?.name ?? null;
   const waiting = open
     .filter((t) => (goal ? t.goal === goal : true))
     .filter((t) => t.title.toLowerCase().includes(q.trim().toLowerCase()))
@@ -1856,7 +2372,9 @@ function PlanPile({ board }: { board: Board }) {
               type="button"
               onClick={() => setGoal(g.id)}
               className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
-                goal === g.id ? "border-ink bg-ink text-brand-cream" : "border-line text-muted hover:text-ink"
+                goal === g.id
+                  ? "border-ink bg-ink text-brand-cream"
+                  : "border-line text-muted hover:text-ink"
               }`}
             >
               {g.name}
@@ -1879,20 +2397,28 @@ function PlanPile({ board }: { board: Board }) {
               <span className="shrink-0 text-[11px] text-muted">⠿</span>
               <span className="min-w-0 flex-1 truncate">{t.title}</span>
               {!goal && nameOf(t.goal) ? (
-                <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">{nameOf(t.goal)}</span>
+                <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
+                  {nameOf(t.goal)}
+                </span>
               ) : null}
               {t.due ? (
-                <span className={`shrink-0 text-[10px] ${t.due < TODAY ? "text-bad" : "text-muted"}`}>
+                <span
+                  className={`shrink-0 text-[10px] ${t.due < TODAY ? "text-bad" : "text-muted"}`}
+                >
                   {pretty(t.due)}
                 </span>
               ) : null}
             </div>
           ))
         ) : (
-          <p className="text-[13px] text-muted">Nothing waiting — the pile is empty.</p>
+          <p className="text-[13px] text-muted">
+            Nothing waiting — the pile is empty.
+          </p>
         )}
       </div>
-      <p className="mt-2 text-[12px] text-muted">Drag one onto a day. On a phone, use + deep / + quick instead.</p>
+      <p className="mt-2 text-[12px] text-muted">
+        Drag one onto a day. On a phone, use + deep / + quick instead.
+      </p>
     </div>
   );
 }
@@ -1913,7 +2439,10 @@ function PlanTrash({ board, send }: { board: Board; send: Send }) {
         setOver(false);
         const id = e.dataTransfer.getData("text/todo-id");
         if (!board.todos.some((t) => t.id === id)) return;
-        send({ action: "deleteTodo", id }, (b) => ({ ...b, todos: b.todos.filter((t) => t.id !== id) }));
+        send({ action: "deleteTodo", id }, (b) => ({
+          ...b,
+          todos: b.todos.filter((t) => t.id !== id),
+        }));
       }}
       className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[13px] transition ${
         over ? "border-bad bg-bad/10 text-bad" : "border-line text-muted"
@@ -1925,13 +2454,74 @@ function PlanTrash({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/** The cap is the whole point of the week view, so going past it is a
+ *  decision with a price, not a silent refusal. */
+function OverCap({
+  warn,
+  quick,
+  onKeep,
+  onCancel,
+}: {
+  warn: { todo: Todo; into: "deep" | "quick" };
+  quick: number;
+  onKeep: () => void;
+  onCancel: () => void;
+}) {
+  const cost = Math.min(quick, 2);
+  const line =
+    warn.into === "deep"
+      ? `That's deep task number ${DEEP_CAP + 1}. A deep block eats about two quick ones — keep it and you'll have to ${
+          cost
+            ? `drop ${cost} quick task${cost > 1 ? "s" : ""} from this day`
+            : "leave no room for anything quick"
+        }.`
+      : `That's ${QUICK_CAP + 1} quick tasks. Past three they stop being quick — something else has to go.`;
+
+  return (
+    <div className="mb-1.5 rounded-lg border border-bad/40 bg-bad/5 p-2">
+      <p className="text-[12px] text-bad">{line}</p>
+      <p className="mt-0.5 truncate text-[11px] text-muted">
+        {warn.todo.title}
+      </p>
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          type="button"
+          onClick={onKeep}
+          className="rounded-full border border-bad/50 px-2 py-0.5 text-[11px] text-bad transition hover:bg-bad/10"
+        >
+          add it anyway
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted transition hover:text-ink"
+        >
+          leave it off
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** One day of the week being planned: the deep blocks, the quick ones, and
  *  room to fill what's still empty — the caps are what make a week plannable
  *  instead of a wish list. */
-function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }) {
+function PlanDay({
+  board,
+  send,
+  day,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+}) {
   const [open, setOpen] = useState<null | "deep" | "quick">(null);
   const [draft, setDraft] = useState("");
   const [over, setOver] = useState<null | "deep" | "quick">(null);
+  const [warn, setWarn] = useState<{
+    todo: Todo;
+    into: "deep" | "quick";
+  } | null>(null);
   const picked = board.todos.filter((t) => t.slot && pickedOn(t, day));
   const deep = picked.filter((t) => t.slot === "deep");
   const quick = picked.filter((t) => t.slot === "quick");
@@ -1939,7 +2529,10 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
 
   const urgent = suggestFor(board, day);
   const rest = board.todos.filter(
-    (t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.some((s) => s.todo.id === t.id),
+    (t) =>
+      !t.done &&
+      !(t.slot && pickedOn(t, day)) &&
+      !urgent.some((s) => s.todo.id === t.id),
   );
   const candidates = [...urgent.map((s) => s.todo), ...rest].slice(0, 40);
 
@@ -1947,23 +2540,43 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
     const title = draft.trim();
     if (!title) return;
     setDraft("");
-    send({ action: "addTodo", title, slot, plan: day, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
-      ...b,
-      todos: [...b.todos, newTodo(title, slot, day)],
-    }));
+    send(
+      {
+        action: "addTodo",
+        title,
+        slot,
+        plan: day,
+        kind: slot === "deep" ? "deadline" : "want",
+      },
+      (b) => ({
+        ...b,
+        todos: [...b.todos, newTodo(title, slot, day)],
+      }),
+    );
   };
 
-  const room = (slot === "deep" ? DEEP_CAP - deep.length : QUICK_CAP - quick.length) > 0;
+  const room =
+    (slot === "deep" ? DEEP_CAP - deep.length : QUICK_CAP - quick.length) > 0;
+
+  /** Moving a task within the day it already sits on shouldn't count twice. */
+  const wouldHold = (todo: Todo, into: "deep" | "quick") =>
+    (into === "deep" ? deep : quick).filter((t) => t.id !== todo.id).length + 1;
+
+  const place = (todo: Todo, into: "deep" | "quick") => {
+    setWarn(null);
+    if (wouldHold(todo, into) > (into === "deep" ? DEEP_CAP : QUICK_CAP)) {
+      setWarn({ todo, into });
+      return;
+    }
+    pick(todo, into, send, day);
+  };
 
   const drop = (e: React.DragEvent, into: "deep" | "quick") => {
     e.preventDefault();
     setOver(null);
     const id = e.dataTransfer.getData("text/todo-id");
     const todo = board.todos.find((t) => t.id === id);
-    if (!todo) return;
-    const full = (into === "deep" ? deep.length : quick.length) >= (into === "deep" ? DEEP_CAP : QUICK_CAP);
-    if (full && !pickedOn(todo, day)) return;
-    pick(todo, into, send, day);
+    if (todo) place(todo, into);
   };
 
   /** Each half of a day is its own target, so dropping is also the choice
@@ -1983,8 +2596,12 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
         }`}
       >
         <div className="flex items-baseline justify-between">
-          <span className="text-[10px] uppercase tracking-widest text-muted">{kind}</span>
-          <span className="text-[10px] text-muted">
+          <span className="text-[10px] uppercase tracking-widest text-muted">
+            {kind}
+          </span>
+          <span
+            className={`text-[10px] ${rows.length > cap ? "text-bad" : "text-muted"}`}
+          >
             {rows.length}/{cap}
           </span>
         </div>
@@ -2004,8 +2621,14 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
       }`}
     >
       <div className="mb-1.5 flex items-baseline justify-between">
-        <span className={`text-[12px] ${day === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(day)}</span>
-        <span className="text-[11px] text-muted">{picked.filter((t) => !t.done).length || ""}</span>
+        <span
+          className={`text-[12px] ${day === TODAY ? "font-medium text-ink" : "text-muted"}`}
+        >
+          {weekday(day)}
+        </span>
+        <span className="text-[11px] text-muted">
+          {picked.filter((t) => !t.done).length || ""}
+        </span>
       </div>
 
       <div className="mb-1 space-y-1">
@@ -2013,9 +2636,23 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
         {zone("quick", quick)}
       </div>
 
+      {warn ? (
+        <OverCap
+          warn={warn}
+          quick={quick.length}
+          onKeep={() => {
+            pick(warn.todo, warn.into, send, day);
+            setWarn(null);
+          }}
+          onCancel={() => setWarn(null)}
+        />
+      ) : null}
+
       <div className="flex gap-1.5">
         {(["deep", "quick"] as const).map((s) => {
-          const full = (s === "deep" ? deep.length : quick.length) >= (s === "deep" ? DEEP_CAP : QUICK_CAP);
+          const full =
+            (s === "deep" ? deep.length : quick.length) >=
+            (s === "deep" ? DEEP_CAP : QUICK_CAP);
           return (
             <button
               key={s}
@@ -2023,7 +2660,9 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
               disabled={full}
               onClick={() => setOpen(open === s ? null : s)}
               className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
-                open === s ? "border-ink/40 text-ink" : "border-line text-muted hover:text-ink"
+                open === s
+                  ? "border-ink/40 text-ink"
+                  : "border-line text-muted hover:text-ink"
               } disabled:opacity-30`}
             >
               {full ? `${s} is full` : `+ ${s}`}
@@ -2038,7 +2677,9 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
-            placeholder={open === "deep" ? "A real block of work…" : "Something quick…"}
+            placeholder={
+              open === "deep" ? "A real block of work…" : "Something quick…"
+            }
             className="w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
           />
           <div className="max-h-44 overflow-auto rounded-lg border border-line bg-panel-2 p-1">
@@ -2049,16 +2690,22 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
                   type="button"
                   onClick={() => {
                     setOpen(null);
-                    pick(t, open, send, day);
+                    place(t, open);
                   }}
                   className="block w-full truncate rounded px-2 py-1 text-left text-[13px] hover:bg-panel"
                 >
                   {t.title}
-                  {t.due ? <span className="ml-2 text-[11px] text-muted">{pretty(t.due)}</span> : null}
+                  {t.due ? (
+                    <span className="ml-2 text-[11px] text-muted">
+                      {pretty(t.due)}
+                    </span>
+                  ) : null}
                 </button>
               ))
             ) : (
-              <p className="px-2 py-1 text-[13px] text-muted">Nothing waiting in Notion.</p>
+              <p className="px-2 py-1 text-[13px] text-muted">
+                Nothing waiting in Notion.
+              </p>
             )}
           </div>
         </div>
@@ -2069,19 +2716,33 @@ function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }
 
 /** One month of a single kind of task, so a glance answers "what is actually
  *  owed this month" without the optional pile in the way. */
-function MonthCal({ kind, items, offset }: { kind: "deadline" | "want"; items: Todo[]; offset: number }) {
+function MonthCal({
+  kind,
+  items,
+  offset,
+}: {
+  kind: "deadline" | "want";
+  items: Todo[];
+  offset: number;
+}) {
   const { cells } = monthGrid(offset);
   const mine = items.filter((t) => !t.done && kindOfTodo(t) === kind);
-  const dayOf = (t: Todo) => (kind === "deadline" ? t.due ?? t.plan : t.plan ?? t.due);
+  const dayOf = (t: Todo) =>
+    kind === "deadline" ? (t.due ?? t.plan) : (t.plan ?? t.due);
   return (
     <Panel
       tone={kind}
       title={kind === "deadline" ? DEADLINE_LABEL : WANT_LABEL}
-      right={<span className="text-[12px] text-muted">{mine.length || ""}</span>}
+      right={
+        <span className="text-[12px] text-muted">{mine.length || ""}</span>
+      }
     >
       <div className="grid grid-cols-7 gap-1">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <div key={`${d}${i}`} className="pb-1 text-center text-[10px] text-muted">
+          <div
+            key={`${d}${i}`}
+            className="pb-1 text-center text-[10px] text-muted"
+          >
             {d}
           </div>
         ))}
@@ -2095,7 +2756,9 @@ function MonthCal({ kind, items, offset }: { kind: "deadline" | "want"; items: T
                 d === TODAY ? "border-ink/40" : "border-line/70"
               }`}
             >
-              <div className={`mb-0.5 text-[10px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>
+              <div
+                className={`mb-0.5 text-[10px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}
+              >
                 {Number(d.slice(8))}
               </div>
               {mine
@@ -2106,13 +2769,18 @@ function MonthCal({ kind, items, offset }: { kind: "deadline" | "want"; items: T
                     key={t.id}
                     title={t.title}
                     className="mb-0.5 truncate rounded px-1 text-[10px]"
-                    style={{ background: `${catColour(t.category)}1f`, color: catColour(t.category) }}
+                    style={{
+                      background: `${catColour(t.category)}1f`,
+                      color: catColour(t.category),
+                    }}
                   >
                     {t.title}
                   </div>
                 ))}
               {mine.filter((t) => dayOf(t) === d).length > 3 ? (
-                <div className="text-[9px] text-muted">+{mine.filter((t) => dayOf(t) === d).length - 3}</div>
+                <div className="text-[9px] text-muted">
+                  +{mine.filter((t) => dayOf(t) === d).length - 3}
+                </div>
               ) : null}
             </div>
           ),
@@ -2127,7 +2795,9 @@ function planWeek(offset = 0): string[] {
   const now = new Date();
   const base = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const monday = base - ((new Date(base).getUTCDay() + 6) % 7) * 86400000;
-  return Array.from({ length: 7 }, (_, i) => iso(new Date(monday + (i + offset * 7) * 86400000)));
+  return Array.from({ length: 7 }, (_, i) =>
+    iso(new Date(monday + (i + offset * 7) * 86400000)),
+  );
 }
 
 /**
@@ -2141,9 +2811,12 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   const [view, setView] = useState("plan");
   const cats = categoriesOf(board);
   const days = planWeek(week);
-  const pickedIn = (list: string[]) => board.todos.filter((t) => t.slot && list.some((d) => pickedOn(t, d)));
+  const pickedIn = (list: string[]) =>
+    board.todos.filter((t) => t.slot && list.some((d) => pickedOn(t, d)));
   const planned = pickedIn(days);
-  const empty = days.filter((d) => d >= TODAY && !planned.some((t) => pickedOn(t, d))).length;
+  const empty = days.filter(
+    (d) => d >= TODAY && !planned.some((t) => pickedOn(t, d)),
+  ).length;
   const late = board.todos.filter((t) => !t.done && t.due && t.due < TODAY);
   // Sunday is when the week is decided, so that's when the page offers to.
   const sunday = new Date(`${TODAY}T12:00:00`).getDay() === 0;
@@ -2172,7 +2845,9 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
               </span>
               <span className="ml-2 text-[12px] text-muted">
                 {planned.filter((t) => !t.done).length} planned
-                {empty ? ` · ${empty} ${empty === 1 ? "day" : "days"} still empty` : " · every day has something"}
+                {empty
+                  ? ` · ${empty} ${empty === 1 ? "day" : "days"} still empty`
+                  : " · every day has something"}
               </span>
             </div>
             <div className="flex gap-1.5">
@@ -2194,7 +2869,9 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
               onClick={() => setWeek(week + 1)}
               className="w-full rounded-xl border border-accent-2/40 bg-accent-2/5 p-3 text-left"
             >
-              <span className="text-[13px] font-medium text-accent-2">It&rsquo;s Sunday — set up next week.</span>
+              <span className="text-[13px] font-medium text-accent-2">
+                It&rsquo;s Sunday — set up next week.
+              </span>
               <span className="ml-2 text-[12px] text-muted">
                 Two or three a day is a week that actually happens.
               </span>
@@ -2227,13 +2904,16 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
           </div>
 
           <p className="text-[12px] text-muted">
-            Everything else stays in Notion — this is only what you&rsquo;ve promised each day.
+            Everything else stays in Notion — this is only what you&rsquo;ve
+            promised each day.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[13px] font-medium">{monthGrid(month).label}</span>
+            <span className="text-[13px] font-medium">
+              {monthGrid(month).label}
+            </span>
             <div className="flex gap-1.5">
               <Arrow label="Previous month" onClick={() => setMonth(month - 1)}>
                 ←
@@ -2268,13 +2948,22 @@ function AgentRow({ task, send }: { task: AgentTask; send: Send }) {
   return (
     <div className="border-b border-line py-3 last:border-none">
       <div className="flex items-center gap-3">
-        <span className={`w-[64px] shrink-0 text-[11px] uppercase tracking-widest ${AGENT_TONE[task.status] ?? "text-muted"}`}>
+        <span
+          className={`w-[64px] shrink-0 text-[11px] uppercase tracking-widest ${AGENT_TONE[task.status] ?? "text-muted"}`}
+        >
           {task.status}
         </span>
         <span className="min-w-0 flex-1 text-[14px]">{task.title}</span>
-        <span className="shrink-0 text-[12px] text-muted">{pretty(task.due)}</span>
+        <span className="shrink-0 text-[12px] text-muted">
+          {pretty(task.due)}
+        </span>
         {task.url !== "#" ? (
-          <a href={task.url} target="_blank" rel="noreferrer" className="shrink-0 text-[12px] text-accent-2 underline">
+          <a
+            href={task.url}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 text-[12px] text-accent-2 underline"
+          >
             open
           </a>
         ) : null}
@@ -2292,7 +2981,9 @@ function AgentRow({ task, send }: { task: AgentTask; send: Send }) {
           ✕
         </button>
       </div>
-      {task.details ? <p className="mt-1 pl-[76px] text-[13px] text-muted">{task.details}</p> : null}
+      {task.details ? (
+        <p className="mt-1 pl-[76px] text-[13px] text-muted">{task.details}</p>
+      ) : null}
       {task.result ? (
         <p className="mt-1 pl-[76px] text-[13px]">
           <span className="text-muted">Bot: </span>
@@ -2307,7 +2998,9 @@ function AgentRow({ task, send }: { task: AgentTask; send: Send }) {
             onClick={() =>
               send({ action: "agentStatus", id: task.id, status: s }, (b) => ({
                 ...b,
-                agent: b.agent.map((a) => (a.id === task.id ? { ...a, status: s } : a)),
+                agent: b.agent.map((a) =>
+                  a.id === task.id ? { ...a, status: s } : a,
+                ),
               }))
             }
             className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted transition hover:border-ink/30 hover:text-ink"
@@ -2323,24 +3016,40 @@ function AgentRow({ task, send }: { task: AgentTask; send: Send }) {
 /** The hand-off list: anything here is a job for the Grok bot, which reads the
  *  same Notion database and writes its answer back into the Result column. */
 function AgentPane({ board, send }: { board: Board; send: Send }) {
-  const open = board.agent.filter((a) => a.status !== "Done" && a.status !== "Failed");
-  const closed = board.agent.filter((a) => a.status === "Done" || a.status === "Failed");
-  const dbUrl = board.dbs.agent !== "demo" ? `https://notion.so/${board.dbs.agent.replace(/-/g, "")}` : null;
+  const open = board.agent.filter(
+    (a) => a.status !== "Done" && a.status !== "Failed",
+  );
+  const closed = board.agent.filter(
+    (a) => a.status === "Done" || a.status === "Failed",
+  );
+  const dbUrl =
+    board.dbs.agent !== "demo"
+      ? `https://notion.so/${board.dbs.agent.replace(/-/g, "")}`
+      : null;
 
   return (
     <div className="space-y-4">
       <Panel
         title="For the assistant"
-        right={<span className="text-[12px] text-muted">{open.length} waiting</span>}
+        right={
+          <span className="text-[12px] text-muted">{open.length} waiting</span>
+        }
       >
         <div className="space-y-3">
           <p className="text-[13px] leading-relaxed text-muted">
-            Anything you put here lands in the <span className="text-ink">Assistant Tasks</span> database in Notion,
-            which your assistant reads. It writes back into Result and flips the status when it&apos;s done.
+            Anything you put here lands in the{" "}
+            <span className="text-ink">Assistant Tasks</span> database in
+            Notion, which your assistant reads. It writes back into Result and
+            flips the status when it&apos;s done.
             {dbUrl ? (
               <>
                 {" "}
-                <a href={dbUrl} target="_blank" rel="noreferrer" className="text-accent-2 underline">
+                <a
+                  href={dbUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent-2 underline"
+                >
                   Open it in Notion
                 </a>
               </>
@@ -2352,7 +3061,15 @@ function AgentPane({ board, send }: { board: Board; send: Send }) {
               send({ action: "sendToAgent", title }, (b) => ({
                 ...b,
                 agent: [
-                  { id: `tmp-${Date.now()}`, title, details: "", due: null, status: "Queued", result: "", url: "#" },
+                  {
+                    id: `tmp-${Date.now()}`,
+                    title,
+                    details: "",
+                    due: null,
+                    status: "Queued",
+                    result: "",
+                    url: "#",
+                  },
                   ...b.agent,
                 ],
               }))
@@ -2369,7 +3086,12 @@ function AgentPane({ board, send }: { board: Board; send: Send }) {
       </Panel>
 
       {closed.length ? (
-        <Panel title="Finished" right={<span className="text-[12px] text-muted">{closed.length}</span>}>
+        <Panel
+          title="Finished"
+          right={
+            <span className="text-[12px] text-muted">{closed.length}</span>
+          }
+        >
           <div>
             {closed.map((a) => (
               <AgentRow key={a.id} task={a} send={send} />
@@ -2381,14 +3103,32 @@ function AgentPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
-function tickHabit(board: Board, send: Send, habit: Habit, date: string, on: boolean) {
-  const existing = board.ticks.find((t) => t.habitId === habit.id && t.date === date);
+function tickHabit(
+  board: Board,
+  send: Send,
+  habit: Habit,
+  date: string,
+  on: boolean,
+) {
+  const existing = board.ticks.find(
+    (t) => t.habitId === habit.id && t.date === date,
+  );
   send(
-    { action: "tickHabit", habitId: habit.id, habitName: habit.name, date, on, tickId: existing?.id },
+    {
+      action: "tickHabit",
+      habitId: habit.id,
+      habitName: habit.name,
+      date,
+      on,
+      tickId: existing?.id,
+    },
     (b) => ({
       ...b,
       ticks: on
-        ? [...b.ticks, { id: `tmp-${Date.now()}`, habitId: habit.id, date } as HabitTick]
+        ? [
+            ...b.ticks,
+            { id: `tmp-${Date.now()}`, habitId: habit.id, date } as HabitTick,
+          ]
         : b.ticks.filter((t) => !(t.habitId === habit.id && t.date === date)),
     }),
   );
@@ -2398,28 +3138,44 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
   const [cadence, setCadence] = useState("Daily");
   const days = monthDays().filter((d) => d <= TODAY);
   const allDays = monthDays();
-  const habits = board.habits.filter((h) => !h.bad && !h.affirmation && h.cadence === cadence);
+  const habits = board.habits.filter(
+    (h) => !h.bad && !h.affirmation && h.cadence === cadence,
+  );
   const bad = board.habits.filter((h) => h.bad);
-  const isOn = (habitId: string, date: string) => board.ticks.some((t) => t.habitId === habitId && t.date === date);
+  const isOn = (habitId: string, date: string) =>
+    board.ticks.some((t) => t.habitId === habitId && t.date === date);
 
   const total = habits.length * days.length;
-  const hits = habits.reduce((n, h) => n + days.filter((d) => isOn(h.id, d)).length, 0);
+  const hits = habits.reduce(
+    (n, h) => n + days.filter((d) => isOn(h.id, d)).length,
+    0,
+  );
 
   return (
     <div className="space-y-4">
       <Panel
         title="Habits"
-        right={<span className="text-[12px] text-muted">{total ? Math.round((hits / total) * 100) : 0}% this month</span>}
+        right={
+          <span className="text-[12px] text-muted">
+            {total ? Math.round((hits / total) * 100) : 0}% this month
+          </span>
+        }
       >
         <div className="space-y-4">
-          <Pills items={CADENCES.map((c) => ({ id: c, label: c }))} value={cadence} onChange={setCadence} />
+          <Pills
+            items={CADENCES.map((c) => ({ id: c, label: c }))}
+            value={cadence}
+            onChange={setCadence}
+          />
 
           {cadence === "Daily" ? (
             <div className="overflow-x-auto">
               <table className="border-separate border-spacing-x-[2px]">
                 <thead>
                   <tr>
-                    <th className="min-w-[130px] pb-1 text-left text-[11px] font-medium text-muted">Habit</th>
+                    <th className="min-w-[130px] pb-1 text-left text-[11px] font-medium text-muted">
+                      Habit
+                    </th>
                     {allDays.map((d) => (
                       <th
                         key={d}
@@ -2436,7 +3192,9 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
                 <tbody>
                   {habits.map((h) => (
                     <tr key={h.id}>
-                      <td className="pr-2 text-[13px] whitespace-nowrap">{h.name}</td>
+                      <td className="pr-2 text-[13px] whitespace-nowrap">
+                        {h.name}
+                      </td>
                       {allDays.map((d) => (
                         <td key={d} className="px-[1px] py-[2px]">
                           <div className="flex justify-center">
@@ -2446,14 +3204,23 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
                               <Tick
                                 on={isOn(h.id, d)}
                                 ring={d === TODAY}
-                                onChange={(v) => tickHabit(board, send, h, d, v)}
+                                onChange={(v) =>
+                                  tickHabit(board, send, h, d, v)
+                                }
                               />
                             )}
                           </div>
                         </td>
                       ))}
                       <td className="pl-2 text-right text-[11px] text-muted whitespace-nowrap">
-                        {days.length ? Math.round((days.filter((d) => isOn(h.id, d)).length / days.length) * 100) : 0}%
+                        {days.length
+                          ? Math.round(
+                              (days.filter((d) => isOn(h.id, d)).length /
+                                days.length) *
+                                100,
+                            )
+                          : 0}
+                        %
                         <button
                           type="button"
                           aria-label="Delete habit"
@@ -2476,8 +3243,14 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
           ) : (
             <div>
               {habits.map((h) => (
-                <div key={h.id} className="flex items-center gap-3 border-b border-line py-2.5 last:border-none">
-                  <Box on={isOn(h.id, TODAY)} onChange={(v) => tickHabit(board, send, h, TODAY, v)} />
+                <div
+                  key={h.id}
+                  className="flex items-center gap-3 border-b border-line py-2.5 last:border-none"
+                >
+                  <Box
+                    on={isOn(h.id, TODAY)}
+                    onChange={(v) => tickHabit(board, send, h, TODAY, v)}
+                  />
                   <span className="flex-1 text-[14px]">{h.name}</span>
                   <button
                     type="button"
@@ -2497,28 +3270,45 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
             </div>
           )}
 
-          {habits.length === 0 ? <p className="text-[14px] text-muted">No {cadence.toLowerCase()} habits yet.</p> : null}
+          {habits.length === 0 ? (
+            <p className="text-[14px] text-muted">
+              No {cadence.toLowerCase()} habits yet.
+            </p>
+          ) : null}
 
           <AddRow
             placeholder={`New ${cadence.toLowerCase()} habit…`}
             onAdd={(name) =>
               send({ action: "addHabit", name, cadence, bad: false }, (b) => ({
                 ...b,
-                habits: [...b.habits, { id: `tmp-${Date.now()}`, name, cadence, bad: false }],
+                habits: [
+                  ...b.habits,
+                  { id: `tmp-${Date.now()}`, name, cadence, bad: false },
+                ],
               }))
             }
           />
         </div>
       </Panel>
 
-      <Panel title="Bad habits" right={<span className="text-[12px] text-muted">tick the days you slipped</span>}>
+      <Panel
+        title="Bad habits"
+        right={
+          <span className="text-[12px] text-muted">
+            tick the days you slipped
+          </span>
+        }
+      >
         <div className="space-y-4">
           {bad.map((h) => (
             <div key={h.id}>
               <div className="mb-1 flex items-center gap-2">
-                <span className="text-[13px] font-medium text-bad">{h.name}</span>
+                <span className="text-[13px] font-medium text-bad">
+                  {h.name}
+                </span>
                 <span className="text-[11px] text-muted">
-                  {board.ticks.filter((t) => t.habitId === h.id).length}× this month
+                  {board.ticks.filter((t) => t.habitId === h.id).length}× this
+                  month
                 </span>
                 <button
                   type="button"
@@ -2536,7 +3326,12 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
               </div>
               <div className="flex flex-wrap gap-1">
                 {days.map((d) => (
-                  <Box key={d} tone="bad" on={isOn(h.id, d)} onChange={(v) => tickHabit(board, send, h, d, v)} />
+                  <Box
+                    key={d}
+                    tone="bad"
+                    on={isOn(h.id, d)}
+                    onChange={(v) => tickHabit(board, send, h, d, v)}
+                  />
                 ))}
               </div>
             </div>
@@ -2544,10 +3339,21 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
           <AddRow
             placeholder="Something you want to do less of…"
             onAdd={(name) =>
-              send({ action: "addHabit", name, cadence: "Daily", bad: true }, (b) => ({
-                ...b,
-                habits: [...b.habits, { id: `tmp-${Date.now()}`, name, cadence: "Daily", bad: true }],
-              }))
+              send(
+                { action: "addHabit", name, cadence: "Daily", bad: true },
+                (b) => ({
+                  ...b,
+                  habits: [
+                    ...b.habits,
+                    {
+                      id: `tmp-${Date.now()}`,
+                      name,
+                      cadence: "Daily",
+                      bad: true,
+                    },
+                  ],
+                }),
+              )
             }
           />
         </div>
@@ -2565,7 +3371,11 @@ const monthLabel = (year: number, month: number) =>
 
 /** A quarter, three months either side of today, so a goal can be written
  *  before the quarter it belongs to starts. */
-function quarterAt(shift: number): { period: string; year: number; first: number } {
+function quarterAt(shift: number): {
+  period: string;
+  year: number;
+  first: number;
+} {
   const now = new Date();
   const index = Math.floor(now.getMonth() / 3) + shift;
   const year = now.getFullYear() + Math.floor(index / 4);
@@ -2586,12 +3396,22 @@ const goalActions = (goal: Goal, send: Send) => ({
     })),
 });
 
-function GoalRow({ goal, send, note }: { goal: Goal; send: Send; note?: ReactNode }) {
+function GoalRow({
+  goal,
+  send,
+  note,
+}: {
+  goal: Goal;
+  send: Send;
+  note?: ReactNode;
+}) {
   const { tick, remove } = goalActions(goal, send);
   return (
     <div className="flex items-center gap-2 py-0.5">
       <Box on={goal.done} onChange={tick} />
-      <span className={`min-w-0 flex-1 truncate text-[13px] ${goal.done ? "text-muted line-through" : ""}`}>
+      <span
+        className={`min-w-0 flex-1 truncate text-[13px] ${goal.done ? "text-muted line-through" : ""}`}
+      >
         {goal.name}
       </span>
       {note}
@@ -2621,28 +3441,43 @@ function GoalTasks({ tasks, send }: { tasks: Todo[]; send: Send }) {
             onClick={() =>
               send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
                 ...b,
-                todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
+                todos: b.todos.map((x) =>
+                  x.id === t.id ? { ...x, done: !t.done } : x,
+                ),
               }))
             }
             className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded border text-[8px] transition ${
-              t.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+              t.done
+                ? "border-ink bg-ink text-brand-cream"
+                : "border-line hover:border-ink/40"
             }`}
           >
             {t.done ? "✓" : ""}
           </button>
-          <span className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}>
+          <span
+            className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}
+          >
             {t.title}
           </span>
           {!t.done ? (
-            <span className={`shrink-0 text-[10px] ${t.plan || t.due ? "text-muted" : "text-accent"}`}>
-              {t.plan ? pretty(t.plan) : t.due ? `due ${pretty(t.due)}` : "no day"}
+            <span
+              className={`shrink-0 text-[10px] ${t.plan || t.due ? "text-muted" : "text-accent"}`}
+            >
+              {t.plan
+                ? pretty(t.plan)
+                : t.due
+                  ? `due ${pretty(t.due)}`
+                  : "no day"}
             </span>
           ) : null}
           <button
             type="button"
             aria-label="Delete task"
             onClick={() =>
-              send({ action: "deleteTodo", id: t.id }, (b) => ({ ...b, todos: b.todos.filter((x) => x.id !== t.id) }))
+              send({ action: "deleteTodo", id: t.id }, (b) => ({
+                ...b,
+                todos: b.todos.filter((x) => x.id !== t.id),
+              }))
             }
             className="shrink-0 text-[11px] text-muted/60 hover:text-bad"
           >
@@ -2668,13 +3503,24 @@ function MonthGoals({
   quarterGoals: Goal[];
 }) {
   const [parent, setParent] = useState("");
-  const goals = board.goals.filter((g) => g.horizon === "month" && g.period === period);
+  const goals = board.goals.filter(
+    (g) => g.horizon === "month" && g.period === period,
+  );
   const under = quarterGoals.find((g) => g.id === parent) ?? null;
 
   const addTask = (goal: Goal, title: string) =>
     send({ action: "addTodo", title, goal: goal.id, kind: "want" }, (b) => ({
       ...b,
-      todos: [...b.todos, { ...newTodo(title, "deep", ""), plan: null, slot: null, kind: "want", goal: goal.id }],
+      todos: [
+        ...b.todos,
+        {
+          ...newTodo(title, "deep", ""),
+          plan: null,
+          slot: null,
+          kind: "want",
+          goal: goal.id,
+        },
+      ],
     }));
 
   return (
@@ -2692,26 +3538,40 @@ function MonthGoals({
           const loose = tasks.filter((t) => !t.done && !t.plan).length;
           const quarter = quarterGoals.find((q) => q.id === g.parent);
           return (
-            <div key={g.id} className="rounded-lg border border-line/70 px-2 py-1.5">
+            <div
+              key={g.id}
+              className="rounded-lg border border-line/70 px-2 py-1.5"
+            >
               <GoalRow
                 goal={g}
                 send={send}
                 note={
                   <span className="shrink-0 text-[10px] text-muted">
-                    {tasks.length ? `${done}/${tasks.length} done` : "no tasks yet"}
+                    {tasks.length
+                      ? `${done}/${tasks.length} done`
+                      : "no tasks yet"}
                     {loose ? ` · ${loose} unplanned` : ""}
                   </span>
                 }
               />
-              {quarter ? <p className="mb-1 pl-6 text-[10px] text-muted">towards {quarter.name}</p> : null}
+              {quarter ? (
+                <p className="mb-1 pl-6 text-[10px] text-muted">
+                  towards {quarter.name}
+                </p>
+              ) : null}
               <div className="pl-6">
                 <GoalTasks tasks={tasks} send={send} />
-                <AddRow placeholder="A task this needs…" onAdd={(title) => addTask(g, title)} />
+                <AddRow
+                  placeholder="A task this needs…"
+                  onAdd={(title) => addTask(g, title)}
+                />
               </div>
             </div>
           );
         })}
-        {goals.length === 0 ? <p className="text-[12px] text-muted">Nothing set for this month.</p> : null}
+        {goals.length === 0 ? (
+          <p className="text-[12px] text-muted">Nothing set for this month.</p>
+        ) : null}
       </div>
       {quarterGoals.length ? (
         <select
@@ -2731,7 +3591,14 @@ function MonthGoals({
         placeholder="A goal for this month…"
         onAdd={(name) =>
           send(
-            { action: "addGoal", name, area: under?.area ?? AREAS[0], period, horizon: "month", parent: parent || null },
+            {
+              action: "addGoal",
+              name,
+              area: under?.area ?? AREAS[0],
+              period,
+              horizon: "month",
+              parent: parent || null,
+            },
             (b) => ({
               ...b,
               goals: [
@@ -2758,19 +3625,31 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
   const [shift, setShift] = useState(0);
   const { period, year, first } = quarterAt(shift);
   const months = [0, 1, 2].map((i) => monthLabel(year, first + i));
-  const quarterGoals = board.goals.filter((g) => g.horizon === "quarter" && g.period === period);
-  const strays = board.goals.filter((g) => g.horizon === "month" && g.period === period);
+  const quarterGoals = board.goals.filter(
+    (g) => g.horizon === "quarter" && g.period === period,
+  );
+  const strays = board.goals.filter(
+    (g) => g.horizon === "month" && g.period === period,
+  );
 
   return (
     <Panel
       title="Goals"
       right={
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setShift((s) => s - 1)} className="text-[12px] text-muted hover:text-ink">
+          <button
+            type="button"
+            onClick={() => setShift((s) => s - 1)}
+            className="text-[12px] text-muted hover:text-ink"
+          >
             ←
           </button>
           <span className="text-[12px] font-medium">{period}</span>
-          <button type="button" onClick={() => setShift((s) => s + 1)} className="text-[12px] text-muted hover:text-ink">
+          <button
+            type="button"
+            onClick={() => setShift((s) => s + 1)}
+            className="text-[12px] text-muted hover:text-ink"
+          >
             →
           </button>
         </div>
@@ -2789,31 +3668,56 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
               send={send}
               note={
                 <span className="shrink-0 text-[10px] text-muted">
-                  {board.goals.filter((m) => m.parent === g.id && m.done).length}/
-                  {board.goals.filter((m) => m.parent === g.id).length} months
+                  {
+                    board.goals.filter((m) => m.parent === g.id && m.done)
+                      .length
+                  }
+                  /{board.goals.filter((m) => m.parent === g.id).length} months
                 </span>
               }
             />
           ))}
           {quarterGoals.length === 0 ? (
-            <p className="text-[12px] text-muted">What has to be true by the end of {period}?</p>
+            <p className="text-[12px] text-muted">
+              What has to be true by the end of {period}?
+            </p>
           ) : null}
         </div>
         <AddRow
           placeholder="A goal for the quarter…"
           onAdd={(name) =>
-            send({ action: "addGoal", name, area: AREAS[0], period, horizon: "quarter", parent: null }, (b) => ({
-              ...b,
-              goals: [
-                ...b.goals,
-                { id: `tmp-${Date.now()}`, name, area: AREAS[0], period, horizon: "quarter" as const, parent: null, done: false },
-              ],
-            }))
+            send(
+              {
+                action: "addGoal",
+                name,
+                area: AREAS[0],
+                period,
+                horizon: "quarter",
+                parent: null,
+              },
+              (b) => ({
+                ...b,
+                goals: [
+                  ...b.goals,
+                  {
+                    id: `tmp-${Date.now()}`,
+                    name,
+                    area: AREAS[0],
+                    period,
+                    horizon: "quarter" as const,
+                    parent: null,
+                    done: false,
+                  },
+                ],
+              }),
+            )
           }
         />
         {strays.length ? (
           <div className="mt-3 border-t border-line pt-2">
-            <p className="mb-1 text-[11px] text-muted">Written before months existed</p>
+            <p className="mb-1 text-[11px] text-muted">
+              Written before months existed
+            </p>
             {strays.map((g) => (
               <GoalRow key={g.id} goal={g} send={send} />
             ))}
@@ -2822,7 +3726,13 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         {months.map((m) => (
-          <MonthGoals key={m} board={board} send={send} period={m} quarterGoals={quarterGoals} />
+          <MonthGoals
+            key={m}
+            board={board}
+            send={send}
+            period={m}
+            quarterGoals={quarterGoals}
+          />
         ))}
       </div>
     </Panel>
@@ -2877,7 +3787,10 @@ export default function BoardApp({
   // Picked after mount so the server and the browser can't disagree on it.
   const [quote, setQuote] = useState("");
 
-  useEffect(() => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]), []);
+  useEffect(
+    () => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]),
+    [],
+  );
 
   // The dashboard is opened from a phone as often as a laptop, so the key is
   // remembered rather than needing the long link every time.
@@ -2916,9 +3829,9 @@ export default function BoardApp({
 
   const boardUrl = useCallback(
     () =>
-      `/api/board?key=${encodeURIComponent(captureKey)}`
-      + (todoDb ? `&todos=${encodeURIComponent(todoDb)}` : "")
-      + (ideaDb ? `&ideas=${encodeURIComponent(ideaDb)}` : ""),
+      `/api/board?key=${encodeURIComponent(captureKey)}` +
+      (todoDb ? `&todos=${encodeURIComponent(todoDb)}` : "") +
+      (ideaDb ? `&ideas=${encodeURIComponent(ideaDb)}` : ""),
     [captureKey, todoDb, ideaDb],
   );
 
@@ -2927,7 +3840,10 @@ export default function BoardApp({
     setLoading(true);
     try {
       const res = await fetch(boardUrl());
-      const json = (await res.json()) as { ok: boolean; error?: string } & Board;
+      const json = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+      } & Board;
       if (!json.ok) {
         setError(json.error ?? "Couldn't load your Notion.");
         return;
@@ -2935,7 +3851,9 @@ export default function BoardApp({
       setError("");
       setBoard(json);
     } catch {
-      setError("Couldn't reach the server. Check your connection and try again.");
+      setError(
+        "Couldn't reach the server. Check your connection and try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -2955,8 +3873,12 @@ export default function BoardApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action),
       }).catch(() => null);
-      const json = (await res?.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!json?.ok) setError(json?.error ?? "That didn't save to Notion — reloading.");
+      const json = (await res?.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+      if (!json?.ok)
+        setError(json?.error ?? "That didn't save to Notion — reloading.");
       void load();
     })();
   };
@@ -2965,15 +3887,20 @@ export default function BoardApp({
     return (
       <div className="board-theme">
         <div className="mx-auto max-w-md space-y-4 px-5 py-16">
-          <h1 className="text-[30px] font-semibold tracking-tight">Your dashboard</h1>
+          <h1 className="text-[30px] font-semibold tracking-tight">
+            Your dashboard
+          </h1>
           <p className="text-[15px] leading-relaxed text-muted">
-            Paste your capture link (the long one ending in <span className="font-mono">?key=…</span>) and this becomes
-            your Notion, in a layout you&apos;d actually look at.
+            Paste your capture link (the long one ending in{" "}
+            <span className="font-mono">?key=…</span>) and this becomes your
+            Notion, in a layout you&apos;d actually look at.
           </p>
           <AddRow
             placeholder="https://…/api/capture?key=…"
             onAdd={(v) => {
-              const key = v.includes("key=") ? decodeURIComponent(v.split("key=")[1]) : v.trim();
+              const key = v.includes("key=")
+                ? decodeURIComponent(v.split("key=")[1])
+                : v.trim();
               localStorage.setItem("captureKey", key);
               setCaptureKey(key);
             }}
@@ -2992,7 +3919,9 @@ export default function BoardApp({
               <h1 className="serif text-[34px] leading-none sm:text-[38px]">
                 {greeting().replace(".", ", Sophie.")}
               </h1>
-              <p className="mt-2.5 min-h-[18px] text-[13px] italic text-muted">{quote}</p>
+              <p className="mt-2.5 min-h-[18px] text-[13px] italic text-muted">
+                {quote}
+              </p>
             </div>
             <div className="flex shrink-0 items-center gap-4 pt-1.5">
               {board ? <StreakDots board={board} /> : null}
@@ -3014,7 +3943,9 @@ export default function BoardApp({
                 type="button"
                 onClick={() => setTab(t.id)}
                 className={`-mb-px shrink-0 border-b-2 pb-2.5 text-[13px] tracking-wide transition ${
-                  tab === t.id ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"
+                  tab === t.id
+                    ? "border-ink text-ink"
+                    : "border-transparent text-muted hover:text-ink"
                 }`}
               >
                 {t.label}
@@ -3024,11 +3955,15 @@ export default function BoardApp({
         </header>
 
         {error ? (
-          <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">{error}</div>
+          <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">
+            {error}
+          </div>
         ) : null}
 
         {!board ? (
-          <p className="py-16 text-center text-[15px] text-muted">Reading your Notion…</p>
+          <p className="py-16 text-center text-[15px] text-muted">
+            Reading your Notion…
+          </p>
         ) : tab === "today" ? (
           <TodayPane board={board} send={send} />
         ) : tab === "ideas" ? (
