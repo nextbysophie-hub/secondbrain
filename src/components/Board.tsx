@@ -20,7 +20,6 @@ function catColour(name: string | null): string {
 }
 
 const categoriesOf = (board: Board) => (board.categories?.length ? board.categories : CATEGORIES);
-const groupOf = (todo: Todo, cats: string[]) => (todo.category && cats.includes(todo.category) ? todo.category : NONE);
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const TODAY = iso(new Date());
@@ -31,13 +30,6 @@ function monthDays(): string[] {
   return Array.from({ length: days }, (_, i) =>
     iso(new Date(Date.UTC(now.getFullYear(), now.getMonth(), i + 1))),
   );
-}
-
-/** Seven days starting today, so a day that's gone never takes up room. */
-function weekDays(offset = 0): string[] {
-  const now = new Date();
-  const base = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  return Array.from({ length: 7 }, (_, i) => iso(new Date(base + (i + offset * 7) * 86400000)));
 }
 
 /** A month as Monday-first cells, with blanks where the month hasn't started. */
@@ -1729,9 +1721,6 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
 const DEADLINE_LABEL = "📌 Deadlines";
 const WANT_LABEL = "✏️ Want to do";
 
-/** How many things a day can realistically hold once the deadlines are in. */
-const WANT_CAP = 3;
-
 const KIND_FACE: Record<string, string> = { deadline: "📌", want: "✏️" };
 const KIND_WORD: Record<string, string> = { deadline: "Deadline", want: "Want to do" };
 
@@ -1761,174 +1750,150 @@ function KindChip({ todo, send }: { todo: Todo; send: Send }) {
  *  no date reads as an intention. */
 const kindOfTodo = (t: Todo): "deadline" | "want" => t.kind ?? (t.due ? "deadline" : "want");
 
-/** A deadline is something with a date somebody else cares about; everything
- *  else on the day is a choice, and the two read differently. */
-function Split({ items, send, cats }: { items: Todo[]; send: Send; cats: string[] }) {
-  const deadlines = items.filter((t) => kindOfTodo(t) === "deadline");
-  const wanted = items.filter((t) => !deadlines.includes(t));
-  const over = wanted.filter((t) => !t.done).length - WANT_CAP;
-  const group = (label: string, list: Todo[], note?: string) =>
-    list.length ? (
-      <div className={label === DEADLINE_LABEL ? "group-deadline" : "group-want"}>
-        <div className="mb-1 mt-1 flex items-center justify-between text-[10px] font-medium uppercase tracking-widest">
-          <span>{label}</span>
-          {note ? <span className="text-warn">{note}</span> : null}
-        </div>
-        {list.map((t) => (
-          <TodoRow key={t.id} todo={t} send={send} cats={cats} />
-        ))}
-      </div>
-    ) : null;
-  if (!deadlines.length || !wanted.length)
-    return (
-      <div>
-        {items.map((t) => (
-          <TodoRow key={t.id} todo={t} send={send} cats={cats} />
-        ))}
-      </div>
-    );
+/** One picked line inside a day of the week: enough to recognise it, and a
+ *  way to put it back down. */
+function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
   return (
-    <div>
-      {group(DEADLINE_LABEL, deadlines)}
-      {group(WANT_LABEL, wanted, over > 0 ? `${over} more than fits — move ${over} to another day` : undefined)}
+    <div className="flex items-center gap-2 py-1">
+      <button
+        type="button"
+        aria-label={todo.done ? "Mark as not done" : "Mark done"}
+        onClick={() =>
+          send({ action: "toggleTodo", id: todo.id, done: !todo.done }, (b) => ({
+            ...b,
+            todos: b.todos.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t)),
+          }))
+        }
+        className={`grid h-4 w-4 shrink-0 place-items-center text-[9px] transition ${
+          todo.slot === "deep" ? "rounded-full" : "rounded"
+        } border ${todo.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"}`}
+      >
+        {todo.done ? "✓" : ""}
+      </button>
+      <span className={`min-w-0 flex-1 truncate text-[13px] ${todo.done ? "text-muted line-through" : ""}`}>
+        {todo.title}
+      </span>
+      {todo.due && todo.due !== day ? (
+        <span className={`shrink-0 text-[10px] ${todo.due < day ? "text-bad" : "text-muted"}`}>
+          due {pretty(todo.due)}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => park(todo, send, day)}
+        title="Put it back on the pile"
+        className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+      >
+        ×
+      </button>
     </div>
   );
 }
 
-/** The week as seven stacked days, each with its own add box. */
-function WeekView({
-  send,
-  shown,
-  cats,
-  week,
-  setWeek,
-}: {
-  send: Send;
-  shown: Todo[];
-  cats: string[];
-  week: number;
-  setWeek: (n: number) => void;
-}) {
-  const [mode, setMode] = useState<"all" | "deadline" | "want">("all");
-  const wanting = mode === "want";
-  const days = weekDays(week);
-  const start = days[0];
-  const end = days[6];
-  const dayOf = (t: Todo) => t.plan ?? t.due;
-  const onDay = (t: Todo, d: string) => dayOf(t) === d && (mode === "all" || kindOfTodo(t) === mode);
-  // Days already gone are only worth the room if something is still owed.
-  const late = week === 0 ? shown.filter((t) => !t.done && dayOf(t) && (dayOf(t) as string) < TODAY) : [];
-  const undated = week === 0 ? shown.filter((t) => !t.done && !dayOf(t)) : [];
+/** One day of the week being planned: the deep blocks, the quick ones, and
+ *  room to fill what's still empty — the caps are what make a week plannable
+ *  instead of a wish list. */
+function PlanDay({ board, send, day }: { board: Board; send: Send; day: string }) {
+  const [open, setOpen] = useState<null | "deep" | "quick">(null);
+  const [draft, setDraft] = useState("");
+  const picked = board.todos.filter((t) => t.slot && pickedOn(t, day));
+  const deep = picked.filter((t) => t.slot === "deep");
+  const quick = picked.filter((t) => t.slot === "quick");
+  const slot = open ?? "deep";
+
+  const urgent = suggestFor(board, day);
+  const rest = board.todos.filter(
+    (t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.some((s) => s.todo.id === t.id),
+  );
+  const candidates = [...urgent.map((s) => s.todo), ...rest].slice(0, 40);
+
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    send({ action: "addTodo", title, slot, plan: day, kind: slot === "deep" ? "deadline" : "want" }, (b) => ({
+      ...b,
+      todos: [...b.todos, newTodo(title, slot, day)],
+    }));
+  };
+
+  const room = (slot === "deep" ? DEEP_CAP - deep.length : QUICK_CAP - quick.length) > 0;
 
   return (
-    <div className="space-y-4">
-      <Pills
-        items={[
-          { id: "all", label: "Everything" },
-          { id: "deadline", label: DEADLINE_LABEL },
-          { id: "want", label: WANT_LABEL },
-        ]}
-        value={mode}
-        onChange={(v) => setMode(v as "all" | "deadline" | "want")}
-      />
-      <div className="flex items-center justify-between">
-        <div className="text-[13px] font-medium">
-          {pretty(start)} – {pretty(end)}
-          {week === 0 ? <span className="ml-2 text-[12px] text-muted">from today</span> : null}
-        </div>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            disabled={week === 0}
-            onClick={() => setWeek(Math.max(0, week - 1))}
-            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink disabled:opacity-30"
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            onClick={() => setWeek(0)}
-            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
-          >
-            today
-          </button>
-          <button
-            type="button"
-            onClick={() => setWeek(week + 1)}
-            className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
-          >
-            →
-          </button>
-        </div>
+    <div
+      className={`rounded-xl border p-3 ${day === TODAY ? "border-ink/30 bg-panel" : "border-line"} ${
+        day < TODAY ? "opacity-60" : ""
+      }`}
+    >
+      <div className="mb-1.5 flex items-baseline justify-between">
+        <span className={`text-[12px] ${day === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(day)}</span>
+        <span className="text-[11px] text-muted">
+          {deep.length}/{DEEP_CAP} deep · {quick.length}/{QUICK_CAP} quick
+        </span>
       </div>
 
-      {late.length ? (
-        <div className="rounded-xl border border-bad/40 bg-bad/5 p-3">
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-widest text-bad">
-            Late · {late.length}
-          </div>
-          {late.map((t) => (
-            <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+      {picked.length ? (
+        <div className="mb-1">
+          {deep.map((t) => (
+            <PlanRow key={t.id} todo={t} send={send} day={day} />
+          ))}
+          {quick.map((t) => (
+            <PlanRow key={t.id} todo={t} send={send} day={day} />
           ))}
         </div>
-      ) : null}
+      ) : (
+        <p className="mb-1 text-[12px] text-muted">Nothing planned.</p>
+      )}
 
-      {days.map((d) => {
-        const items = shown.filter((t) => onDay(t, d));
-        return (
-          <div key={d} className={`rounded-xl border p-3 ${d === TODAY ? "border-ink/30 bg-panel" : "border-line"}`}>
-            <div className="mb-1 flex items-center justify-between">
-              <span className={`text-[12px] ${d === TODAY ? "font-medium text-ink" : "text-muted"}`}>{weekday(d)}</span>
-              <span className="text-[11px] text-muted">{items.filter((t) => !t.done).length || ""}</span>
-            </div>
-            <Split items={items} send={send} cats={cats} />
-            <AddRow
-              placeholder={wanting ? "Want to do this day…" : "Due this day…"}
-              onAdd={(title) =>
-                send(
-                  {
-                    action: "addTodo",
-                    title,
-                    kind: wanting ? "want" : "deadline",
-                    ...(wanting ? { plan: d } : { due: d }),
-                  },
-                  (b) => ({
-                  ...b,
-                  todos: [
-                    ...b.todos,
-                    {
-                      id: `tmp-${Date.now()}`,
-                      title,
-                      done: false,
-                      due: wanting ? null : d,
-                      plan: wanting ? d : null,
-                      kind: wanting ? ("want" as const) : ("deadline" as const),
-                      slot: null,
-                      minutes: null,
-                      category: null,
-                      priority: null,
-                      link: null,
-                      source: "Manual",
-                      url: "#",
-                    },
-                  ],
-                  }),
-                )
-              }
-            />
-          </div>
-        );
-      })}
+      <div className="flex gap-1.5">
+        {(["deep", "quick"] as const).map((s) => {
+          const full = (s === "deep" ? deep.length : quick.length) >= (s === "deep" ? DEEP_CAP : QUICK_CAP);
+          return (
+            <button
+              key={s}
+              type="button"
+              disabled={full}
+              onClick={() => setOpen(open === s ? null : s)}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                open === s ? "border-ink/40 text-ink" : "border-line text-muted hover:text-ink"
+              } disabled:opacity-30`}
+            >
+              {full ? `${s} is full` : `+ ${s}`}
+            </button>
+          );
+        })}
+      </div>
 
-      {undated.length ? (
-        <details>
-          <summary className="cursor-pointer text-[12px] text-muted">{undated.length} with no date</summary>
-          <div className="pt-2">
-            {undated.map((t) => (
-              <TodoRow key={t.id} todo={t} send={send} cats={cats} />
-            ))}
+      {open && room ? (
+        <div className="mt-2 space-y-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder={open === "deep" ? "A real block of work…" : "Something quick…"}
+            className="w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
+          />
+          <div className="max-h-44 overflow-auto rounded-lg border border-line bg-panel-2 p-1">
+            {candidates.length ? (
+              candidates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(null);
+                    pick(t, open, send, day);
+                  }}
+                  className="block w-full truncate rounded px-2 py-1 text-left text-[13px] hover:bg-panel"
+                >
+                  {t.title}
+                  {t.due ? <span className="ml-2 text-[11px] text-muted">{pretty(t.due)}</span> : null}
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-1 text-[13px] text-muted">Nothing waiting in Notion.</p>
+            )}
           </div>
-        </details>
+        </div>
       ) : null}
     </div>
   );
@@ -1989,127 +1954,131 @@ function MonthCal({ kind, items, offset }: { kind: "deadline" | "want"; items: T
   );
 }
 
-function TodosPane({ board, send }: { board: Board; send: Send }) {
-  const [view, setView] = useState("week");
-  const [cat, setCat] = useState("all");
+/** Monday-first week, so "next week" means the week, not the next seven days. */
+function planWeek(offset = 0): string[] {
+  const now = new Date();
+  const base = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const monday = base - ((new Date(base).getUTCDay() + 6) % 7) * 86400000;
+  return Array.from({ length: 7 }, (_, i) => iso(new Date(monday + (i + offset * 7) * 86400000)));
+}
+
+/**
+ * The week, planned rather than listed. Everything that exists lives in
+ * Notion; this page only answers "what are the few things each day holds",
+ * which is the part that never happens on its own.
+ */
+function PlanPane({ board, send }: { board: Board; send: Send }) {
   const [week, setWeek] = useState(0);
   const [month, setMonth] = useState(0);
+  const [view, setView] = useState("plan");
   const cats = categoriesOf(board);
-  const shown = cat === "all" ? board.todos : board.todos.filter((t) => groupOf(t, cats) === cat);
+  const days = planWeek(week);
+  const pickedIn = (list: string[]) => board.todos.filter((t) => t.slot && list.some((d) => pickedOn(t, d)));
+  const planned = pickedIn(days);
+  const empty = days.filter((d) => d >= TODAY && !planned.some((t) => pickedOn(t, d))).length;
+  const late = board.todos.filter((t) => !t.done && t.due && t.due < TODAY);
+  // Sunday is when the week is decided, so that's when the page offers to.
+  const sunday = new Date(`${TODAY}T12:00:00`).getDay() === 0;
+  const nextEmpty = pickedIn(planWeek(week + 1)).length === 0;
 
   return (
-    <div className="space-y-4">
-      <Panel
-        title="To-dos"
-        right={
-          <Pills
-            items={[
-              { id: "week", label: "Next 7 days" },
-              { id: "list", label: "List" },
-              { id: "calendar", label: "Calendars" },
-            ]}
-            value={view}
-            onChange={setView}
-          />
-        }
-      >
-        <div className="space-y-4">
-          <AddRow
-            placeholder="Add a to-do…"
-            botToggle
-            onAdd={(title, bot) => {
-              if (bot) send({ action: "sendToAgent", title }, queueAgent(title, null));
-              send({ action: "addTodo", title, category: cat === "all" ? undefined : cat }, (b) => ({
-                ...b,
-                todos: [
-                  ...b.todos,
-                  {
-                    id: `tmp-${Date.now()}`,
-                    title,
-                    done: false,
-                    due: null,
-                    plan: null,
-                    kind: null,
-                    slot: null,
-                    minutes: null,
-                    category: cat === "all" ? null : cat,
-                    priority: null,
-                    link: null,
-                    source: "Manual",
-                    url: "#",
-                  },
-                ],
-              }));
-            }}
-          />
-          <Pills
-            items={[{ id: "all", label: "Everything" }, ...cats.map((c) => ({ id: c, label: c }))]}
-            value={cat}
-            onChange={setCat}
-          />
+    <Panel
+      title="Plan the week"
+      right={
+        <Pills
+          items={[
+            { id: "plan", label: "Week" },
+            { id: "calendar", label: "Calendars" },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+      }
+    >
+      {view === "plan" ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[13px]">
+              <span className="font-medium">
+                {pretty(days[0])} – {pretty(days[6])}
+              </span>
+              <span className="ml-2 text-[12px] text-muted">
+                {planned.filter((t) => !t.done).length} planned
+                {empty ? ` · ${empty} ${empty === 1 ? "day" : "days"} still empty` : " · every day has something"}
+              </span>
+            </div>
+            <div className="flex gap-1.5">
+              <Arrow label="Previous week" onClick={() => setWeek(week - 1)}>
+                ←
+              </Arrow>
+              <Arrow label="This week" onClick={() => setWeek(0)}>
+                this week
+              </Arrow>
+              <Arrow label="Next week" onClick={() => setWeek(week + 1)}>
+                →
+              </Arrow>
+            </div>
+          </div>
 
-          {view === "list" ? (
-            <div>
-              {(cat === "all" ? [...cats, NONE] : [cat]).map((group) => {
-                const items = shown.filter((t) => groupOf(t, cats) === group);
-                if (!items.length) return null;
-                const done = items.filter((t) => t.done).length;
-                return (
-                  <div key={group} className="mb-4">
-                    <div className="mb-1 flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: catColour(group) }} />
-                      <span className="text-[13px] font-medium">{group}</span>
-                      <span className="text-[12px] text-muted">
-                        {done}/{items.length}
-                      </span>
-                    </div>
-                    {items.map((t) => (
-                      <TodoRow key={t.id} todo={t} send={send} cats={cats} />
-                    ))}
-                  </div>
-                );
-              })}
-              {shown.length === 0 ? <p className="text-[14px] text-muted">Nothing here yet.</p> : null}
-            </div>
-          ) : view === "week" ? (
-            <WeekView send={send} shown={shown} cats={cats} week={week} setWeek={setWeek} />
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] font-medium">{monthGrid(month).label}</span>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setMonth(month - 1)}
-                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
-                  >
-                    ←
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMonth(0)}
-                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
-                  >
-                    this month
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMonth(month + 1)}
-                    className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted hover:text-ink"
-                  >
-                    →
-                  </button>
-                </div>
+          {sunday && week === 0 && nextEmpty ? (
+            <button
+              type="button"
+              onClick={() => setWeek(week + 1)}
+              className="w-full rounded-xl border border-accent-2/40 bg-accent-2/5 p-3 text-left"
+            >
+              <span className="text-[13px] font-medium text-accent-2">It&rsquo;s Sunday — set up next week.</span>
+              <span className="ml-2 text-[12px] text-muted">
+                Two or three a day is a week that actually happens.
+              </span>
+            </button>
+          ) : null}
+
+          {late.length && week === 0 ? (
+            <details className="rounded-xl border border-bad/40 bg-bad/5 p-3">
+              <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-widest text-bad">
+                Late · {late.length}
+              </summary>
+              <div className="pt-1">
+                {late.map((t) => (
+                  <TodoRow key={t.id} todo={t} send={send} cats={cats} />
+                ))}
               </div>
-              <div className="grid gap-3 lg:grid-cols-2">
-                <MonthCal kind="deadline" items={shown} offset={month} />
-                <MonthCal kind="want" items={shown} offset={month} />
-              </div>
-            </div>
-          )}
+            </details>
+          ) : null}
+
+          <div className="grid gap-2 lg:grid-cols-2">
+            {days.map((d) => (
+              <PlanDay key={d} board={board} send={send} day={d} />
+            ))}
+          </div>
+
+          <p className="text-[12px] text-muted">
+            Everything else stays in Notion — this is only what you&rsquo;ve promised each day.
+          </p>
         </div>
-      </Panel>
-    </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] font-medium">{monthGrid(month).label}</span>
+            <div className="flex gap-1.5">
+              <Arrow label="Previous month" onClick={() => setMonth(month - 1)}>
+                ←
+              </Arrow>
+              <Arrow label="This month" onClick={() => setMonth(0)}>
+                this month
+              </Arrow>
+              <Arrow label="Next month" onClick={() => setMonth(month + 1)}>
+                →
+              </Arrow>
+            </div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <MonthCal kind="deadline" items={board.todos} offset={month} />
+            <MonthCal kind="want" items={board.todos} offset={month} />
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -2492,7 +2461,7 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
 const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
-  { id: "todos", label: "To-dos" },
+  { id: "todos", label: "Plan week" },
   { id: "agent", label: "Assistant" },
   { id: "habits", label: "Habits" },
   { id: "goals", label: "Goals" },
@@ -2692,7 +2661,7 @@ export default function BoardApp({
         ) : tab === "ideas" ? (
           <IdeasPane board={board} send={send} />
         ) : tab === "todos" ? (
-          <TodosPane board={board} send={send} />
+          <PlanPane board={board} send={send} />
         ) : tab === "agent" ? (
           <AgentPane board={board} send={send} />
         ) : tab === "habits" ? (
