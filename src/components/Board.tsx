@@ -2596,6 +2596,51 @@ function PlanTrash({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/** Some things shouldn't be on your week at all — hand them over. */
+function PlanHandoff({ board, send }: { board: Board; send: Send }) {
+  const [over, setOver] = useState(false);
+  const [gone, setGone] = useState<string | null>(null);
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const id = e.dataTransfer.getData("text/todo-id");
+        const todo = board.todos.find((t) => t.id === id);
+        if (!todo) return;
+        setGone(todo.title);
+        send(
+          {
+            action: "sendToAgent",
+            title: todo.title,
+            due: todo.due,
+            from: todo.url,
+          },
+          queueAgent(todo.title, todo.due),
+        );
+      }}
+      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[13px] transition ${
+        over ? "border-ink/40 bg-ink/5 text-ink" : "border-line text-muted"
+      }`}
+    >
+      <span className="text-[16px]">🤖</span>
+      <span className="min-w-0 truncate">
+        {over
+          ? "Drop it and the assistant takes it"
+          : gone
+            ? `Handed over: ${gone}`
+            : "Drag here to hand to assistant"}
+      </span>
+    </div>
+  );
+}
+
 /** The cap is the whole point of the week view, so going past it is a
  *  decision with a price, not a silent refusal. */
 function OverCap({
@@ -3119,6 +3164,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             </div>
             <div className="space-y-2">
               <PlanPile board={board} send={send} />
+              <PlanHandoff board={board} send={send} />
               <PlanTrash board={board} send={send} />
             </div>
           </div>
