@@ -443,7 +443,7 @@ const greeting = () => {
   return h < 12 ? "Good morning." : h < 17 ? "Good afternoon." : "Good evening.";
 };
 
-const pickedOn = (t: Todo, day: string) => t.plan === day || t.due === day;
+const pickedOn = (t: Todo, day: string) => (t.plan ? t.plan === day : t.due === day);
 
 const shiftDay = (day: string, by: number) => iso(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
 
