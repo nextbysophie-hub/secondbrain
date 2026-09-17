@@ -1897,6 +1897,34 @@ function PlanPile({ board }: { board: Board }) {
   );
 }
 
+/** Some things don't need a day, they need to be gone. */
+function PlanTrash({ board, send }: { board: Board; send: Send }) {
+  const [over, setOver] = useState(false);
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const id = e.dataTransfer.getData("text/todo-id");
+        if (!board.todos.some((t) => t.id === id)) return;
+        send({ action: "deleteTodo", id }, (b) => ({ ...b, todos: b.todos.filter((t) => t.id !== id) }));
+      }}
+      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[13px] transition ${
+        over ? "border-bad bg-bad/10 text-bad" : "border-line text-muted"
+      }`}
+    >
+      <span className="text-[16px]">🗑</span>
+      {over ? "Drop it and it's gone" : "Drag here to delete"}
+    </div>
+  );
+}
+
 /** One day of the week being planned: the deep blocks, the quick ones, and
  *  room to fill what's still empty — the caps are what make a week plannable
  *  instead of a wish list. */
@@ -2192,7 +2220,10 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
                 <PlanDay key={d} board={board} send={send} day={d} />
               ))}
             </div>
-            <PlanPile board={board} />
+            <div className="space-y-2">
+              <PlanPile board={board} />
+              <PlanTrash board={board} send={send} />
+            </div>
           </div>
 
           <p className="text-[12px] text-muted">
