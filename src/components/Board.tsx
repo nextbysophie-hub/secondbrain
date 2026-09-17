@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Action, AgentTask, Board, Goal, Habit, HabitTick, Idea, Timing, Todo } from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
@@ -841,6 +841,7 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   priority: null,
   link: null,
   source: "Manual",
+  goal: null,
   url: "#",
 });
 
@@ -1502,6 +1503,7 @@ function IdeaRow({ idea, send }: { idea: Idea; send: Send }) {
                 id: `tmp-${Date.now()}`,
                 title: idea.title,
                 done: false,
+                goal: null,
                 due: null,
                 plan: null,
                 kind: null,
@@ -1590,6 +1592,7 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
           id: `tmp-${Date.now()}`,
           title,
           done: false,
+          goal: null,
           due: null,
           plan: null,
           kind: "want",
@@ -1801,8 +1804,12 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
  *  hasn't been promised to a day yet, dragged across one at a time. */
 function PlanPile({ board }: { board: Board }) {
   const [q, setQ] = useState("");
-  const waiting = board.todos
-    .filter((t) => !t.done && !t.slot)
+  const [goal, setGoal] = useState("");
+  const open = board.todos.filter((t) => !t.done && !t.slot);
+  const goals = board.goals.filter((g) => !g.done && open.some((t) => t.goal === g.id));
+  const nameOf = (id: string | null) => board.goals.find((g) => g.id === id)?.name ?? null;
+  const waiting = open
+    .filter((t) => (goal ? t.goal === goal : true))
     .filter((t) => t.title.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
@@ -1818,6 +1825,22 @@ function PlanPile({ board }: { board: Board }) {
         placeholder="Find something…"
         className="mb-2 w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
       />
+      {goals.length ? (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {[{ id: "", name: "Everything" }, ...goals].map((g) => (
+            <button
+              key={g.id || "all"}
+              type="button"
+              onClick={() => setGoal(g.id)}
+              className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
+                goal === g.id ? "border-ink bg-ink text-brand-cream" : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              {g.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="max-h-[520px] space-y-1 overflow-auto">
         {waiting.length ? (
           waiting.map((t) => (
@@ -1832,6 +1855,9 @@ function PlanPile({ board }: { board: Board }) {
             >
               <span className="shrink-0 text-[11px] text-muted">⠿</span>
               <span className="min-w-0 flex-1 truncate">{t.title}</span>
+              {!goal && nameOf(t.goal) ? (
+                <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">{nameOf(t.goal)}</span>
+              ) : null}
               {t.due ? (
                 <span className={`shrink-0 text-[10px] ${t.due < TODAY ? "text-bad" : "text-muted"}`}>
                   {pretty(t.due)}
@@ -2476,75 +2502,226 @@ function HabitsPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+const monthLabel = (year: number, month: number) =>
+  new Date(Date.UTC(year, month, 1)).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+/** A quarter, three months either side of today, so a goal can be written
+ *  before the quarter it belongs to starts. */
+function quarterAt(shift: number): { period: string; year: number; first: number } {
+  const now = new Date();
+  const index = Math.floor(now.getMonth() / 3) + shift;
+  const year = now.getFullYear() + Math.floor(index / 4);
+  const q = ((index % 4) + 4) % 4;
+  return { period: `Q${q + 1} ${year}`, year, first: q * 3 };
+}
+
+const goalActions = (goal: Goal, send: Send) => ({
+  tick: (done: boolean) =>
+    send({ action: "toggleGoal", id: goal.id, done }, (b) => ({
+      ...b,
+      goals: b.goals.map((x) => (x.id === goal.id ? { ...x, done } : x)),
+    })),
+  remove: () =>
+    send({ action: "deleteGoal", id: goal.id }, (b) => ({
+      ...b,
+      goals: b.goals.filter((x) => x.id !== goal.id),
+    })),
+});
+
+function GoalRow({ goal, send, note }: { goal: Goal; send: Send; note?: ReactNode }) {
+  const { tick, remove } = goalActions(goal, send);
+  return (
+    <div className="flex items-center gap-2 py-0.5">
+      <Box on={goal.done} onChange={tick} />
+      <span className={`min-w-0 flex-1 truncate text-[13px] ${goal.done ? "text-muted line-through" : ""}`}>
+        {goal.name}
+      </span>
+      {note}
+      <button
+        type="button"
+        aria-label="Delete goal"
+        onClick={remove}
+        className="text-[12px] text-muted/60 hover:text-bad"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/** A month's goals, and under each one the work that actually carries it —
+ *  what's done, and what still has no day, which is what Sunday is for. */
+function MonthGoals({
+  board,
+  send,
+  period,
+  quarterGoals,
+}: {
+  board: Board;
+  send: Send;
+  period: string;
+  quarterGoals: Goal[];
+}) {
+  const [parent, setParent] = useState("");
+  const goals = board.goals.filter((g) => g.horizon === "month" && g.period === period);
+  const under = quarterGoals.find((g) => g.id === parent) ?? null;
+
+  const addTask = (goal: Goal, title: string) =>
+    send({ action: "addTodo", title, goal: goal.id, kind: "want" }, (b) => ({
+      ...b,
+      todos: [...b.todos, { ...newTodo(title, "deep", ""), plan: null, slot: null, kind: "want", goal: goal.id }],
+    }));
+
+  return (
+    <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-[13px] font-medium">{period}</span>
+        <span className="text-[11px] text-muted">
+          {goals.filter((g) => g.done).length}/{goals.length}
+        </span>
+      </div>
+      <div className="mb-2 space-y-2">
+        {goals.map((g) => {
+          const tasks = board.todos.filter((t) => t.goal === g.id);
+          const done = tasks.filter((t) => t.done).length;
+          const loose = tasks.filter((t) => !t.done && !t.plan).length;
+          const quarter = quarterGoals.find((q) => q.id === g.parent);
+          return (
+            <div key={g.id} className="rounded-lg border border-line/70 px-2 py-1.5">
+              <GoalRow
+                goal={g}
+                send={send}
+                note={
+                  <span className="shrink-0 text-[10px] text-muted">
+                    {tasks.length ? `${done}/${tasks.length} done` : "no tasks yet"}
+                    {loose ? ` · ${loose} unplanned` : ""}
+                  </span>
+                }
+              />
+              {quarter ? <p className="mb-1 pl-6 text-[10px] text-muted">towards {quarter.name}</p> : null}
+              <div className="pl-6">
+                <AddRow placeholder="A task this needs…" onAdd={(title) => addTask(g, title)} />
+              </div>
+            </div>
+          );
+        })}
+        {goals.length === 0 ? <p className="text-[12px] text-muted">Nothing set for this month.</p> : null}
+      </div>
+      {quarterGoals.length ? (
+        <select
+          value={parent}
+          onChange={(e) => setParent(e.target.value)}
+          className="mb-1 w-full rounded-lg border border-line bg-transparent px-2 py-1 text-[12px] text-muted outline-none"
+        >
+          <option value="">On its own</option>
+          {quarterGoals.map((g) => (
+            <option key={g.id} value={g.id}>
+              towards {g.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <AddRow
+        placeholder="A goal for this month…"
+        onAdd={(name) =>
+          send(
+            { action: "addGoal", name, area: under?.area ?? AREAS[0], period, horizon: "month", parent: parent || null },
+            (b) => ({
+              ...b,
+              goals: [
+                ...b.goals,
+                {
+                  id: `tmp-${Date.now()}`,
+                  name,
+                  area: under?.area ?? AREAS[0],
+                  period,
+                  horizon: "month" as const,
+                  parent: parent || null,
+                  done: false,
+                },
+              ],
+            }),
+          )
+        }
+      />
+    </div>
+  );
+}
+
 function GoalsPane({ board, send }: { board: Board; send: Send }) {
-  const periods = useMemo(() => {
-    const found = Array.from(new Set(board.goals.map((g) => g.period).filter(Boolean)));
-    const now = new Date();
-    const quarter = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
-    return found.includes(quarter) ? found : [quarter, ...found];
-  }, [board.goals]);
-  const [period, setPeriod] = useState(periods[0]);
-  const current = periods.includes(period) ? period : periods[0];
+  const [shift, setShift] = useState(0);
+  const { period, year, first } = quarterAt(shift);
+  const months = [0, 1, 2].map((i) => monthLabel(year, first + i));
+  const quarterGoals = board.goals.filter((g) => g.horizon === "quarter" && g.period === period);
+  const strays = board.goals.filter((g) => g.horizon === "month" && g.period === period);
 
   return (
     <Panel
       title="Goals"
-      right={<Pills items={periods.map((p) => ({ id: p, label: p }))} value={current} onChange={setPeriod} />}
+      right={
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setShift((s) => s - 1)} className="text-[12px] text-muted hover:text-ink">
+            ←
+          </button>
+          <span className="text-[12px] font-medium">{period}</span>
+          <button type="button" onClick={() => setShift((s) => s + 1)} className="text-[12px] text-muted hover:text-ink">
+            →
+          </button>
+        </div>
+      }
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        {AREAS.map((area) => {
-          const items = board.goals.filter((g) => g.area === area && g.period === current);
-          const done = items.filter((g) => g.done).length;
-          return (
-            <div key={area} className="rounded-xl border border-line bg-panel p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[13px] font-medium">{area}</span>
-                <span className="text-[11px] text-muted">
-                  {done}/{items.length}
+      <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
+        <div className="mb-2 flex items-baseline justify-between">
+          <span className="text-[13px] font-semibold">The quarter</span>
+          <span className="text-[11px] text-muted">two or three, no more</span>
+        </div>
+        <div className="mb-2">
+          {quarterGoals.map((g) => (
+            <GoalRow
+              key={g.id}
+              goal={g}
+              send={send}
+              note={
+                <span className="shrink-0 text-[10px] text-muted">
+                  {board.goals.filter((m) => m.parent === g.id && m.done).length}/
+                  {board.goals.filter((m) => m.parent === g.id).length} months
                 </span>
-              </div>
-              <div className="mb-2 space-y-1">
-                {items.map((g: Goal) => (
-                  <div key={g.id} className="flex items-center gap-2">
-                    <Box
-                      on={g.done}
-                      onChange={(v) =>
-                        send({ action: "toggleGoal", id: g.id, done: v }, (b) => ({
-                          ...b,
-                          goals: b.goals.map((x) => (x.id === g.id ? { ...x, done: v } : x)),
-                        }))
-                      }
-                    />
-                    <span className={`flex-1 text-[13px] ${g.done ? "text-muted line-through" : ""}`}>{g.name}</span>
-                    <button
-                      type="button"
-                      aria-label="Delete goal"
-                      onClick={() =>
-                        send({ action: "deleteGoal", id: g.id }, (b) => ({
-                          ...b,
-                          goals: b.goals.filter((x) => x.id !== g.id),
-                        }))
-                      }
-                      className="text-[12px] text-muted/60 hover:text-bad"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                {items.length === 0 ? <p className="text-[12px] text-muted">Nothing yet.</p> : null}
-              </div>
-              <AddRow
-                placeholder="Add a goal…"
-                onAdd={(name) =>
-                  send({ action: "addGoal", name, area, period: current }, (b) => ({
-                    ...b,
-                    goals: [...b.goals, { id: `tmp-${Date.now()}`, name, area, period: current, done: false }],
-                  }))
-                }
-              />
-            </div>
-          );
-        })}
+              }
+            />
+          ))}
+          {quarterGoals.length === 0 ? (
+            <p className="text-[12px] text-muted">What has to be true by the end of {period}?</p>
+          ) : null}
+        </div>
+        <AddRow
+          placeholder="A goal for the quarter…"
+          onAdd={(name) =>
+            send({ action: "addGoal", name, area: AREAS[0], period, horizon: "quarter", parent: null }, (b) => ({
+              ...b,
+              goals: [
+                ...b.goals,
+                { id: `tmp-${Date.now()}`, name, area: AREAS[0], period, horizon: "quarter" as const, parent: null, done: false },
+              ],
+            }))
+          }
+        />
+        {strays.length ? (
+          <div className="mt-3 border-t border-line pt-2">
+            <p className="mb-1 text-[11px] text-muted">Written before months existed</p>
+            {strays.map((g) => (
+              <GoalRow key={g.id} goal={g} send={send} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {months.map((m) => (
+          <MonthGoals key={m} board={board} send={send} period={m} quarterGoals={quarterGoals} />
+        ))}
       </div>
     </Panel>
   );

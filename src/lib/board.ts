@@ -48,6 +48,8 @@ export type Todo = {
   priority: string | null;
   link: string | null;
   source: string | null;
+  // The goal this is work towards, if any — the rest is life admin.
+  goal: string | null;
   url: string;
 };
 
@@ -77,7 +79,17 @@ export type Idea = {
 
 export type Habit = { id: string; name: string; cadence: string; bad: boolean; affirmation?: boolean };
 export type HabitTick = { id: string; habitId: string; date: string };
-export type Goal = { id: string; name: string; area: string; period: string; done: boolean };
+/** Goals are one table at two heights: a quarter goal is the parent, and the
+ *  month goals under it are what actually turn into tasks. */
+export type Goal = {
+  id: string;
+  name: string;
+  area: string;
+  period: string;
+  horizon: "month" | "quarter";
+  parent: string | null;
+  done: boolean;
+};
 
 export type Board = {
   todos: Todo[];
@@ -117,6 +129,7 @@ type Prop = {
   multi_select?: { name?: string }[];
   url?: string | null;
   number?: number | null;
+  relation?: { id: string }[];
 };
 
 type Row = { id: string; url: string; created_time?: string; properties: Record<string, Prop> };
@@ -131,6 +144,8 @@ const title = (s: string) => ({ title: [{ type: "text", text: { content: s.slice
 const richText = (s: string) => ({ rich_text: [{ type: "text", text: { content: s.slice(0, 1900) } }] });
 const dateProp = (s: string | null) => ({ date: s ? { start: s } : null });
 const selectProp = (s: string | null) => ({ select: s ? { name: s } : null });
+const relationProp = (id: string | null) => ({ relation: id ? [{ id }] : [] });
+const relationOf = (p?: Prop) => p?.relation?.[0]?.id ?? null;
 
 const kindOf = (r: Row, map: TaskMap): "deadline" | "want" | null => {
   if (!map.kindProp) return null;
@@ -175,6 +190,7 @@ export type TaskMap = {
   link: string | null;
   source: string | null;
   captured: string | null;
+  goal: string | null;
 };
 
 type SchemaProp = {
@@ -182,6 +198,7 @@ type SchemaProp = {
   type: string;
   select?: { options: { name: string }[] };
   multi_select?: { options: { name: string }[] };
+  relation?: { database_id?: string };
   number?: object;
   status?: { options: { id: string; name: string }[]; groups: { name: string; option_ids: string[] }[] };
 };
@@ -249,6 +266,7 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
     link: pick(props, "url")?.name ?? null,
     source: pick(props, "select", /source/i)?.name ?? null,
     captured: dates.find((p) => /captured|created/i.test(p.name))?.name ?? null,
+    goal: pick(props, "relation", /goal/i)?.name ?? null,
   };
 }
 
@@ -289,6 +307,38 @@ export async function ensureDayColumns(token: string, taskDbId: string, map: Tas
     slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
     minutes: map.minutes ?? "Minutes",
   };
+}
+
+/** A month goal is only real once the work under it is visible, which needs
+ *  the tracker to point at the goals table. */
+export async function ensureGoalLink(
+  token: string,
+  taskDbId: string,
+  goalsDbId: string,
+  map: TaskMap,
+): Promise<TaskMap> {
+  if (map.goal) return map;
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        Goal: { relation: { database_id: goalsDbId, type: "dual_property", dual_property: {} } },
+      },
+    }),
+  });
+  return { ...map, goal: "Goal" };
+}
+
+/** A goals table from before quarters existed has neither a height nor a
+ *  parent, and both are what make a month's goals roll up. */
+export async function ensureGoalColumns(token: string, goalsDbId: string): Promise<void> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${goalsDbId}`);
+  const missing: Record<string, object> = {};
+  if (!db.properties.Horizon) missing.Horizon = selectSchema(["Month", "Quarter"], ["blue", "purple"]);
+  if (!db.properties.Parent)
+    missing.Parent = { relation: { database_id: goalsDbId, type: "dual_property", dual_property: {} } };
+  if (!Object.keys(missing).length) return;
+  await notion(token, `/databases/${goalsDbId}`, { method: "PATCH", body: JSON.stringify({ properties: missing }) });
 }
 
 /* --------------------------------------------------------- database lookup */
@@ -419,6 +469,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       Goal: { title: {} },
       Area: selectSchema(AREAS, ["blue", "orange", "green", "purple"]),
       Period: { rich_text: {} },
+      Horizon: selectSchema(["Month", "Quarter"], ["blue", "purple"]),
       Done: { checkbox: {} },
     }));
   const agent =
@@ -526,6 +577,7 @@ export async function readBoard(
       priority: map.priority ? selectOf(r.properties[map.priority]) : null,
       link: map.link ? (r.properties[map.link]?.url ?? null) : null,
       source: map.source ? selectOf(r.properties[map.source]) : null,
+      goal: map.goal ? relationOf(r.properties[map.goal]) : null,
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
@@ -566,6 +618,8 @@ export async function readBoard(
       name: titleOf(r),
       area: selectOf(r.properties.Area) ?? AREAS[0],
       period: textOf(r.properties.Period),
+      horizon: selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
+      parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
     })),
   };
@@ -598,11 +652,12 @@ export type Action =
       plan?: string | null;
       kind?: "deadline" | "want" | null;
       slot?: "deep" | "quick" | null;
+      goal?: string | null;
     }
   | {
       action: "editTodo";
       id: string;
-      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes";
+      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes" | "goal";
       value: string | null;
     }
   | { action: "toggleTodo"; id: string; done: boolean }
@@ -616,7 +671,14 @@ export type Action =
   | { action: "addHabit"; name: string; cadence: string; bad: boolean; affirmation?: boolean }
   | { action: "deleteHabit"; id: string }
   | { action: "tickHabit"; habitId: string; habitName: string; date: string; on: boolean; tickId?: string }
-  | { action: "addGoal"; name: string; area: string; period: string }
+  | {
+      action: "addGoal";
+      name: string;
+      area: string;
+      period: string;
+      horizon?: "month" | "quarter";
+      parent?: string | null;
+    }
   | { action: "toggleGoal"; id: string; done: boolean }
   | { action: "deleteGoal"; id: string };
 
@@ -635,6 +697,7 @@ function taskProps(
     category?: string | null;
     link?: string | null;
     source?: string;
+    goal?: string | null;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -660,6 +723,7 @@ function taskProps(
       map.category.kind === "multi_select"
         ? { multi_select: fields.category ? [{ name: fields.category }] : [] }
         : selectProp(fields.category);
+  if (fields.goal !== undefined && map.goal) out[map.goal] = relationProp(fields.goal);
   if (fields.link && map.link) out[map.link] = { url: fields.link };
   if (fields.source && map.source) out[map.source] = selectProp(fields.source);
   if (fields.title !== undefined && map.captured)
@@ -680,6 +744,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
           plan: body.plan ?? null,
           kind: body.kind ?? null,
           slot: body.slot ?? null,
+          goal: body.goal ?? null,
           category: body.category ?? null,
           source: "Manual",
         }),
@@ -695,6 +760,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
         slot: { slot: (value === "deep" || value === "quick" ? value : null) as "deep" | "quick" | null },
         minutes: { minutes: value === null ? null : Number(value) || 0 },
         category: { category: value },
+        goal: { goal: value },
       }[body.field];
       await updatePage(token, body.id, taskProps(map, fields));
       return;
@@ -757,6 +823,8 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
         Goal: title(body.name),
         Area: selectProp(body.area),
         Period: richText(body.period),
+        Horizon: selectProp(body.horizon === "quarter" ? "Quarter" : "Month"),
+        ...(body.parent ? { Parent: relationProp(body.parent) } : {}),
         Done: { checkbox: false },
       });
       return;

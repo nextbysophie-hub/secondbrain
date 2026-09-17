@@ -4,6 +4,8 @@ import {
   applyAction,
   ensureBoardDbs,
   ensureDayColumns,
+  ensureGoalColumns,
+  ensureGoalLink,
   ensureKindColumn,
   ensurePlanColumn,
   readBoard,
@@ -33,13 +35,15 @@ const dbParam = (req: Request, name: string) => {
 
 /** The schema as it is, plus the columns the dashboard needs and a
  *  deadline-shaped tracker won't have. */
-async function taskMap(token: string, taskDbId: string): Promise<TaskMap> {
+async function taskMap(token: string, taskDbId: string, goalsDbId: string): Promise<TaskMap> {
   const map = await readTaskMap(token, taskDbId);
-  return ensureDayColumns(
+  const dated = await ensureDayColumns(
     token,
     taskDbId,
     await ensureKindColumn(token, taskDbId, await ensurePlanColumn(token, taskDbId, map)),
   );
+  await ensureGoalColumns(token, goalsDbId);
+  return ensureGoalLink(token, taskDbId, goalsDbId, dated);
 }
 
 /** Everything the dashboard renders, in one round trip. */
@@ -59,7 +63,7 @@ export async function GET(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task);
+    const map = await taskMap(creds.token, dbs.task, dbs.goals);
     const board = await readBoard(creds.token, dbs, map, since.toISOString().slice(0, 10));
     return NextResponse.json({ ok: true, ...board, dbs });
   } catch (e) {
@@ -81,7 +85,7 @@ export async function POST(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task);
+    const map = await taskMap(creds.token, dbs.task, dbs.goals);
     await applyAction(creds.token, dbs, map, body);
     return NextResponse.json({ ok: true });
   } catch (e) {
