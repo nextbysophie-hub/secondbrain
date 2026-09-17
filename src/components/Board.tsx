@@ -2553,6 +2553,53 @@ function GoalRow({ goal, send, note }: { goal: Goal; send: Send; note?: ReactNod
   );
 }
 
+/** The work linked to one goal, so adding a task shows the list growing
+ *  instead of a count going up. */
+function GoalTasks({ tasks, send }: { tasks: Todo[]; send: Send }) {
+  if (!tasks.length) return null;
+  return (
+    <ul className="mb-1 space-y-0.5">
+      {tasks.map((t) => (
+        <li key={t.id} className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={t.done ? "Mark as not done" : "Mark done"}
+            onClick={() =>
+              send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+                ...b,
+                todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
+              }))
+            }
+            className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded border text-[8px] transition ${
+              t.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+            }`}
+          >
+            {t.done ? "✓" : ""}
+          </button>
+          <span className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}>
+            {t.title}
+          </span>
+          {!t.done ? (
+            <span className={`shrink-0 text-[10px] ${t.plan || t.due ? "text-muted" : "text-accent"}`}>
+              {t.plan ? pretty(t.plan) : t.due ? `due ${pretty(t.due)}` : "no day"}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Delete task"
+            onClick={() =>
+              send({ action: "deleteTodo", id: t.id }, (b) => ({ ...b, todos: b.todos.filter((x) => x.id !== t.id) }))
+            }
+            className="shrink-0 text-[11px] text-muted/60 hover:text-bad"
+          >
+            ✕
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** A month's goals, and under each one the work that actually carries it —
  *  what's done, and what still has no day, which is what Sunday is for. */
 function MonthGoals({
@@ -2604,6 +2651,7 @@ function MonthGoals({
               />
               {quarter ? <p className="mb-1 pl-6 text-[10px] text-muted">towards {quarter.name}</p> : null}
               <div className="pl-6">
+                <GoalTasks tasks={tasks} send={send} />
                 <AddRow placeholder="A task this needs…" onAdd={(title) => addTask(g, title)} />
               </div>
             </div>
