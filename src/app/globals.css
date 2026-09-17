@@ -233,6 +233,14 @@ select {
   color: #4b45a8;
 }
 
+/* Money leaves on a date somebody else chose, so it reads as a different
+   kind of thing entirely: green, fixed, not part of the planning game. */
+.board-theme .zone-money {
+  border-color: #b9cfae;
+  background: #f1f7ed;
+  color: #33612f;
+}
+
 .board-theme .panel-dropping {
   border-style: dashed;
   box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.06);

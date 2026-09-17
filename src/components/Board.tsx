@@ -44,6 +44,20 @@ function catColour(name: string | null): string {
   return PALETTE[hash % PALETTE.length];
 }
 
+/** Rent doesn't care which day suits you. Money that leaves on a date
+ *  somebody else set isn't planning material, so the week shows it where it
+ *  falls and refuses to let it be dragged somewhere more convenient. */
+const MONEY =
+  /\b(rent|mortgage|bill|bills|invoice|invoices|payment|pay|paid|tax|taxes|insurance|loan|premium|subscription|dues|deposit|transfer|utilities|electric|water bill|card)\b/i;
+
+const isMoney = (t: Todo) =>
+  MONEY.test(t.title) ||
+  (t.category ? /financ|money|bill|payment/i.test(t.category) : false);
+
+/** A fixed money item only behaves that way once it has a date to sit on. */
+const moneyDay = (t: Todo) => t.due ?? t.plan;
+const isFixed = (t: Todo) => isMoney(t) && !!moneyDay(t);
+
 const categoriesOf = (board: Board) =>
   board.categories?.length ? board.categories : CATEGORIES;
 
@@ -2342,7 +2356,7 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
   const [q, setQ] = useState("");
   const [goal, setGoal] = useState("");
   const [over, setOver] = useState(false);
-  const open = board.todos.filter((t) => !t.done && !t.slot);
+  const open = board.todos.filter((t) => !t.done && !t.slot && !isFixed(t));
   const goals = board.goals.filter(
     (g) => !g.done && open.some((t) => t.goal === g.id),
   );
@@ -2518,6 +2532,47 @@ function OverCap({
   );
 }
 
+/** Money owed on a day: shown, tickable, and deliberately immovable. */
+function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
+  return (
+    <div className="zone-money mb-1.5 rounded-lg border px-2 py-1.5">
+      <div className="mb-0.5 flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-widest">money due</span>
+        <span className="text-[10px] opacity-70">can&rsquo;t be moved</span>
+      </div>
+      {rows.map((t) => (
+        <div key={t.id} className="flex items-center gap-2 py-0.5">
+          <button
+            type="button"
+            aria-label={t.done ? "Mark as not paid" : "Mark paid"}
+            onClick={() =>
+              send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+                ...b,
+                todos: b.todos.map((x) =>
+                  x.id === t.id ? { ...x, done: !t.done } : x,
+                ),
+              }))
+            }
+            className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
+              t.done
+                ? "border-current bg-current text-brand-cream"
+                : "border-current/40 hover:border-current"
+            }`}
+          >
+            {t.done ? "✓" : ""}
+          </button>
+          <span
+            className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? "line-through opacity-60" : ""}`}
+          >
+            {t.title}
+          </span>
+          <span className="shrink-0 text-[11px] opacity-70">💸</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** One day of the week being planned: the deep blocks, the quick ones, and
  *  room to fill what's still empty — the caps are what make a week plannable
  *  instead of a wish list. */
@@ -2537,7 +2592,10 @@ function PlanDay({
     todo: Todo;
     into: "deep" | "quick";
   } | null>(null);
-  const picked = board.todos.filter((t) => t.slot && pickedOn(t, day));
+  const picked = board.todos.filter(
+    (t) => t.slot && pickedOn(t, day) && !isFixed(t),
+  );
+  const fixed = board.todos.filter((t) => isFixed(t) && moneyDay(t) === day);
   const deep = picked.filter((t) => t.slot === "deep");
   const quick = picked.filter((t) => t.slot === "quick");
   const slot = open ?? "deep";
@@ -2546,6 +2604,7 @@ function PlanDay({
   const rest = board.todos.filter(
     (t) =>
       !t.done &&
+      !isFixed(t) &&
       !(t.slot && pickedOn(t, day)) &&
       !urgent.some((s) => s.todo.id === t.id),
   );
@@ -2586,12 +2645,31 @@ function PlanDay({
     pick(todo, into, send, day);
   };
 
+  /** Email is the one thing every day holds, so the slot is always drawn and
+   *  only becomes a real row once she takes it on. */
+  const hasEmail = quick.some((t) => EMAIL_RE.test(t.title));
+
+  const takeEmails = () =>
+    send(
+      {
+        action: "addTodo",
+        title: "Go through emails",
+        slot: "quick",
+        plan: day,
+        kind: "want",
+      },
+      (b) => ({
+        ...b,
+        todos: [...b.todos, newTodo("Go through emails", "quick", day)],
+      }),
+    );
+
   const drop = (e: React.DragEvent, into: "deep" | "quick") => {
     e.preventDefault();
     setOver(null);
     const id = e.dataTransfer.getData("text/todo-id");
     const todo = board.todos.find((t) => t.id === id);
-    if (todo) place(todo, into);
+    if (todo && !isFixed(todo)) place(todo, into);
   };
 
   /** Each half of a day is its own target, so dropping is also the choice
@@ -2620,11 +2698,22 @@ function PlanDay({
             {rows.length}/{cap}
           </span>
         </div>
-        {rows.length ? (
-          rows.map((t) => <PlanRow key={t.id} todo={t} send={send} day={day} />)
-        ) : (
+        {rows.map((t) => (
+          <PlanRow key={t.id} todo={t} send={send} day={day} />
+        ))}
+        {kind === "quick" && !hasEmail ? (
+          <button
+            type="button"
+            onClick={takeEmails}
+            className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-muted/70 transition hover:text-ink"
+          >
+            <span className="h-3.5 w-3.5 shrink-0 rounded border border-dashed border-line" />
+            <span className="min-w-0 flex-1 truncate">Go through emails</span>
+          </button>
+        ) : null}
+        {!rows.length && kind === "deep" ? (
           <p className="py-1 text-[12px] text-muted/70">Drop one here.</p>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -2645,6 +2734,8 @@ function PlanDay({
           {picked.filter((t) => !t.done).length || ""}
         </span>
       </div>
+
+      {fixed.length ? <MoneyDue rows={fixed} send={send} /> : null}
 
       <div className="mb-1 space-y-1">
         {zone("deep", deep)}
