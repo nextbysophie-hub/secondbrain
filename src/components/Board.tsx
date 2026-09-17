@@ -2338,9 +2338,10 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
 
 /** The pile the week gets planned out of: everything real in Notion that
  *  hasn't been promised to a day yet, dragged across one at a time. */
-function PlanPile({ board }: { board: Board }) {
+function PlanPile({ board, send }: { board: Board; send: Send }) {
   const [q, setQ] = useState("");
   const [goal, setGoal] = useState("");
+  const [over, setOver] = useState(false);
   const open = board.todos.filter((t) => !t.done && !t.slot);
   const goals = board.goals.filter(
     (g) => !g.done && open.some((t) => t.goal === g.id),
@@ -2353,9 +2354,23 @@ function PlanPile({ board }: { board: Board }) {
     .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
   return (
-    <div className="rounded-xl border border-line p-3">
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const id = e.dataTransfer.getData("text/todo-id");
+        const todo = board.todos.find((t) => t.id === id);
+        if (todo && todo.slot) park(todo, send, todo.plan ?? "");
+      }}
+      className={`rounded-xl border p-3 transition ${over ? "border-ink/40 bg-ink/5" : "border-line"}`}
+    >
       <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[12px] font-medium">Waiting in Notion</span>
+        <span className="text-[12px] font-medium">{over ? "Drop it back here" : "Waiting in Notion"}</span>
         <span className="text-[11px] text-muted">{waiting.length}</span>
       </div>
       <input
@@ -2417,7 +2432,7 @@ function PlanPile({ board }: { board: Board }) {
         )}
       </div>
       <p className="mt-2 text-[12px] text-muted">
-        Drag one onto a day. On a phone, use + deep / + quick instead.
+        Drag one onto a day, or drag one back here to unplan it. On a phone, use + deep / + quick and × instead.
       </p>
     </div>
   );
@@ -2898,7 +2913,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
               ))}
             </div>
             <div className="space-y-2">
-              <PlanPile board={board} />
+              <PlanPile board={board} send={send} />
               <PlanTrash board={board} send={send} />
             </div>
           </div>
