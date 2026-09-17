@@ -11,6 +11,7 @@ import type {
   Action,
   AgentTask,
   Board,
+  Deal,
   Goal,
   Habit,
   HabitTick,
@@ -1087,6 +1088,7 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   link: null,
   source: "Manual",
   goal: null,
+  deal: null,
   url: "#",
 });
 
@@ -1967,6 +1969,7 @@ const ideaToTodo = (idea: Idea, send: Send) => {
           priority: null,
           link: idea.link,
           source: "Manual",
+          deal: null,
           url: "#",
         },
       ],
@@ -2130,6 +2133,7 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
           priority: null,
           link: null,
           source: "Manual",
+          deal: null,
           url: "#",
         },
       ],
@@ -4005,12 +4009,296 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/* -------------------------------------------------------------- brand deals */
+
+const STAGES = [
+  "Pitched",
+  "Negotiating",
+  "Signed",
+  "Filming",
+  "Delivered",
+  "Invoiced",
+  "Paid",
+];
+
+const money = (n: number) =>
+  `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+/** A deal is only finished when the money lands, so everything short of Paid
+ *  still counts as owed to you. */
+function DealCard({
+  deal,
+  board,
+  send,
+}: {
+  deal: Deal;
+  board: Board;
+  send: Send;
+}) {
+  const [adding, setAdding] = useState("");
+  const tasks = board.todos.filter((t) => t.deal === deal.id);
+  const left = tasks.filter((t) => !t.done).length;
+
+  const edit = (
+    field: "brand" | "stage" | "fee" | "due" | "contact",
+    value: string | null,
+  ) =>
+    send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
+      ...b,
+      deals: b.deals.map((d) =>
+        d.id === deal.id
+          ? {
+              ...d,
+              ...(field === "fee"
+                ? { fee: value === null ? null : Number(value) || 0 }
+                : field === "brand"
+                  ? { brand: value ?? "" }
+                  : field === "contact"
+                    ? { contact: value ?? "" }
+                    : field === "due"
+                      ? { due: value }
+                      : { stage: value ?? d.stage }),
+            }
+          : d,
+      ),
+    }));
+
+  const addTask = () => {
+    const title = adding.trim();
+    if (!title) return;
+    setAdding("");
+    send(
+      { action: "addTodo", title, deal: deal.id, kind: "deadline" },
+      (b) => ({
+        ...b,
+        todos: [
+          ...b.todos,
+          {
+            ...newTodo(title, "deep", ""),
+            plan: null,
+            slot: null,
+            deal: deal.id,
+          },
+        ],
+      }),
+    );
+  };
+
+  return (
+    <div className="rounded-xl border border-line p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          defaultValue={deal.brand}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v && v !== deal.brand) edit("brand", v);
+          }}
+          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[14px] font-medium outline-none transition hover:border-line focus:border-ink/30"
+        />
+        <input
+          type="number"
+          defaultValue={deal.fee ?? ""}
+          placeholder="fee"
+          onBlur={(e) => edit("fee", e.target.value || null)}
+          className="w-[86px] rounded border border-transparent bg-transparent px-1 py-0.5 text-right text-[13px] outline-none transition hover:border-line focus:border-ink/30"
+        />
+        <input
+          type="date"
+          value={deal.due ?? ""}
+          aria-label="Deliverable due"
+          onChange={(e) => edit("due", e.target.value || null)}
+          className={`w-[126px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none transition hover:border-line ${
+            deal.due && deal.due < TODAY && deal.stage !== "Paid"
+              ? "text-bad"
+              : "text-muted"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() =>
+            send({ action: "deleteDeal", id: deal.id }, (b) => ({
+              ...b,
+              deals: b.deals.filter((d) => d.id !== deal.id),
+            }))
+          }
+          title="Remove this deal"
+          className="text-[12px] text-muted transition hover:text-bad"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {STAGES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => edit("stage", s)}
+            className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
+              deal.stage === s
+                ? "border-ink bg-ink text-brand-cream"
+                : "border-line text-muted hover:text-ink"
+            }`}
+          >
+            {s.toLowerCase()}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 space-y-0.5">
+        {tasks.map((t) => (
+          <div key={t.id} className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={t.done ? "Mark as not done" : "Mark done"}
+              onClick={() =>
+                send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+                  ...b,
+                  todos: b.todos.map((x) =>
+                    x.id === t.id ? { ...x, done: !t.done } : x,
+                  ),
+                }))
+              }
+              className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
+                t.done
+                  ? "border-ink bg-ink text-brand-cream"
+                  : "border-line hover:border-ink/40"
+              }`}
+            >
+              {t.done ? "✓" : ""}
+            </button>
+            <span
+              className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? "text-muted line-through" : ""}`}
+            >
+              {t.title}
+            </span>
+            <span className="shrink-0 text-[10px] text-muted">
+              {t.plan ? pretty(t.plan) : "no day"}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        <input
+          value={adding}
+          onChange={(e) => setAdding(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addTask()}
+          placeholder="+ a to-do for this deal…"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-2 py-1 text-[13px] outline-none placeholder:text-muted/70"
+        />
+        <span className="shrink-0 text-[11px] text-muted">
+          {tasks.length ? `${left} left` : "no to-dos yet"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Deals, and the work each one is actually waiting on. */
+function DealsPane({ board, send }: { board: Board; send: Send }) {
+  const paid = board.deals.filter((d) => d.stage === "Paid");
+  const live = board.deals.filter((d) => d.stage !== "Paid");
+  const owed = live
+    .filter((d) => d.stage === "Delivered" || d.stage === "Invoiced")
+    .reduce((n, d) => n + (d.fee ?? 0), 0);
+  const booked = board.deals.reduce((n, d) => n + (d.fee ?? 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title="Brand deals"
+        right={
+          <span className="text-[12px] text-muted">
+            {money(booked)} booked
+            {owed ? ` · ${money(owed)} waiting on payment` : ""}
+          </span>
+        }
+      >
+        <div className="space-y-2">
+          {live.length ? (
+            live.map((d) => (
+              <DealCard key={d.id} deal={d} board={board} send={send} />
+            ))
+          ) : (
+            <p className="text-[13px] text-muted">
+              No live deals — add the next one below.
+            </p>
+          )}
+        </div>
+        <div className="mt-3">
+          <AddRow
+            placeholder="New deal — the brand's name…"
+            onAdd={(brand) =>
+              send({ action: "addDeal", brand }, (b) => ({
+                ...b,
+                deals: [
+                  ...b.deals,
+                  {
+                    id: `tmp-${Date.now()}`,
+                    brand,
+                    stage: STAGES[0],
+                    fee: null,
+                    due: null,
+                    contact: "",
+                    link: null,
+                    notes: "",
+                    url: "#",
+                  },
+                ],
+              }))
+            }
+          />
+        </div>
+      </Panel>
+
+      {paid.length ? (
+        <Panel title="Paid" right={<span className="text-[12px] text-muted">{paid.length}</span>}>
+          <div className="space-y-1">
+            {paid.map((d) => (
+              <div key={d.id} className="flex items-center gap-2 text-[13px]">
+                <span className="min-w-0 flex-1 truncate">{d.brand}</span>
+                <span className="shrink-0 text-muted">
+                  {d.fee ? money(d.fee) : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    send(
+                      {
+                        action: "editDeal",
+                        id: d.id,
+                        field: "stage",
+                        value: "Invoiced",
+                      },
+                      (b) => ({
+                        ...b,
+                        deals: b.deals.map((x) =>
+                          x.id === d.id ? { ...x, stage: "Invoiced" } : x,
+                        ),
+                      }),
+                    )
+                  }
+                  className="shrink-0 text-[11px] text-muted hover:text-ink"
+                >
+                  not paid after all
+                </button>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- shell */
 
 const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
   { id: "todos", label: "Plan week" },
+  { id: "deals", label: "Deals" },
   { id: "agent", label: "Assistant" },
   { id: "habits", label: "Habits" },
   { id: "goals", label: "Goals" },
@@ -4236,6 +4524,8 @@ export default function BoardApp({
           <IdeasPane board={board} send={send} />
         ) : tab === "todos" ? (
           <PlanPane board={board} send={send} />
+        ) : tab === "deals" ? (
+          <DealsPane board={board} send={send} />
         ) : tab === "agent" ? (
           <AgentPane board={board} send={send} />
         ) : tab === "habits" ? (

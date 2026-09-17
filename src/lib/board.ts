@@ -50,6 +50,8 @@ export type Todo = {
   source: string | null;
   // The goal this is work towards, if any — the rest is life admin.
   goal: string | null;
+  // The brand deal this is owed to, if any.
+  deal: string | null;
   url: string;
 };
 
@@ -92,6 +94,20 @@ export type Goal = {
   done: boolean;
 };
 
+/** A paid partnership from the first email to the money landing: the stage is
+ *  the whole point, because an unpaid invoice is still an open deal. */
+export type Deal = {
+  id: string;
+  brand: string;
+  stage: string;
+  fee: number | null;
+  due: string | null;
+  contact: string;
+  link: string | null;
+  notes: string;
+  url: string;
+};
+
 export type Board = {
   todos: Todo[];
   agent: AgentTask[];
@@ -99,6 +115,7 @@ export type Board = {
   habits: Habit[];
   ticks: HabitTick[];
   goals: Goal[];
+  deals: Deal[];
   timings: Timing[];
   categories: string[];
   dbs: BoardDbs;
@@ -111,11 +128,22 @@ export type BoardDbs = {
   ticks: string;
   goals: string;
   agent: string;
+  deals: string;
 };
 
 export const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 export const AREAS = ["Business", "Content", "Health", "Life"];
 export const CADENCES = ["Daily", "Weekly", "Monthly"];
+/** A deal moves one way, and "Delivered" is not the same as "Paid". */
+export const DEAL_STAGES = [
+  "Pitched",
+  "Negotiating",
+  "Signed",
+  "Filming",
+  "Delivered",
+  "Invoiced",
+  "Paid",
+];
 
 /* ------------------------------------------------------- property plumbing */
 
@@ -192,6 +220,7 @@ export type TaskMap = {
   source: string | null;
   captured: string | null;
   goal: string | null;
+  deal: string | null;
 };
 
 type SchemaProp = {
@@ -268,6 +297,7 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
     source: pick(props, "select", /source/i)?.name ?? null,
     captured: dates.find((p) => /captured|created/i.test(p.name))?.name ?? null,
     goal: pick(props, "relation", /goal/i)?.name ?? null,
+    deal: pick(props, "relation", /deal|brand/i)?.name ?? null,
   };
 }
 
@@ -330,6 +360,26 @@ export async function ensureGoalLink(
   return { ...map, goal: "Goal" };
 }
 
+/** A deal's to-dos only roll up under it once the tracker points at the deals
+ *  table. */
+export async function ensureDealLink(
+  token: string,
+  taskDbId: string,
+  dealsDbId: string,
+  map: TaskMap,
+): Promise<TaskMap> {
+  if (map.deal) return map;
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        Deal: { relation: { database_id: dealsDbId, type: "dual_property", dual_property: {} } },
+      },
+    }),
+  });
+  return { ...map, deal: "Deal" };
+}
+
 /** A goals table from before quarters existed has neither a height nor a
  *  parent, and both are what make a month's goals roll up. */
 export async function ensureGoalColumns(token: string, goalsDbId: string): Promise<void> {
@@ -358,6 +408,7 @@ const HABIT_DB = "Habits";
 const TICK_DB = "Habit Log";
 const GOAL_DB = "Goals";
 const AGENT_DB = "Assistant Tasks";
+const DEAL_DB = "Brand Deals";
 const AGENT_DB_LEGACY = "Agent Tasks";
 
 export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
@@ -437,13 +488,14 @@ async function ensureTaskColumns(token: string, taskDbId: string) {
 export async function ensureBoardDbs(token: string, contentDbId: string, taskDbId: string): Promise<BoardDbs> {
   await ensureTaskColumns(token, taskDbId);
 
-  const [foundHabits, foundTicks, foundGoals, foundAgent] = await Promise.all([
+  const [foundHabits, foundTicks, foundGoals, foundAgent, foundDeals] = await Promise.all([
     findDatabase(token, HABIT_DB),
     findDatabase(token, TICK_DB),
     findDatabase(token, GOAL_DB),
     findDatabase(token, AGENT_DB).then((id) => id ?? findDatabase(token, AGENT_DB_LEGACY)),
+    findDatabase(token, DEAL_DB),
   ]);
-  if (foundHabits && foundTicks && foundGoals && foundAgent)
+  if (foundHabits && foundTicks && foundGoals && foundAgent && foundDeals)
     return {
       content: contentDbId,
       task: taskDbId,
@@ -451,6 +503,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       ticks: foundTicks,
       goals: foundGoals,
       agent: foundAgent,
+      deals: foundDeals,
     };
 
   const parent = await parentPageOf(token, [taskDbId, contentDbId]);
@@ -495,7 +548,27 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       Result: { rich_text: {} },
       From: { url: {} },
     }));
-  return { content: contentDbId, task: taskDbId, habits, ticks, goals, agent };
+  const deals =
+    foundDeals ??
+    existing(DEAL_DB) ??
+    (await createDatabase(token, parent, DEAL_DB, "\u{1F91D}", {
+      Brand: { title: {} },
+      Stage: selectSchema(DEAL_STAGES, [
+        "gray",
+        "yellow",
+        "blue",
+        "purple",
+        "orange",
+        "pink",
+        "green",
+      ]),
+      Fee: { number: { format: "dollar" } },
+      Due: { date: {} },
+      Contact: { rich_text: {} },
+      Link: { url: {} },
+      Notes: { rich_text: {} },
+    }));
+  return { content: contentDbId, task: taskDbId, habits, ticks, goals, agent, deals };
 }
 
 /* --------------------------------------------------------------- the reads */
@@ -558,13 +631,14 @@ export async function readBoard(
       })
     : Promise.resolve([] as Row[]);
 
-  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows, timedRows] = await Promise.all([
+  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows, dealRows, timedRows] = await Promise.all([
     query(token, dbs.task, openFilter ? { filter: openFilter } : {}),
     query(token, dbs.content, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
     query(token, dbs.habits),
     query(token, dbs.ticks, { filter: { property: "Date", date: { on_or_after: since } } }),
     query(token, dbs.goals),
     query(token, dbs.agent, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
+    query(token, dbs.deals, { page_size: 100 }),
     timedQuery,
   ]);
 
@@ -589,6 +663,7 @@ export async function readBoard(
       link: map.link ? (r.properties[map.link]?.url ?? null) : null,
       source: map.source ? selectOf(r.properties[map.source]) : null,
       goal: map.goal ? relationOf(r.properties[map.goal]) : null,
+      deal: map.deal ? relationOf(r.properties[map.deal]) : null,
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
@@ -634,6 +709,17 @@ export async function readBoard(
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
     })),
+    deals: dealRows.map((r) => ({
+      id: r.id,
+      brand: titleOf(r),
+      stage: tagOf(r.properties.Stage) ?? DEAL_STAGES[0],
+      fee: r.properties.Fee?.number ?? null,
+      due: dateOf(r.properties.Due),
+      contact: textOf(r.properties.Contact),
+      link: r.properties.Link?.url ?? null,
+      notes: textOf(r.properties.Notes),
+      url: r.url,
+    })),
   };
 }
 
@@ -665,11 +751,12 @@ export type Action =
       kind?: "deadline" | "want" | null;
       slot?: "deep" | "quick" | null;
       goal?: string | null;
+      deal?: string | null;
     }
   | {
       action: "editTodo";
       id: string;
-      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes" | "goal";
+      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes" | "goal" | "deal";
       value: string | null;
     }
   | { action: "toggleTodo"; id: string; done: boolean }
@@ -693,7 +780,23 @@ export type Action =
       parent?: string | null;
     }
   | { action: "toggleGoal"; id: string; done: boolean }
-  | { action: "deleteGoal"; id: string };
+  | { action: "deleteGoal"; id: string }
+  | {
+      action: "addDeal";
+      brand: string;
+      stage?: string;
+      fee?: number | null;
+      due?: string | null;
+      contact?: string;
+      link?: string | null;
+    }
+  | {
+      action: "editDeal";
+      id: string;
+      field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes";
+      value: string | null;
+    }
+  | { action: "deleteDeal"; id: string };
 
 /** Only writes columns the database actually has, so the same action works on
  *  the wizard's To-dos and on a tracker somebody built years ago. */
@@ -711,6 +814,7 @@ function taskProps(
     link?: string | null;
     source?: string;
     goal?: string | null;
+    deal?: string | null;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -737,6 +841,7 @@ function taskProps(
         ? { multi_select: fields.category ? [{ name: fields.category }] : [] }
         : selectProp(fields.category);
   if (fields.goal !== undefined && map.goal) out[map.goal] = relationProp(fields.goal);
+  if (fields.deal !== undefined && map.deal) out[map.deal] = relationProp(fields.deal);
   if (fields.link && map.link) out[map.link] = { url: fields.link };
   if (fields.source && map.source) out[map.source] = selectProp(fields.source);
   if (fields.title !== undefined && map.captured)
@@ -758,6 +863,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
           kind: body.kind ?? null,
           slot: body.slot ?? null,
           goal: body.goal ?? null,
+          deal: body.deal ?? null,
           category: body.category ?? null,
           source: "Manual",
         }),
@@ -774,6 +880,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
         minutes: { minutes: value === null ? null : Number(value) || 0 },
         category: { category: value },
         goal: { goal: value },
+        deal: { deal: value },
       }[body.field];
       await updatePage(token, body.id, taskProps(map, fields));
       return;
@@ -794,6 +901,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
     case "agentStatus":
       await updatePage(token, body.id, { Status: selectProp(body.status) });
       return;
+    case "deleteDeal":
     case "deleteAgent":
     case "deleteTodo":
     case "deleteIdea":
@@ -862,5 +970,30 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, bo
     case "toggleGoal":
       await updatePage(token, body.id, { Done: { checkbox: body.done } });
       return;
+    case "addDeal":
+      await createPage(token, dbs.deals, {
+        Brand: title(body.brand),
+        Stage: selectProp(body.stage ?? DEAL_STAGES[0]),
+        Fee: { number: body.fee ?? null },
+        Due: dateProp(body.due ?? null),
+        Contact: richText(body.contact ?? ""),
+        Link: { url: body.link || null },
+        Notes: richText(""),
+      });
+      return;
+    case "editDeal": {
+      const value = body.value || null;
+      const props: Record<string, unknown> = {
+        brand: { Brand: title(value ?? "") },
+        stage: { Stage: selectProp(value) },
+        fee: { Fee: { number: value === null ? null : Number(value) || 0 } },
+        due: { Due: dateProp(value) },
+        contact: { Contact: richText(value ?? "") },
+        link: { Link: { url: value } },
+        notes: { Notes: richText(value ?? "") },
+      }[body.field];
+      await updatePage(token, body.id, props);
+      return;
+    }
   }
 }

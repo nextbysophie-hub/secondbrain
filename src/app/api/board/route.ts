@@ -4,6 +4,7 @@ import {
   applyAction,
   ensureBoardDbs,
   ensureDayColumns,
+  ensureDealLink,
   ensureGoalColumns,
   ensureGoalLink,
   ensureIdeaNotes,
@@ -36,7 +37,13 @@ const dbParam = (req: Request, name: string) => {
 
 /** The schema as it is, plus the columns the dashboard needs and a
  *  deadline-shaped tracker won't have. */
-async function taskMap(token: string, taskDbId: string, goalsDbId: string, ideaDbId: string): Promise<TaskMap> {
+async function taskMap(
+  token: string,
+  taskDbId: string,
+  goalsDbId: string,
+  ideaDbId: string,
+  dealsDbId: string,
+): Promise<TaskMap> {
   const map = await readTaskMap(token, taskDbId);
   const dated = await ensureDayColumns(
     token,
@@ -45,7 +52,8 @@ async function taskMap(token: string, taskDbId: string, goalsDbId: string, ideaD
   );
   await ensureGoalColumns(token, goalsDbId);
   await ensureIdeaNotes(token, ideaDbId);
-  return ensureGoalLink(token, taskDbId, goalsDbId, dated);
+  const linked = await ensureGoalLink(token, taskDbId, goalsDbId, dated);
+  return ensureDealLink(token, taskDbId, dealsDbId, linked);
 }
 
 /** Everything the dashboard renders, in one round trip. */
@@ -65,7 +73,7 @@ export async function GET(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content);
+    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
     const board = await readBoard(creds.token, dbs, map, since.toISOString().slice(0, 10));
     return NextResponse.json({ ok: true, ...board, dbs });
   } catch (e) {
@@ -87,7 +95,7 @@ export async function POST(req: Request) {
 
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content);
+    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
     await applyAction(creds.token, dbs, map, body);
     return NextResponse.json({ ok: true });
   } catch (e) {

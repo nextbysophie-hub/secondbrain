@@ -29,20 +29,20 @@ const ticks = habits.flatMap((h, hi) =>
 
 export function demoBoard() {
   const board: Board = {
-    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo" },
+    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", deals: "demo" },
     categories: ["Work", "Personal", "Health", "Money", "Other"],
     todos: [
-      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d2", title: "Film the b-roll in the car", done: false, due: iso(0), plan: iso(0), kind: "want", slot: "deep", minutes: null, category: "Work", priority: null, link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d3", title: "Renew the domain", done: false, due: iso(-2), plan: null, kind: null, slot: "quick", minutes: 15, category: "Money", priority: null, link: null, source: "Manual", goal: null, url: "#" },
-      { id: "d4", title: "Book the dentist", done: false, due: iso(3), plan: null, kind: null, slot: null, minutes: null, category: "Health", priority: null, link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d5", title: "Reply to the brand email", done: true, due: iso(-1), plan: null, kind: null, slot: null, minutes: 25, category: "Work", priority: null, link: null, source: "Manual", goal: null, url: "#" },
-      { id: "d6", title: "Buy Patrick a birthday thing", done: false, due: iso(6), plan: null, kind: null, slot: null, minutes: null, category: "Personal", priority: null, link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d7", title: "Move money to savings", done: false, due: null, plan: iso(0), kind: null, slot: "quick", minutes: null, category: "Money", priority: null, link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d8", title: "Call mum back", done: false, due: null, plan: iso(0), kind: null, slot: "quick", minutes: null, category: "Personal", priority: null, link: null, source: "Siri", goal: null, url: "#" },
-      { id: "d11", title: "Go through emails", done: false, due: null, plan: iso(0), kind: "want", slot: "quick", minutes: null, category: "Work", priority: null, link: null, source: "Manual", goal: null, url: "#" },
-      { id: "d9", title: "Batch 3 reels", done: false, due: iso(1), plan: iso(1), kind: "want", slot: "deep", minutes: 240, category: "Work", priority: null, link: null, source: "Manual", goal: null, url: "#" },
-      { id: "d10", title: "Stretch before bed", done: true, due: iso(0), plan: null, kind: null, slot: null, minutes: 10, category: "Health", priority: null, link: null, source: "Manual", goal: null, url: "#" },
+      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d2", title: "Film the b-roll in the car", done: false, due: iso(0), plan: iso(0), kind: "want", slot: "deep", minutes: null, category: "Work", priority: null, link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d3", title: "Renew the domain", done: false, due: iso(-2), plan: null, kind: null, slot: "quick", minutes: 15, category: "Money", priority: null, link: null, source: "Manual", goal: null, deal: null, url: "#" },
+      { id: "d4", title: "Book the dentist", done: false, due: iso(3), plan: null, kind: null, slot: null, minutes: null, category: "Health", priority: null, link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d5", title: "Reply to the brand email", done: true, due: iso(-1), plan: null, kind: null, slot: null, minutes: 25, category: "Work", priority: null, link: null, source: "Manual", goal: null, deal: null, url: "#" },
+      { id: "d6", title: "Buy Patrick a birthday thing", done: false, due: iso(6), plan: null, kind: null, slot: null, minutes: null, category: "Personal", priority: null, link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d7", title: "Move money to savings", done: false, due: null, plan: iso(0), kind: null, slot: "quick", minutes: null, category: "Money", priority: null, link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d8", title: "Call mum back", done: false, due: null, plan: iso(0), kind: null, slot: "quick", minutes: null, category: "Personal", priority: null, link: null, source: "Siri", goal: null, deal: null, url: "#" },
+      { id: "d11", title: "Go through emails", done: false, due: null, plan: iso(0), kind: "want", slot: "quick", minutes: null, category: "Work", priority: null, link: null, source: "Manual", goal: null, deal: null, url: "#" },
+      { id: "d9", title: "Batch 3 reels", done: false, due: iso(1), plan: iso(1), kind: "want", slot: "deep", minutes: 240, category: "Work", priority: null, link: null, source: "Manual", goal: null, deal: null, url: "#" },
+      { id: "d10", title: "Stretch before bed", done: true, due: iso(0), plan: null, kind: null, slot: null, minutes: 10, category: "Health", priority: null, link: null, source: "Manual", goal: null, deal: null, url: "#" },
     ],
     agent: [
       { id: "a1", title: "Book car detailing for Saturday", details: "Interior + exterior, somewhere in Austin, under $200.", due: iso(2), status: "Working", result: "", url: "#" },
@@ -75,6 +75,10 @@ export function demoBoard() {
       { id: "g4", name: "Build a real content bank", area: "Content", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: true },
       { id: "g5", name: "Gym 4× a week", area: "Health", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
       { id: "g6", name: "Weekend off the laptop", area: "Life", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
+    ],
+    deals: [
+      { id: "b1", brand: "Vercel", stage: "Filming", fee: 4500, due: iso(4), contact: "maya@", link: null, notes: "", url: "#" },
+      { id: "b2", brand: "Notion", stage: "Invoiced", fee: 3000, due: iso(-8), contact: "", link: null, notes: "", url: "#" },
     ],
   };
   return NextResponse.json({ ok: true, ...board });
