@@ -99,7 +99,10 @@ export type Goal = {
 export type Deal = {
   id: string;
   brand: string;
+  /** Where the work is: script, film, edit, post, delivered. */
   stage: string | null;
+  /** Where the deal is: prospecting, signed, paid. */
+  status: string | null;
   fee: number | null;
   due: string | null;
   contact: string;
@@ -116,6 +119,7 @@ export type Deal = {
 export type DealMap = {
   title: string;
   stage: { prop: string; kind: "select" | "status"; options: string[] } | null;
+  status: { prop: string; kind: "select" | "status"; options: string[] } | null;
   fee: string | null;
   due: string | null;
   contact: string | null;
@@ -276,22 +280,31 @@ function statusDone(prop: SchemaProp): { doneName: string; openName: string } | 
 export async function readDealMap(token: string, dealsDbId: string): Promise<DealMap> {
   const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${dealsDbId}`);
   const props = Object.entries(db.properties).map(([name, p]) => ({ ...p, name }));
+  const optionsOf = (p: SchemaProp) =>
+    ((p.type === "status" ? p.status?.options : p.select?.options) ?? []).map((o) => o.name);
+  const choices = props.filter((p) => p.type === "select" || p.type === "status");
+  // What she asks the dashboard is "do I have to script, film, edit or post
+  // this?", so the production column wins over the negotiation one wherever a
+  // tracker keeps both.
   const stageProp =
-    pick(props, "status", /status|stage/i) ??
-    pick(props, "select", /stage|status/i) ??
-    pick(props, "select");
+    choices.find((p) => /production|workflow|progress/i.test(p.name)) ??
+    choices.find((p) => optionsOf(p).some((o) => /script|film|edit|post/i.test(o))) ??
+    choices.find((p) => /stage|status/i.test(p.name)) ??
+    choices[0];
+  const statusProp = choices.find((p) => p.name !== stageProp?.name && /status|stage/i.test(p.name));
+  const asRole = (p?: SchemaProp) =>
+    p
+      ? {
+          prop: p.name,
+          kind: (p.type === "status" ? "status" : "select") as "select" | "status",
+          options: optionsOf(p),
+        }
+      : null;
   const checkbox = (match: RegExp) => pick(props, "checkbox", match)?.name ?? null;
   return {
     title: pick(props, "title")?.name ?? "Name",
-    stage: stageProp
-      ? {
-          prop: stageProp.name,
-          kind: stageProp.type === "status" ? "status" : "select",
-          options: (stageProp.type === "status" ? stageProp.status?.options : stageProp.select?.options)?.map(
-            (o) => o.name,
-          ) ?? [],
-        }
-      : null,
+    stage: asRole(stageProp),
+    status: asRole(statusProp),
     fee: pick(props, "number", /amount|fee|rate|price|value|\$/i)?.name ?? pick(props, "number")?.name ?? null,
     due: pick(props, "date", /post|deliver|due|deadline|film/i)?.name ?? pick(props, "date")?.name ?? null,
     contact: pick(props, "rich_text", /contact|person|manager/i)?.name ?? null,
@@ -785,6 +798,7 @@ export async function readBoard(
       id: r.id,
       brand: titleOf(r),
       stage: deals.stage ? tagOf(r.properties[deals.stage.prop]) : null,
+      status: deals.status ? tagOf(r.properties[deals.status.prop]) : null,
       fee: deals.fee ? (r.properties[deals.fee]?.number ?? null) : null,
       due: deals.due ? dateOf(r.properties[deals.due]) : null,
       contact: deals.contact ? textOf(r.properties[deals.contact]) : "",
@@ -867,7 +881,7 @@ export type Action =
   | {
       action: "editDeal";
       id: string;
-      field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid";
+      field: "brand" | "stage" | "status" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid";
       value: string | null;
     }
   | { action: "deleteDeal"; id: string };
@@ -926,18 +940,20 @@ function taskProps(
 /** Writes only the columns her deals table actually has, under its own names. */
 function dealProps(
   deals: DealMap,
-  field: "brand" | "stage" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid",
+  field: "brand" | "stage" | "status" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid",
   value: string | null,
 ): Record<string, unknown> {
+  const choice = (role: DealMap["stage"]) =>
+    role
+      ? { [role.prop]: role.kind === "status" ? { status: value ? { name: value } : null } : selectProp(value) }
+      : {};
   switch (field) {
     case "brand":
       return { [deals.title]: title(value ?? "") };
     case "stage":
-      if (!deals.stage) return {};
-      return {
-        [deals.stage.prop]:
-          deals.stage.kind === "status" ? { status: value ? { name: value } : null } : selectProp(value),
-      };
+      return choice(deals.stage);
+    case "status":
+      return choice(deals.status);
     case "fee":
       return deals.fee ? { [deals.fee]: { number: value === null ? null : Number(value) || 0 } } : {};
     case "due":

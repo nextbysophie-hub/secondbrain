@@ -4055,6 +4055,8 @@ function DealCard({
 }) {
   const [adding, setAdding] = useState("");
   const stages = board.dealStages;
+  const at = deal.stage ? stages.indexOf(deal.stage) : -1;
+  const next = at >= 0 && at < stages.length - 1 ? stages[at + 1] : at < 0 ? stages[0] : null;
   const tasks = board.todos.filter((t) => t.deal === deal.id);
   const left = tasks.filter((t) => !t.done).length;
 
@@ -4150,20 +4152,28 @@ function DealCard({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-1">
-        {stages.map((s) => (
+        <select
+          value={deal.stage ?? ""}
+          aria-label="What this deal needs next"
+          onChange={(e) => edit("stage", e.target.value || null)}
+          className="rounded-full border border-line bg-transparent px-2 py-0.5 text-[11px] outline-none"
+        >
+          <option value="">not started</option>
+          {stages.map((s) => (
+            <option key={s} value={s}>
+              {s.toLowerCase()}
+            </option>
+          ))}
+        </select>
+        {next ? (
           <button
-            key={s}
             type="button"
-            onClick={() => edit("stage", s)}
-            className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
-              deal.stage === s
-                ? "border-ink bg-ink text-brand-cream"
-                : "border-line text-muted hover:text-ink"
-            }`}
+            onClick={() => edit("stage", next)}
+            className="rounded-full border border-ink bg-ink px-2 py-0.5 text-[11px] text-brand-cream transition hover:opacity-90"
           >
-            {s.toLowerCase()}
+            done → {next.toLowerCase()}
           </button>
-        ))}
+        ) : null}
         {deal.invoiced !== null ? (
           <MoneyFlag
             label="invoiced"
@@ -4230,35 +4240,61 @@ function DealCard({
   );
 }
 
-/** Deals, and the work each one is actually waiting on. */
+/** The question this tab answers is "what do I owe a brand this week", so the
+ *  deals are stacked by the work they're waiting on — script, film, edit,
+ *  post — and the negotiation end sits out of the way at the bottom. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
+  const dead = (d: Deal) =>
+    isPaid(d) || /passed|declined/i.test(`${d.stage ?? ""} ${d.status ?? ""}`);
+  const live = board.deals.filter((d) => !dead(d));
   const paid = board.deals.filter(isPaid);
-  const live = board.deals.filter((d) => !isPaid(d));
   const owed = live.filter(isOwed).reduce((n, d) => n + (d.fee ?? 0), 0);
-  const booked = board.deals.reduce((n, d) => n + (d.fee ?? 0), 0);
+  const booked = live.reduce((n, d) => n + (d.fee ?? 0), 0);
   const loose = board.todos.filter(
     (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc/i.test(t.title),
   );
 
+  // Anything before a signature isn't work yet; it shouldn't crowd the top.
+  const talking = (d: Deal) =>
+    !d.stage || /inquiry|negotiat|prospect|contact|testing/i.test(d.stage);
+  const buckets = board.dealStages
+    .filter((s) => !/passed|declined|inquiry|negotiat|prospect|contact|testing/i.test(s))
+    .map((stage) => ({ stage, deals: live.filter((d) => d.stage === stage) }))
+    .filter((b) => b.deals.length);
+  const early = live.filter(talking);
+
   return (
     <div className="space-y-4">
+      {buckets.map(({ stage, deals }) => (
+        <Panel
+          key={stage}
+          title={stage}
+          right={<span className="text-[12px] text-muted">{deals.length}</span>}
+        >
+          <div className="space-y-2">
+            {deals.map((d) => (
+              <DealCard key={d.id} deal={d} board={board} send={send} />
+            ))}
+          </div>
+        </Panel>
+      ))}
+
       <Panel
-        title="Brand deals"
+        title={buckets.length ? "Talking, not signed" : "Brand deals"}
         right={
           <span className="text-[12px] text-muted">
-            {money(booked)} booked
-            {owed ? ` · ${money(owed)} waiting on payment` : ""}
+            {money(booked)} live{owed ? ` · ${money(owed)} unpaid` : ""}
           </span>
         }
       >
         <div className="space-y-2">
-          {live.length ? (
-            live.map((d) => (
+          {early.length ? (
+            early.map((d) => (
               <DealCard key={d.id} deal={d} board={board} send={send} />
             ))
           ) : (
             <p className="text-[13px] text-muted">
-              No live deals — add the next one below.
+              Nothing in the inbox stage — add the next brand below.
             </p>
           )}
         </div>
@@ -4274,6 +4310,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                     id: `tmp-${Date.now()}`,
                     brand,
                     stage: board.dealStages[0] ?? null,
+                    status: null,
                     fee: null,
                     due: null,
                     contact: "",
