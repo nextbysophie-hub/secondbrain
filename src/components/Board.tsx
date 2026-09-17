@@ -4054,7 +4054,7 @@ function DealCard({
   send: Send;
 }) {
   const [adding, setAdding] = useState("");
-  const stages = board.dealStages;
+  const stages = productionStages(board.dealStages);
   const at = deal.stage ? stages.indexOf(deal.stage) : -1;
   const next = at >= 0 && at < stages.length - 1 ? stages[at + 1] : at < 0 ? stages[0] : null;
   const tasks = board.todos.filter((t) => t.deal === deal.id);
@@ -4158,7 +4158,7 @@ function DealCard({
           onChange={(e) => edit("stage", e.target.value || null)}
           className="rounded-full border border-line bg-transparent px-2 py-0.5 text-[11px] outline-none"
         >
-          <option value="">not started</option>
+          <option value="">no step yet</option>
           {stages.map((s) => (
             <option key={s} value={s}>
               {s.toLowerCase()}
@@ -4240,36 +4240,41 @@ function DealCard({
   );
 }
 
-/** The question this tab answers is "what do I owe a brand this week", so the
- *  deals are stacked by the work they're waiting on — script, film, edit,
- *  post — and the negotiation end sits out of the way at the bottom. */
+/** Only the making of the content: whether something needs a script, a shoot,
+ *  an edit or a round of revisions. Chasing and closing the deal is her
+ *  manager's job, so those rows never reach this tab. */
+const NOT_WORK = /passed|declined|inquiry|negotiat|prospect|contact|testing/i;
+
+const productionStages = (stages: string[]) => stages.filter((s) => !NOT_WORK.test(s));
+
 function DealsPane({ board, send }: { board: Board; send: Send }) {
-  const dead = (d: Deal) =>
-    isPaid(d) || /passed|declined/i.test(`${d.stage ?? ""} ${d.status ?? ""}`);
-  const live = board.deals.filter((d) => !dead(d));
+  const stages = productionStages(board.dealStages);
+  const working = board.deals.filter(
+    (d) => !isPaid(d) && d.stage !== null && !NOT_WORK.test(d.stage),
+  );
+  const owed = working.filter(isOwed).reduce((n, d) => n + (d.fee ?? 0), 0);
+  const booked = working.reduce((n, d) => n + (d.fee ?? 0), 0);
   const paid = board.deals.filter(isPaid);
-  const owed = live.filter(isOwed).reduce((n, d) => n + (d.fee ?? 0), 0);
-  const booked = live.reduce((n, d) => n + (d.fee ?? 0), 0);
   const loose = board.todos.filter(
     (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc/i.test(t.title),
   );
-
-  // Anything before a signature isn't work yet; it shouldn't crowd the top.
-  const talking = (d: Deal) =>
-    !d.stage || /inquiry|negotiat|prospect|contact|testing/i.test(d.stage);
-  const buckets = board.dealStages
-    .filter((s) => !/passed|declined|inquiry|negotiat|prospect|contact|testing/i.test(s))
-    .map((stage) => ({ stage, deals: live.filter((d) => d.stage === stage) }))
+  const buckets = stages
+    .map((stage) => ({ stage, deals: working.filter((d) => d.stage === stage) }))
     .filter((b) => b.deals.length);
-  const early = live.filter(talking);
 
   return (
     <div className="space-y-4">
-      {buckets.map(({ stage, deals }) => (
+      {buckets.map(({ stage, deals }, i) => (
         <Panel
           key={stage}
           title={stage}
-          right={<span className="text-[12px] text-muted">{deals.length}</span>}
+          right={
+            <span className="text-[12px] text-muted">
+              {i === 0
+                ? `${working.length} in progress · ${money(booked)}${owed ? ` · ${money(owed)} unpaid` : ""}`
+                : deals.length}
+            </span>
+          }
         >
           <div className="space-y-2">
             {deals.map((d) => (
@@ -4280,36 +4285,25 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
       ))}
 
       <Panel
-        title={buckets.length ? "Talking, not signed" : "Brand deals"}
+        title={buckets.length ? "Add a signed deal" : "Brand deals"}
         right={
-          <span className="text-[12px] text-muted">
-            {money(booked)} live{owed ? ` · ${money(owed)} unpaid` : ""}
-          </span>
+          buckets.length ? null : (
+            <span className="text-[12px] text-muted">nothing in production</span>
+          )
         }
       >
-        <div className="space-y-2">
-          {early.length ? (
-            early.map((d) => (
-              <DealCard key={d.id} deal={d} board={board} send={send} />
-            ))
-          ) : (
-            <p className="text-[13px] text-muted">
-              Nothing in the inbox stage — add the next brand below.
-            </p>
-          )}
-        </div>
-        <div className="mt-3">
+        <div className="mt-1">
           <AddRow
             placeholder="New deal — the brand's name…"
             onAdd={(brand) =>
-              send({ action: "addDeal", brand }, (b) => ({
+              send({ action: "addDeal", brand, stage: stages[0] }, (b) => ({
                 ...b,
                 deals: [
                   ...b.deals,
                   {
                     id: `tmp-${Date.now()}`,
                     brand,
-                    stage: board.dealStages[0] ?? null,
+                    stage: stages[0] ?? null,
                     status: null,
                     fee: null,
                     due: null,
