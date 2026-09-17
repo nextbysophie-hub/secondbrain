@@ -6,12 +6,16 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ key?: string; todos?: string }>;
+  searchParams: Promise<{ key?: string; todos?: string; ideas?: string }>;
 }) {
-  const { key, todos } = await searchParams;
+  const { key, todos, ideas } = await searchParams;
   return (
     <Suspense>
-      <BoardApp initialKey={key?.trim() ?? ""} initialTodoDb={todos?.trim() ?? ""} />
+      <BoardApp
+        initialKey={key?.trim() ?? ""}
+        initialTodoDb={todos?.trim() ?? ""}
+        initialIdeaDb={ideas?.trim() ?? ""}
+      />
     </Suspense>
   );
 }

@@ -1544,12 +1544,145 @@ function IdeaRow({ idea, send }: { idea: Idea; send: Send }) {
 
 const IDEA_STATUSES = ["Inbox", "Next Up", "Making It", "Posted"];
 
+/* ----------------------------------------------------------- idea trends */
+
+const STOPWORDS = new Set(
+  ("a an and are as at be but by for from get go have how i if in into is it its just like make me my new not"
+    + " of on one or our out so some that the their them then there they this to up us want was we what when"
+    + " where which who why will with you your do does did can could should would need needs about more than"
+    + " thing things stuff idea ideas post content video reel")
+    .split(" "),
+);
+
+/** Loose stemming so "detailing" and "detail" land in the same pile. */
+const stem = (w: string) => w.replace(/(ings|ing|ies|ed|es|s)$/, (m) => (m === "ies" ? "y" : ""));
+
+type Trend = { term: string; ideas: Idea[] };
+
+/**
+ * What keeps coming back. Purely a word count over the idea titles — no model,
+ * so it can be trusted and explained: any stem that shows up in two or more
+ * separate ideas is something the brain keeps circling.
+ */
+function trendsOf(ideas: Idea[]): Trend[] {
+  const hits = new Map<string, { label: string; ideas: Idea[] }>();
+  for (const idea of ideas) {
+    const seen = new Set<string>();
+    for (const raw of idea.title.toLowerCase().split(/[^a-z0-9']+/)) {
+      if (raw.length < 4 || STOPWORDS.has(raw)) continue;
+      const key = stem(raw);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const entry = hits.get(key) ?? { label: raw, ideas: [] };
+      entry.ideas.push(idea);
+      hits.set(key, entry);
+    }
+  }
+  return [...hits.values()]
+    .filter((h) => h.ideas.length > 1)
+    .sort((a, b) => b.ideas.length - a.ideas.length)
+    .slice(0, 4)
+    .map((h) => ({ term: h.label, ideas: h.ideas }));
+}
+
+function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
+  const [open, setOpen] = useState(false);
+  const term = trend.term;
+
+  const spin = (title: string) =>
+    send({ action: "addTodo", title, kind: "want" }, (b) => ({
+      ...b,
+      todos: [
+        ...b.todos,
+        {
+          id: `tmp-${Date.now()}`,
+          title,
+          done: false,
+          due: null,
+          plan: null,
+          kind: "want",
+          slot: null,
+          minutes: null,
+          category: null,
+          priority: null,
+          link: null,
+          source: "Manual",
+          url: "#",
+        },
+      ],
+    }));
+
+  return (
+    <div className="border-b border-line/70 py-3 last:border-none">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="min-w-0 text-[14px]">
+          <span className="font-medium capitalize">{term}</span>
+          <span className="text-muted"> came up in {trend.ideas.length} ideas</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          {open ? "hide" : "which ones"}
+        </button>
+      </div>
+      {open ? (
+        <ul className="mt-2 space-y-1">
+          {trend.ideas.map((i) => (
+            <li key={i.id} className="text-[13px] text-muted">
+              · {i.title}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {[`Research ${term}`, `Block an hour on ${term}`, `Decide what to do about ${term}`].map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => spin(t)}
+            className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:border-ink/30 hover:text-ink"
+          >
+            → {t.toLowerCase()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Trends({ board, send }: { board: Board; send: Send }) {
+  const trends = trendsOf(board.ideas);
+  return (
+    <Panel
+      title="Trends"
+      right={<span className="text-[12px] text-muted">what keeps coming back</span>}
+    >
+      {trends.length ? (
+        <div>
+          {trends.map((t) => (
+            <TrendCard key={t.term} trend={t} send={send} />
+          ))}
+        </div>
+      ) : (
+        <p className="py-2 text-[14px] text-muted">
+          Nothing repeating yet — once a subject shows up in a couple of ideas it lands here with
+          something to do about it.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 function IdeasPane({ board, send }: { board: Board; send: Send }) {
   const [status, setStatus] = useState("Inbox");
   const shown = board.ideas.filter((i) => (i.status ?? "Inbox") === status);
   return (
+    <div className="space-y-5">
+    <Trends board={board} send={send} />
     <Panel
-      title="Content ideas"
+      title="Ideas"
       right={
         <Pills
           items={IDEA_STATUSES.map((s) => ({ id: s, label: s }))}
@@ -1589,6 +1722,7 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
         )}
       </div>
     </Panel>
+    </div>
   );
 }
 
@@ -2382,9 +2516,18 @@ const QUOTES = [
   "The days are long but the decades are short.",
 ];
 
-export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: string; initialTodoDb: string }) {
+export default function BoardApp({
+  initialKey,
+  initialTodoDb,
+  initialIdeaDb = "",
+}: {
+  initialKey: string;
+  initialTodoDb: string;
+  initialIdeaDb?: string;
+}) {
   const [captureKey, setCaptureKey] = useState(initialKey);
   const [todoDb, setTodoDb] = useState(initialTodoDb);
+  const [ideaDb, setIdeaDb] = useState(initialIdeaDb);
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -2419,9 +2562,22 @@ export default function BoardApp({ initialKey, initialTodoDb }: { initialKey: st
     if (saved) setTodoDb(saved);
   }, [initialTodoDb]);
 
+  // Same for an ideas list kept outside the wizard's content database.
+  useEffect(() => {
+    if (initialIdeaDb) {
+      localStorage.setItem("ideaDb", initialIdeaDb);
+      return;
+    }
+    const saved = localStorage.getItem("ideaDb");
+    if (saved) setIdeaDb(saved);
+  }, [initialIdeaDb]);
+
   const boardUrl = useCallback(
-    () => `/api/board?key=${encodeURIComponent(captureKey)}${todoDb ? `&todos=${encodeURIComponent(todoDb)}` : ""}`,
-    [captureKey, todoDb],
+    () =>
+      `/api/board?key=${encodeURIComponent(captureKey)}`
+      + (todoDb ? `&todos=${encodeURIComponent(todoDb)}` : "")
+      + (ideaDb ? `&ideas=${encodeURIComponent(ideaDb)}` : ""),
+    [captureKey, todoDb, ideaDb],
   );
 
   const load = useCallback(async () => {

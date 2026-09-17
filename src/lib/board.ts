@@ -119,7 +119,7 @@ type Prop = {
   number?: number | null;
 };
 
-type Row = { id: string; url: string; properties: Record<string, Prop> };
+type Row = { id: string; url: string; created_time?: string; properties: Record<string, Prop> };
 
 const textOf = (p?: Prop) =>
   (p?.title ?? p?.rich_text ?? []).map((t) => t.plain_text ?? "").join("").trim();
@@ -537,12 +537,14 @@ export async function readBoard(
       result: textOf(r.properties.Result),
       url: r.url,
     })),
+    // An ideas list someone already keeps won't have the wizard's columns, so
+    // everything past the title is read only if it happens to be there.
     ideas: ideaRows.map((r) => ({
       id: r.id,
       title: titleOf(r),
-      status: selectOf(r.properties.Status),
-      link: r.properties.Link?.url ?? null,
-      captured: dateOf(r.properties.Captured),
+      status: tagOf(r.properties.Status),
+      link: r.properties.Link?.url ?? r.properties.URL?.url ?? null,
+      captured: dateOf(r.properties.Captured) ?? r.created_time?.slice(0, 10) ?? null,
       url: r.url,
     })),
     habits: habitRows

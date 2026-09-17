@@ -20,8 +20,14 @@ const NO_KEY = "This dashboard link isn't carrying working credentials. Open you
 
 /** ?todos=<database id> points the to-do side at a list the user already keeps,
  *  instead of the one the wizard made. Captures are unaffected either way. */
-const todoDbOverride = (req: Request) => {
-  const raw = new URL(req.url).searchParams.get("todos")?.trim();
+const todoDbOverride = (req: Request) => dbParam(req, "todos");
+
+/** Same for ?ideas=<database id>, for a general ideas list kept outside the
+ *  wizard's content database. */
+const ideaDbOverride = (req: Request) => dbParam(req, "ideas");
+
+const dbParam = (req: Request, name: string) => {
+  const raw = new URL(req.url).searchParams.get(name)?.trim();
   return raw ? raw.replace(/-/g, "") : undefined;
 };
 
@@ -49,9 +55,10 @@ export async function GET(req: Request) {
   since.setUTCDate(1);
 
   const taskDbId = todoDbOverride(req) ?? creds.taskDbId;
+  const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;
 
   try {
-    const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
+    const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
     const map = await taskMap(creds.token, dbs.task);
     const board = await readBoard(creds.token, dbs, map, since.toISOString().slice(0, 10));
     return NextResponse.json({ ok: true, ...board, dbs });
@@ -70,9 +77,10 @@ export async function POST(req: Request) {
   if (!body?.action) return NextResponse.json({ ok: false, error: "No action given." }, { status: 400 });
 
   const taskDbId = todoDbOverride(req) ?? creds.taskDbId;
+  const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;
 
   try {
-    const dbs = await ensureBoardDbs(creds.token, creds.contentDbId, taskDbId);
+    const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
     const map = await taskMap(creds.token, dbs.task);
     await applyAction(creds.token, dbs, map, body);
     return NextResponse.json({ ok: true });
