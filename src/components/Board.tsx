@@ -2294,12 +2294,101 @@ function KindChip({ todo, send }: { todo: Todo; send: Send }) {
 const kindOfTodo = (t: Todo): "deadline" | "want" =>
   t.kind ?? (t.due ? "deadline" : "want");
 
+/** A title you can correct where you read it, instead of opening Notion. */
+function EditTitle({
+  todo,
+  send,
+  onEditing,
+  className,
+}: {
+  todo: Todo;
+  send: Send;
+  onEditing?: (on: boolean) => void;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(todo.title);
+
+  const start = () => {
+    setDraft(todo.title);
+    setEditing(true);
+    onEditing?.(true);
+  };
+
+  const stop = () => {
+    setEditing(false);
+    onEditing?.(false);
+  };
+
+  const save = () => {
+    const value = draft.trim();
+    stop();
+    if (!value || value === todo.title) return;
+    send({ action: "editTodo", id: todo.id, field: "title", value }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, title: value } : t)),
+    }));
+  };
+
+  if (editing)
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") stop();
+        }}
+        className="min-w-0 flex-1 rounded border border-ink/30 bg-transparent px-1 py-0.5 text-[13px] outline-none"
+      />
+    );
+
+  return (
+    <button
+      type="button"
+      onClick={start}
+      title="Tap to rename"
+      className={`min-w-0 flex-1 truncate text-left text-[13px] ${className ?? ""}`}
+    >
+      {todo.title}
+    </button>
+  );
+}
+
+/** The date lives in Notion, so changing it here changes it there. */
+function EditDue({ todo, send }: { todo: Todo; send: Send }) {
+  return (
+    <input
+      type="date"
+      value={todo.due ?? ""}
+      title="Due date"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const value = e.target.value || null;
+        send({ action: "editTodo", id: todo.id, field: "due", value }, (b) => ({
+          ...b,
+          todos: b.todos.map((t) =>
+            t.id === todo.id ? { ...t, due: value } : t,
+          ),
+        }));
+      }}
+      className={`w-[104px] shrink-0 rounded border border-transparent bg-transparent text-[10px] outline-none transition hover:border-line ${
+        todo.due && todo.due < TODAY ? "text-bad" : "text-muted"
+      }`}
+    />
+  );
+}
+
 /** One picked line inside a day of the week: enough to recognise it, and a
  *  way to put it back down. */
 function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
+  const [editing, setEditing] = useState(false);
+
   return (
     <div
-      draggable
+      draggable={!editing}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
@@ -2326,18 +2415,13 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
       >
         {todo.done ? "✓" : ""}
       </button>
-      <span
-        className={`min-w-0 flex-1 truncate text-[13px] ${todo.done ? "text-muted line-through" : ""}`}
-      >
-        {todo.title}
-      </span>
-      {todo.due && todo.due !== day ? (
-        <span
-          className={`shrink-0 text-[10px] ${todo.due < day ? "text-bad" : "text-muted"}`}
-        >
-          due {pretty(todo.due)}
-        </span>
-      ) : null}
+      <EditTitle
+        todo={todo}
+        send={send}
+        onEditing={setEditing}
+        className={todo.done ? "text-muted line-through" : ""}
+      />
+      <EditDue todo={todo} send={send} />
       <button
         type="button"
         onClick={() => park(todo, send, day)}
@@ -2414,30 +2498,12 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
       <div className="max-h-[520px] space-y-1 overflow-auto">
         {waiting.length ? (
           waiting.map((t) => (
-            <div
+            <PileRow
               key={t.id}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("text/todo-id", t.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              className="flex cursor-grab items-center gap-2 rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
-            >
-              <span className="shrink-0 text-[11px] text-muted">⠿</span>
-              <span className="min-w-0 flex-1 truncate">{t.title}</span>
-              {!goal && nameOf(t.goal) ? (
-                <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
-                  {nameOf(t.goal)}
-                </span>
-              ) : null}
-              {t.due ? (
-                <span
-                  className={`shrink-0 text-[10px] ${t.due < TODAY ? "text-bad" : "text-muted"}`}
-                >
-                  {pretty(t.due)}
-                </span>
-              ) : null}
-            </div>
+              todo={t}
+              send={send}
+              goalName={goal ? null : nameOf(t.goal)}
+            />
           ))
         ) : (
           <p className="text-[13px] text-muted">
@@ -2448,6 +2514,39 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
       <p className="mt-2 text-[12px] text-muted">
         Drag one onto a day, or drag one back here to unplan it. On a phone, use + deep / + quick and × instead.
       </p>
+    </div>
+  );
+}
+
+/** A waiting row: draggable, but its title and date are still editable. */
+function PileRow({
+  todo,
+  send,
+  goalName,
+}: {
+  todo: Todo;
+  send: Send;
+  goalName: string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <div
+      draggable={!editing}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/todo-id", todo.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="flex cursor-grab items-center gap-2 rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
+    >
+      <span className="shrink-0 text-[11px] text-muted">⠿</span>
+      <EditTitle todo={todo} send={send} onEditing={setEditing} />
+      {goalName ? (
+        <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
+          {goalName}
+        </span>
+      ) : null}
+      <EditDue todo={todo} send={send} />
     </div>
   );
 }
@@ -2561,11 +2660,12 @@ function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
           >
             {t.done ? "✓" : ""}
           </button>
-          <span
-            className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? "line-through opacity-60" : ""}`}
-          >
-            {t.title}
-          </span>
+          <EditTitle
+            todo={t}
+            send={send}
+            className={t.done ? "line-through opacity-60" : ""}
+          />
+          <EditDue todo={t} send={send} />
           <span className="shrink-0 text-[11px] opacity-70">💸</span>
         </div>
       ))}
