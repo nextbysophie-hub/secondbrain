@@ -78,8 +78,8 @@ export function demoBoard() {
     ],
     dealStages: ["Inquiry", "Signed", "Need to write script", "Need to film", "Need to edit", "Delivered"],
     deals: [
-      { id: "b1", brand: "Vercel", status: "Signed", stage: "Need to film", fee: 4500, due: iso(4), contact: "maya@", link: null, notes: "", invoiced: false, paid: false, paidOn: null, cut: false, url: "#" },
-      { id: "b2", brand: "Notion", status: "Delivered", stage: "Delivered", fee: 3000, due: iso(-8), contact: "", link: null, notes: "", invoiced: true, paid: false, paidOn: null, cut: true, url: "#" },
+      { id: "b1", brand: "Vercel", status: "Signed", stage: "Need to film", fee: 4500, due: iso(4), contact: "maya@", link: null, notes: "", invoiced: false, paid: false, paidOn: null, cut: false, waiting: false, url: "#" },
+      { id: "b2", brand: "Notion", status: "Delivered", stage: "Delivered", fee: 3000, due: iso(-8), contact: "", link: null, notes: "", invoiced: true, paid: false, paidOn: null, cut: true, waiting: true, url: "#" },
     ],
   };
   return NextResponse.json({ ok: true, ...board });

@@ -115,6 +115,9 @@ export type Deal = {
   paidOn: string | null;
   /** True when the manager brokered it and takes their 20%. */
   cut: boolean | null;
+  /** True while the ball is in the brand's court, so the wall separates
+   *  "nothing I can do" from "this one is on me". */
+  waiting: boolean | null;
   url: string;
 };
 
@@ -130,7 +133,8 @@ export type DealField =
   | "invoiced"
   | "paid"
   | "paidOn"
-  | "cut";
+  | "cut"
+  | "waiting";
 
 /** A brand-deal tracker somebody keeps by hand has its own column names and
  *  its own list of stages, so every role is matched against the real schema
@@ -148,6 +152,7 @@ export type DealMap = {
   paid: string | null;
   paidOn: string | null;
   cut: string | null;
+  waiting: string | null;
 };
 
 export type Board = {
@@ -338,6 +343,7 @@ export async function readDealMap(token: string, dealsDbId: string): Promise<Dea
     paid: checkbox(/paid|payment received|received/i),
     paidOn: pick(props, "date", /payment|paid/i)?.name ?? null,
     cut: checkbox(/manager|commission|agency/i),
+    waiting: checkbox(/waiting on (brand|them)|their court/i),
   };
 }
 
@@ -834,6 +840,7 @@ export async function readBoard(
       paid: deals.paid ? (r.properties[deals.paid]?.checkbox ?? false) : null,
       paidOn: deals.paidOn ? dateOf(r.properties[deals.paidOn]) : null,
       cut: deals.cut ? (r.properties[deals.cut]?.checkbox ?? false) : null,
+      waiting: deals.waiting ? (r.properties[deals.waiting]?.checkbox ?? false) : null,
       url: r.url,
     })),
   };
@@ -1000,6 +1007,8 @@ function dealProps(
       return deals.paidOn ? { [deals.paidOn]: dateProp(value) } : {};
     case "cut":
       return deals.cut ? { [deals.cut]: { checkbox: value === "on" } } : {};
+    case "waiting":
+      return deals.waiting ? { [deals.waiting]: { checkbox: value === "on" } } : {};
   }
 }
 

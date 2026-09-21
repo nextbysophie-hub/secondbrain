@@ -4226,7 +4226,17 @@ function DealCard({
   const at = lane ? LANES.indexOf(lane) : -1;
 
   const edit = (
-    field: "brand" | "stage" | "fee" | "due" | "notes" | "invoiced" | "paid" | "paidOn" | "cut",
+    field:
+      | "brand"
+      | "stage"
+      | "fee"
+      | "due"
+      | "notes"
+      | "invoiced"
+      | "paid"
+      | "paidOn"
+      | "cut"
+      | "waiting",
     value: string | null,
   ) =>
     send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
@@ -4251,7 +4261,9 @@ function DealCard({
                             ? { paidOn: value }
                             : field === "cut"
                               ? { cut: value === "on" }
-                              : { stage: value }),
+                              : field === "waiting"
+                                ? { waiting: value === "on" }
+                                : { stage: value }),
             }
           : d,
       ),
@@ -4331,6 +4343,21 @@ function DealCard({
             <span className="block pr-1 text-[10px] text-muted/80">{money(net(deal))} yours</span>
           ) : null}
         </span>
+      </div>
+
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={() => edit("waiting", deal.waiting ? "off" : "on")}
+          title="Whose move is it?"
+          className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+            deal.waiting
+              ? "border-line bg-panel text-muted"
+              : "border-ink bg-ink text-brand-cream"
+          }`}
+        >
+          {deal.waiting ? "⏳ waiting on them" : "🎯 my move"}
+        </button>
       </div>
 
       <div className="mt-2 flex items-center gap-1">
@@ -4834,6 +4861,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                     paid: false,
                     paidOn: null,
                     cut: true,
+                    waiting: false,
                     url: "#",
                   },
                 ],
