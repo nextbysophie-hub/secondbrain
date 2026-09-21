@@ -4682,6 +4682,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
   const working = mine.filter((d) => !isPaid(d));
   // Money is counted the way it arrives: after the manager's share.
   const booked = working.reduce((n, d) => n + net(d), 0);
+  const cutOff = working.reduce((n, d) => n + (d.fee ?? 0), 0) - booked;
   const owed = working
     .filter((d) => laneFor(d)?.id === "delivered")
     .reduce((n, d) => n + net(d), 0);
@@ -4712,8 +4713,10 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
         title="Production hub"
         right={
           <span className="text-[12px] text-muted">
-            {working.length} in production{booked ? ` · ${money(booked)}` : ""}
+            {working.length} in production
+            {booked ? ` · ${money(booked)} yours` : ""}
             {owed ? ` · ${money(owed)} waiting on payment` : ""}
+            {cutOff ? ` (after the manager's ${money(cutOff)})` : ""}
           </span>
         }
       >
