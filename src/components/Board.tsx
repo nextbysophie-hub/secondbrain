@@ -4105,12 +4105,46 @@ const LANES = [
   { id: "film", label: "Film", match: /film|shoot/i, verb: "Film" },
   { id: "edit", label: "Edit", match: /edit|feedback|approval to post|post/i, verb: "Edit" },
   { id: "delivered", label: "Delivered", match: /deliver/i, verb: "Send over" },
+  // Handing the work over isn't the end of it: a delivered deal sits here
+  // until the money actually lands.
+  { id: "paid", label: "Paid", match: /paid/i, verb: "Invoice" },
 ] as const;
 
 type Lane = (typeof LANES)[number];
 
+const PAID_LANE = LANES[LANES.length - 1];
+
 const laneOf = (stage: string | null): Lane | null =>
   stage ? (LANES.find((l) => l.match.test(stage)) ?? null) : null;
+
+/** Payment is its own column, and it's a checkbox in her tracker rather than
+ *  a production stage, so a paid deal goes last whatever its stage says. */
+const laneFor = (d: Deal): Lane | null =>
+  isPaid(d) ? PAID_LANE : laneOf(d.stage);
+
+/** Moving a card is either a stage change or the payment checkbox, and
+ *  dragging one back out of Paid has to untick it again. */
+function moveToLane(deal: Deal, lane: Lane, stages: string[], send: Send) {
+  const editDeal = (field: "stage" | "paid", value: string | null) =>
+    send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
+      ...b,
+      deals: b.deals.map((d) =>
+        d.id === deal.id
+          ? { ...d, ...(field === "paid" ? { paid: value === "on" } : { stage: value }) }
+          : d,
+      ),
+    }));
+
+  if (lane.id === "paid") {
+    const delivered = stageFor(LANES[3], stages);
+    if (delivered && !/deliver/i.test(deal.stage ?? "")) editDeal("stage", delivered);
+    if (!isPaid(deal)) editDeal("paid", "on");
+    return;
+  }
+  if (isPaid(deal)) editDeal("paid", "off");
+  const stage = stageFor(lane, stages);
+  if (stage && stage !== deal.stage) editDeal("stage", stage);
+}
 
 /** Dropping on a column has to choose one of her real stage names, and the
  *  actionable one ("Need to film") beats the waiting one. */
@@ -4198,8 +4232,7 @@ function DealCard({
 
   const move = (by: number) => {
     const target = LANES[Math.min(LANES.length - 1, Math.max(0, at + by))];
-    const stage = stageFor(target, stages);
-    if (stage && stage !== deal.stage) edit("stage", stage);
+    if (target && target.id !== lane?.id) moveToLane(deal, target, stages, send);
   };
 
   /** The whole point of the tab: the step on the wall becomes a real task in
@@ -4226,7 +4259,8 @@ function DealCard({
     }));
   };
 
-  const late = deal.due && deal.due < TODAY && lane?.id !== "delivered";
+  const late =
+    deal.due && deal.due < TODAY && lane?.id !== "delivered" && lane?.id !== "paid";
 
   return (
     <div
@@ -4261,7 +4295,13 @@ function DealCard({
           }`}
         />
         <span className="flex-1 truncate text-[10px] text-muted">
-          {tasks.length ? `${left} to-do${left === 1 ? "" : "s"}` : ""}
+          {lane?.id === "delivered"
+            ? deal.invoiced
+              ? "invoiced · unpaid"
+              : "not invoiced yet"
+            : tasks.length
+              ? `${left} to-do${left === 1 ? "" : "s"}`
+              : ""}
         </span>
         <button
           type="button"
@@ -4452,29 +4492,28 @@ function DealsLock({
   );
 }
 
-/** The wall: four columns of work, everything else about the deal left in
- *  Notion where her manager keeps it. */
+/** The wall: the making of the content plus the money at the end of it,
+ *  everything else about the deal left in Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const stages = board.dealStages.filter((s) => !NOT_WORK.test(s));
-  const working = board.deals.filter(
-    (d) => !isPaid(d) && d.stage !== null && !NOT_WORK.test(d.stage),
+  const mine = board.deals.filter(
+    (d) => d.stage !== null && !NOT_WORK.test(d.stage),
   );
+  const working = mine.filter((d) => !isPaid(d));
   const booked = working.reduce((n, d) => n + (d.fee ?? 0), 0);
+  const owed = working
+    .filter((d) => laneFor(d)?.id === "delivered")
+    .reduce((n, d) => n + (d.fee ?? 0), 0);
   const loose = board.todos.filter(
     (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc|film|script/i.test(t.title),
   );
 
   const drop = (lane: Lane, id: string) => {
     setOver(null);
-    const stage = stageFor(lane, stages);
     const deal = board.deals.find((d) => d.id === id);
-    if (!stage || !deal || deal.stage === stage) return;
-    send({ action: "editDeal", id, field: "stage", value: stage }, (b) => ({
-      ...b,
-      deals: b.deals.map((d) => (d.id === id ? { ...d, stage } : d)),
-    }));
+    if (deal && laneFor(deal)?.id !== lane.id) moveToLane(deal, lane, stages, send);
   };
 
   return (
@@ -4484,16 +4523,22 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
         right={
           <span className="text-[12px] text-muted">
             {working.length} in production{booked ? ` · ${money(booked)}` : ""}
+            {owed ? ` · ${money(owed)} waiting on payment` : ""}
           </span>
         }
       >
         <p className="mb-3 text-[12px] text-muted">
-          Just the making-of — script, film, edit, delivered. Drag a card to move it a step, open
-          one to write the script or drop the work into your week.
+          Just the making-of — script, film, edit, delivered, paid. Delivered means the money is
+          still out; drag it to Paid when it lands.
         </p>
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
           {LANES.map((lane) => {
-            const cards = working.filter((d) => laneOf(d.stage)?.id === lane.id);
+            const cards = mine
+              .filter((d) => laneFor(d)?.id === lane.id)
+              // Newest money first; the rest keep the tracker's own order.
+              .sort((a, b) =>
+                lane.id === "paid" ? (b.due ?? "").localeCompare(a.due ?? "") : 0,
+              );
             return (
               <div
                 key={lane.id}
@@ -4512,10 +4557,19 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                 }`}
               >
                 <header className="flex items-baseline justify-between px-1 pb-2">
-                  <h3 className="text-[13px] font-medium">{lane.label}</h3>
+                  <h3 className="text-[13px] font-medium">
+                    {lane.label}
+                    {lane.id === "delivered" && owed ? (
+                      <span className="ml-1.5 text-[11px] font-normal text-bad">
+                        {money(owed)} owed
+                      </span>
+                    ) : null}
+                  </h3>
                   <span className="text-[11px] text-muted">{cards.length}</span>
                 </header>
-                <div className="space-y-2">
+                <div
+                  className={`space-y-2 ${lane.id === "paid" ? "max-h-[70vh] overflow-auto" : ""}`}
+                >
                   {cards.length ? (
                     cards.map((d) => (
                       <DealCard
@@ -4792,9 +4846,12 @@ export default function BoardApp({
 
   return (
     <div className="board-theme">
-      {/* Planning a week needs the whole desk; everything else reads better narrow. */}
+      {/* A week and the deal wall need the whole desk; everything else reads
+          better narrow. */}
       <div
-        className={`mx-auto px-5 pb-20 pt-10 ${tab === "todos" ? "max-w-[1600px]" : "max-w-4xl"}`}
+        className={`mx-auto px-5 pb-20 pt-10 ${
+          tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-4xl"
+        }`}
       >
         <header className="mb-7">
           <div className="flex items-start justify-between gap-4">
