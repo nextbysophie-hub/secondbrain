@@ -2394,7 +2394,7 @@ function EditTitle({
       type="button"
       onClick={start}
       title="Tap to rename"
-      className={`min-w-0 flex-1 truncate text-left text-[13px] ${className ?? ""}`}
+      className={`min-w-0 flex-1 break-words text-left text-[13px] leading-snug ${className ?? ""}`}
     >
       {todo.title}
     </button>
@@ -3238,9 +3238,9 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             </details>
           ) : null}
 
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
             {/* Seven across, so Sunday is on screen while a task is in the air. */}
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
               {days.map((d) => (
                 <PlanDay key={d} board={board} send={send} day={d} />
               ))}
@@ -5076,7 +5076,7 @@ export default function BoardApp({
           better narrow. */}
       <div
         className={`mx-auto px-5 pb-20 pt-10 ${
-          tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-4xl"
+          tab === "todos" || tab === "deals" ? "max-w-[1900px]" : "max-w-4xl"
         }`}
       >
         <header className="mb-7">
