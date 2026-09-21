@@ -4593,6 +4593,10 @@ function Earnings({ deals }: { deals: Deal[] }) {
   const coming = deals
     .filter((d) => !isPaid(d) && d.stage !== null && !NOT_WORK.test(d.stage))
     .reduce((n, d) => n + net(d), 0);
+  // Every signed deal there has ever been, paid or not: the whole pipeline.
+  const pipeline = deals
+    .filter((d) => isPaid(d) || (d.stage !== null && !NOT_WORK.test(d.stage)))
+    .reduce((n, d) => n + net(d), 0);
 
   return (
     <Panel
@@ -4621,6 +4625,11 @@ function Earnings({ deals }: { deals: Deal[] }) {
         Everything below is what lands with you — the manager&apos;s 20% is already off the deals
         it applies to (tick &ldquo;manager 20%&rdquo; on a card to include it). {money(coming)} is
         still in production.
+      </p>
+
+      <p className="mt-1 text-[11px] text-muted/80">
+        Lifetime pipeline {money(pipeline)} — every deal ever signed, paid or not ({money(lifetime)}{" "}
+        in, {money(pipeline - lifetime)} still coming).
       </p>
 
       <div className="mt-3 space-y-1.5">
