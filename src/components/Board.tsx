@@ -1055,6 +1055,39 @@ function park(todo: Todo, send: Send, day: string) {
     );
 }
 
+/** Everything that ran late in one go: the day it missed is dropped and the
+ *  deadline moves to the coming Monday, so the whole lot sits in the waiting
+ *  pile ready to be dragged into the week instead of glaring in red. */
+function rescheduleLate(late: Todo[], send: Send) {
+  const monday = comingMonday();
+  for (const todo of late) {
+    if (isFixed(todo)) continue;
+    if (todo.slot)
+      send(
+        { action: "editTodo", id: todo.id, field: "slot", value: null },
+        (b) => ({
+          ...b,
+          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
+        }),
+      );
+    if (todo.plan)
+      send(
+        { action: "editTodo", id: todo.id, field: "plan", value: null },
+        (b) => ({
+          ...b,
+          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: null } : t)),
+        }),
+      );
+    send(
+      { action: "editTodo", id: todo.id, field: "due", value: monday },
+      (b) => ({
+        ...b,
+        todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: monday } : t)),
+      }),
+    );
+  }
+}
+
 /** Pulling an existing task into today: it gets the slot and the day. */
 function pick(todo: Todo, slot: "deep" | "quick", send: Send, day: string) {
   send(
@@ -3149,8 +3182,19 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
 
           {late.length && week === 0 ? (
             <details className="rounded-xl border border-bad/40 bg-bad/5 p-3">
-              <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-widest text-bad">
-                Late · {late.length}
+              <summary className="flex cursor-pointer items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-widest text-bad">
+                <span>Late · {late.length}</span>
+                <button
+                  type="button"
+                  title="Clears their day and moves their date to Monday, so you can drag them into the new week"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    rescheduleLate(late, send);
+                  }}
+                  className="rounded-full border border-bad/50 px-2 py-0.5 text-[10px] normal-case tracking-normal text-bad transition hover:bg-bad hover:text-brand-cream"
+                >
+                  move them back to the pile
+                </button>
               </summary>
               <div className="pt-1">
                 {late.map((t) => (
