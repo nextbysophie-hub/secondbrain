@@ -2811,7 +2811,11 @@ function PlanDay({
       !(t.slot && pickedOn(t, day)) &&
       !urgent.some((s) => s.todo.id === t.id),
   );
-  const candidates = [...urgent.map((s) => s.todo), ...rest].slice(0, 40);
+  const ranked = [...urgent.map((s) => s.todo), ...rest];
+  /** The same pile the panel on the right shows — anything with a slot is
+   *  already promised to a day, so it's listed apart with that day on it. */
+  const candidates = ranked.filter((t) => !t.slot).slice(0, 40);
+  const elsewhere = ranked.filter((t) => t.slot).slice(0, 20);
 
   const add = () => {
     const title = draft.trim();
@@ -3016,6 +3020,29 @@ function PlanDay({
                 Nothing waiting in Notion.
               </p>
             )}
+            {elsewhere.length ? (
+              <>
+                <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-widest text-muted">
+                  Already on another day
+                </p>
+                {elsewhere.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setOpen(null);
+                      place(t, open);
+                    }}
+                    className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-panel hover:text-ink"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                    <span className="shrink-0 text-[11px]">
+                      {t.plan ? weekday(t.plan) : "planned"}
+                    </span>
+                  </button>
+                ))}
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
