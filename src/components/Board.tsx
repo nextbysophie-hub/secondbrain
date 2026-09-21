@@ -4125,12 +4125,19 @@ const laneFor = (d: Deal): Lane | null =>
 /** Moving a card is either a stage change or the payment checkbox, and
  *  dragging one back out of Paid has to untick it again. */
 function moveToLane(deal: Deal, lane: Lane, stages: string[], send: Send) {
-  const editDeal = (field: "stage" | "paid", value: string | null) =>
+  const editDeal = (field: "stage" | "paid" | "paidOn", value: string | null) =>
     send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
       ...b,
       deals: b.deals.map((d) =>
         d.id === deal.id
-          ? { ...d, ...(field === "paid" ? { paid: value === "on" } : { stage: value }) }
+          ? {
+              ...d,
+              ...(field === "paid"
+                ? { paid: value === "on" }
+                : field === "paidOn"
+                  ? { paidOn: value }
+                  : { stage: value }),
+            }
           : d,
       ),
     }));
@@ -4139,6 +4146,9 @@ function moveToLane(deal: Deal, lane: Lane, stages: string[], send: Send) {
     const delivered = stageFor(LANES[3], stages);
     if (delivered && !/deliver/i.test(deal.stage ?? "")) editDeal("stage", delivered);
     if (!isPaid(deal)) editDeal("paid", "on");
+    // Which month it counts towards depends on this date, so the drop fills
+    // it in rather than leaving the earnings guessing.
+    if (!deal.paidOn) editDeal("paidOn", TODAY);
     return;
   }
   if (isPaid(deal)) editDeal("paid", "off");
@@ -4154,6 +4164,16 @@ const stageFor = (lane: Lane, stages: string[]) =>
   null;
 
 const isPaid = (d: Deal) => (d.paid === null ? d.stage === "Paid" : d.paid);
+
+/** The manager brokered it, so a fifth of the fee is theirs. */
+const CUT = 0.2;
+const net = (d: Deal) => Math.round((d.fee ?? 0) * (d.cut ? 1 - CUT : 1));
+/** Earnings are counted the day the money landed; a deal marked paid with no
+ *  payment date falls back to its post date so it still shows up in a month. */
+const earnedOn = (d: Deal) => d.paidOn ?? d.due;
+const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+const monthName = (key: string) =>
+  `${MONTHS[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
 
 function MoneyFlag({
   label,
@@ -4203,7 +4223,7 @@ function DealCard({
   const at = lane ? LANES.indexOf(lane) : -1;
 
   const edit = (
-    field: "brand" | "stage" | "fee" | "due" | "notes" | "invoiced" | "paid",
+    field: "brand" | "stage" | "fee" | "due" | "notes" | "invoiced" | "paid" | "paidOn" | "cut",
     value: string | null,
   ) =>
     send({ action: "editDeal", id: deal.id, field, value }, (b) => ({
@@ -4224,7 +4244,11 @@ function DealCard({
                         ? { invoiced: value === "on" }
                         : field === "paid"
                           ? { paid: value === "on" }
-                          : { stage: value }),
+                          : field === "paidOn"
+                            ? { paidOn: value }
+                            : field === "cut"
+                              ? { cut: value === "on" }
+                              : { stage: value }),
             }
           : d,
       ),
@@ -4281,7 +4305,12 @@ function DealCard({
             </span>
           ) : null}
         </button>
-        <span className="shrink-0 text-[11px] text-muted">{deal.fee ? money(deal.fee) : ""}</span>
+        <span className="shrink-0 text-right text-[11px] text-muted">
+          {deal.fee ? money(deal.fee) : ""}
+          {deal.fee && deal.cut ? (
+            <span className="block text-[10px] text-muted/80">{money(net(deal))} yours</span>
+          ) : null}
+        </span>
       </div>
 
       <div className="mt-2 flex items-center gap-1">
@@ -4351,6 +4380,22 @@ function DealCard({
                 label="paid"
                 on={deal.paid}
                 onChange={(on) => edit("paid", on ? "on" : "off")}
+              />
+            ) : null}
+            {deal.cut !== null ? (
+              <MoneyFlag
+                label="manager 20%"
+                on={deal.cut}
+                onChange={(on) => edit("cut", on ? "on" : "off")}
+              />
+            ) : null}
+            {isPaid(deal) ? (
+              <input
+                type="date"
+                value={deal.paidOn ?? ""}
+                aria-label="Day the money landed"
+                onChange={(e) => edit("paidOn", e.target.value || null)}
+                className="rounded-full border border-line bg-transparent px-2 py-0.5 text-[10px] text-muted outline-none"
               />
             ) : null}
             <a
@@ -4492,6 +4537,119 @@ function DealsLock({
   );
 }
 
+/** What she has actually been paid, month by month, net of the manager's
+ *  cut — counted on the day the money landed, not the day the work shipped,
+ *  so a month's number is money in the account. */
+function Earnings({ deals }: { deals: Deal[] }) {
+  const [all, setAll] = useState(false);
+  const paid = deals.filter((d) => isPaid(d) && (d.fee ?? 0) > 0);
+  const lifetime = paid.reduce((n, d) => n + net(d), 0);
+  const gross = paid.reduce((n, d) => n + (d.fee ?? 0), 0);
+
+  const byMonth = new Map<string, { net: number; deals: Deal[] }>();
+  let undated = 0;
+  for (const d of paid) {
+    const on = earnedOn(d);
+    if (!on) {
+      undated += net(d);
+      continue;
+    }
+    const key = on.slice(0, 7);
+    const row = byMonth.get(key) ?? { net: 0, deals: [] };
+    row.net += net(d);
+    row.deals.push(d);
+    byMonth.set(key, row);
+  }
+  const months = [...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  const shown = all ? months : months.slice(0, 6);
+  const peak = Math.max(1, ...months.map(([, r]) => r.net));
+  const thisMonth = byMonth.get(TODAY.slice(0, 7))?.net ?? 0;
+  const best = months.length ? Math.max(...months.map(([, r]) => r.net)) : 0;
+  const average = months.length ? Math.round(lifetime / months.length) : 0;
+
+  const owedOut = deals
+    .filter((d) => !isPaid(d) && laneFor(d)?.id === "delivered")
+    .reduce((n, d) => n + net(d), 0);
+  const coming = deals
+    .filter((d) => !isPaid(d) && d.stage !== null && !NOT_WORK.test(d.stage))
+    .reduce((n, d) => n + net(d), 0);
+
+  return (
+    <Panel
+      title="Earnings"
+      right={
+        <span className="text-[12px] text-muted">
+          {money(lifetime)} lifetime{gross > lifetime ? ` · ${money(gross - lifetime)} to the manager` : ""}
+        </span>
+      }
+    >
+      <div className="grid gap-2 sm:grid-cols-4">
+        {[
+          { label: "This month", value: thisMonth },
+          { label: "Monthly average", value: average },
+          { label: "Best month", value: best },
+          { label: "Delivered, unpaid", value: owedOut, warn: true },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-line px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wide text-muted">{s.label}</p>
+            <p className={`text-[18px] ${s.warn && s.value ? "text-bad" : ""}`}>{money(s.value)}</p>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[12px] text-muted">
+        Everything below is what lands with you — the manager&apos;s 20% is already off the deals
+        it applies to (tick &ldquo;manager 20%&rdquo; on a card to include it). {money(coming)} is
+        still in production.
+      </p>
+
+      <div className="mt-3 space-y-1.5">
+        {shown.length ? (
+          shown.map(([key, row]) => (
+            <div key={key} className="flex items-center gap-3">
+              <span className="w-[72px] shrink-0 text-[12px] text-muted">{monthName(key)}</span>
+              <span className="h-2 flex-1 overflow-hidden rounded-full bg-line/50">
+                <span
+                  className="block h-full rounded-full bg-ink/70"
+                  style={{ width: `${Math.max(3, (row.net / peak) * 100)}%` }}
+                />
+              </span>
+              <span className="w-[72px] shrink-0 text-right text-[12px]">{money(row.net)}</span>
+              <span
+                className="w-[150px] shrink-0 truncate text-right text-[11px] text-muted"
+                title={row.deals.map((d) => d.brand).join(", ")}
+              >
+                {row.deals.map((d) => d.brand.split(/[—–-]/)[0].trim()).join(", ")}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="text-[12px] italic text-muted">
+            Nothing marked paid yet — drag a delivered card to Paid and it lands here.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-2 flex items-center gap-3">
+        {months.length > 6 ? (
+          <button
+            type="button"
+            onClick={() => setAll(!all)}
+            className="text-[11px] text-muted transition hover:text-ink"
+          >
+            {all ? "show less" : `all ${months.length} months`}
+          </button>
+        ) : null}
+        {undated ? (
+          <span className="text-[11px] text-muted">
+            {money(undated)} paid with no date — give those cards a payment date to place them.
+          </span>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
 /** The wall: the making of the content plus the money at the end of it,
  *  everything else about the deal left in Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
@@ -4502,10 +4660,11 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
     (d) => d.stage !== null && !NOT_WORK.test(d.stage),
   );
   const working = mine.filter((d) => !isPaid(d));
-  const booked = working.reduce((n, d) => n + (d.fee ?? 0), 0);
+  // Money is counted the way it arrives: after the manager's share.
+  const booked = working.reduce((n, d) => n + net(d), 0);
   const owed = working
     .filter((d) => laneFor(d)?.id === "delivered")
-    .reduce((n, d) => n + (d.fee ?? 0), 0);
+    .reduce((n, d) => n + net(d), 0);
   const loose = board.todos.filter(
     (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc|film|script/i.test(t.title),
   );
@@ -4514,6 +4673,17 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
     setOver(null);
     const deal = board.deals.find((d) => d.id === id);
     if (deal && laneFor(deal)?.id !== lane.id) moveToLane(deal, lane, stages, send);
+  };
+
+  const bin = (id: string) => {
+    setOver(null);
+    const deal = board.deals.find((d) => d.id === id);
+    if (!deal) return;
+    if (!confirm(`Delete "${deal.brand}" from the tracker?`)) return;
+    send({ action: "deleteDeal", id }, (b) => ({
+      ...b,
+      deals: b.deals.filter((d) => d.id !== id),
+    }));
   };
 
   return (
@@ -4537,7 +4707,9 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
               .filter((d) => laneFor(d)?.id === lane.id)
               // Newest money first; the rest keep the tracker's own order.
               .sort((a, b) =>
-                lane.id === "paid" ? (b.due ?? "").localeCompare(a.due ?? "") : 0,
+                lane.id === "paid"
+                  ? (earnedOn(b) ?? "").localeCompare(earnedOn(a) ?? "")
+                  : 0,
               );
             return (
               <div
@@ -4590,6 +4762,24 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
             );
           })}
         </div>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setOver("bin");
+          }}
+          onDragLeave={() => setOver((o) => (o === "bin" ? null : o))}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/deal");
+            if (id) bin(id);
+          }}
+          className={`mt-3 rounded-xl border border-dashed px-3 py-2 text-center text-[11px] transition ${
+            over === "bin" ? "border-bad text-bad" : "border-line text-muted"
+          }`}
+        >
+          🗑 drag a deal here to delete it
+        </div>
+
         <div className="mt-3">
           <AddRow
             placeholder="New signed deal — the brand's name…"
@@ -4610,6 +4800,8 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                     notes: "",
                     invoiced: false,
                     paid: false,
+                    paidOn: null,
+                    cut: true,
                     url: "#",
                   },
                 ],
@@ -4618,6 +4810,8 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
           />
         </div>
       </Panel>
+
+      <Earnings deals={board.deals} />
 
       {loose.length ? (
         <Panel

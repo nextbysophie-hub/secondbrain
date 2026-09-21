@@ -110,8 +110,27 @@ export type Deal = {
   notes: string;
   invoiced: boolean | null;
   paid: boolean | null;
+  /** The day the money actually landed, which is the only date earnings can
+   *  honestly be counted by. */
+  paidOn: string | null;
+  /** True when the manager brokered it and takes their 20%. */
+  cut: boolean | null;
   url: string;
 };
+
+export type DealField =
+  | "brand"
+  | "stage"
+  | "status"
+  | "fee"
+  | "due"
+  | "contact"
+  | "link"
+  | "notes"
+  | "invoiced"
+  | "paid"
+  | "paidOn"
+  | "cut";
 
 /** A brand-deal tracker somebody keeps by hand has its own column names and
  *  its own list of stages, so every role is matched against the real schema
@@ -127,6 +146,8 @@ export type DealMap = {
   notes: string | null;
   invoiced: string | null;
   paid: string | null;
+  paidOn: string | null;
+  cut: string | null;
 };
 
 export type Board = {
@@ -315,6 +336,8 @@ export async function readDealMap(token: string, dealsDbId: string): Promise<Dea
     notes: pick(props, "rich_text", /note|detail|deliverable/i)?.name ?? null,
     invoiced: checkbox(/invoice/i),
     paid: checkbox(/paid|payment received|received/i),
+    paidOn: pick(props, "date", /payment|paid/i)?.name ?? null,
+    cut: checkbox(/manager|commission|agency/i),
   };
 }
 
@@ -809,6 +832,8 @@ export async function readBoard(
       notes: deals.notes ? textOf(r.properties[deals.notes]) : "",
       invoiced: deals.invoiced ? (r.properties[deals.invoiced]?.checkbox ?? false) : null,
       paid: deals.paid ? (r.properties[deals.paid]?.checkbox ?? false) : null,
+      paidOn: deals.paidOn ? dateOf(r.properties[deals.paidOn]) : null,
+      cut: deals.cut ? (r.properties[deals.cut]?.checkbox ?? false) : null,
       url: r.url,
     })),
   };
@@ -884,7 +909,7 @@ export type Action =
   | {
       action: "editDeal";
       id: string;
-      field: "brand" | "stage" | "status" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid";
+      field: DealField;
       value: string | null;
     }
   | { action: "deleteDeal"; id: string };
@@ -943,7 +968,7 @@ function taskProps(
 /** Writes only the columns her deals table actually has, under its own names. */
 function dealProps(
   deals: DealMap,
-  field: "brand" | "stage" | "status" | "fee" | "due" | "contact" | "link" | "notes" | "invoiced" | "paid",
+  field: DealField,
   value: string | null,
 ): Record<string, unknown> {
   const choice = (role: DealMap["stage"]) =>
@@ -971,6 +996,10 @@ function dealProps(
       return deals.invoiced ? { [deals.invoiced]: { checkbox: value === "on" } } : {};
     case "paid":
       return deals.paid ? { [deals.paid]: { checkbox: value === "on" } } : {};
+    case "paidOn":
+      return deals.paidOn ? { [deals.paidOn]: dateProp(value) } : {};
+    case "cut":
+      return deals.cut ? { [deals.cut]: { checkbox: value === "on" } } : {};
   }
 }
 
@@ -1103,6 +1132,9 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
         ...(body.due ? dealProps(deals, "due", body.due) : {}),
         ...(body.contact ? dealProps(deals, "contact", body.contact) : {}),
         ...(body.link ? dealProps(deals, "link", body.link) : {}),
+        // Everything signed from here on goes through the manager, so a new
+        // deal starts with their 20% assumed and can be unticked on the card.
+        ...dealProps(deals, "cut", "on"),
       });
       return;
     case "editDeal": {
