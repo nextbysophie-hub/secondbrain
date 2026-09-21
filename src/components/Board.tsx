@@ -4406,6 +4406,52 @@ function DealCard({
   );
 }
 
+/** Anyone who ends up with the dashboard link still doesn't get the money:
+ *  the deals only come down from the server once the passcode is right. */
+function DealsLock({
+  tried,
+  onUnlock,
+}: {
+  tried: boolean;
+  onUnlock: (code: string) => void;
+}) {
+  const [code, setCode] = useState("");
+  return (
+    <div className="mx-auto max-w-sm rounded-2xl border border-line p-6 text-center">
+      <p className="text-[22px]">🔒</p>
+      <h2 className="mt-2 text-[17px] font-medium">Deals are private</h2>
+      <p className="mt-1 text-[13px] leading-relaxed text-muted">
+        Enter your passcode to see the brand work. This device will remember it.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.trim()) onUnlock(code.trim());
+        }}
+        className="mt-4 flex gap-2"
+      >
+        <input
+          type="password"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Passcode"
+          autoFocus
+          className="min-w-0 flex-1 rounded-lg border border-line bg-transparent px-3 py-2 text-[14px] outline-none placeholder:text-muted/70"
+        />
+        <button
+          type="submit"
+          className="rounded-lg border border-ink bg-ink px-3 py-2 text-[13px] text-brand-cream transition hover:opacity-90"
+        >
+          Unlock
+        </button>
+      </form>
+      {tried ? (
+        <p className="mt-2 text-[12px] text-bad">That passcode didn&apos;t work.</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** The wall: four columns of work, everything else about the deal left in
  *  Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
@@ -4607,6 +4653,8 @@ export default function BoardApp({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("today");
+  // The deals passcode: held here, sent with every read so the server decides.
+  const [dealsCode, setDealsCode] = useState("");
   // Picked after mount so the server and the browser can't disagree on it.
   const [quote, setQuote] = useState("");
 
@@ -4650,6 +4698,10 @@ export default function BoardApp({
     if (saved) setIdeaDb(saved);
   }, [initialIdeaDb]);
 
+  // Unlocking is per device, so her laptop and phone stay open and a stranger
+  // holding the link doesn't.
+  useEffect(() => setDealsCode(localStorage.getItem("dealsCode") ?? ""), []);
+
   const boardUrl = useCallback(
     () =>
       `/api/board?key=${encodeURIComponent(captureKey)}` +
@@ -4662,7 +4714,9 @@ export default function BoardApp({
     if (!captureKey && !todoDb) return;
     setLoading(true);
     try {
-      const res = await fetch(boardUrl());
+      const res = await fetch(boardUrl(), {
+        headers: dealsCode ? { "x-deals-code": dealsCode } : undefined,
+      });
       const json = (await res.json()) as {
         ok: boolean;
         error?: string;
@@ -4680,7 +4734,7 @@ export default function BoardApp({
     } finally {
       setLoading(false);
     }
-  }, [captureKey, todoDb, boardUrl]);
+  }, [captureKey, todoDb, boardUrl, dealsCode]);
 
   useEffect(() => {
     void load();
@@ -4693,7 +4747,10 @@ export default function BoardApp({
     void (async () => {
       const res = await fetch(boardUrl(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(dealsCode ? { "x-deals-code": dealsCode } : {}),
+        },
         body: JSON.stringify(action),
       }).catch(() => null);
       const json = (await res?.json().catch(() => null)) as {
@@ -4797,7 +4854,17 @@ export default function BoardApp({
         ) : tab === "todos" ? (
           <PlanPane board={board} send={send} />
         ) : tab === "deals" ? (
-          <DealsPane board={board} send={send} />
+          board.dealsLocked ? (
+            <DealsLock
+              tried={!!dealsCode}
+              onUnlock={(code) => {
+                localStorage.setItem("dealsCode", code);
+                setDealsCode(code);
+              }}
+            />
+          ) : (
+            <DealsPane board={board} send={send} />
+          )
         ) : tab === "agent" ? (
           <AgentPane board={board} send={send} />
         ) : tab === "habits" ? (

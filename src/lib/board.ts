@@ -138,6 +138,9 @@ export type Board = {
   goals: Goal[];
   deals: Deal[];
   dealStages: string[];
+  /** Money is nobody else's business: true when the passcode hasn't been
+   *  given, and the deals never left the server. */
+  dealsLocked?: boolean;
   timings: Timing[];
   categories: string[];
   dbs: BoardDbs;

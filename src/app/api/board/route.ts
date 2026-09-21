@@ -36,6 +36,17 @@ const dbParam = (req: Request, name: string) => {
   return raw ? raw.replace(/-/g, "") : undefined;
 };
 
+/** The deals wall carries amounts and brand terms, so it stays behind a
+ *  passcode even for someone holding the dashboard link. No passcode set on
+ *  the deployment means nothing to hide. */
+const dealsUnlocked = (req: Request) => {
+  const code = process.env.DEALS_PASSCODE?.trim();
+  if (!code) return true;
+  return (req.headers.get("x-deals-code") ?? "").trim() === code;
+};
+
+const DEAL_ACTIONS = ["addDeal", "editDeal", "deleteDeal"];
+
 /** The schema as it is, plus the columns the dashboard needs and a
  *  deadline-shaped tracker won't have. */
 async function taskMap(
@@ -77,6 +88,8 @@ export async function GET(req: Request) {
     const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
     const dealMap = await readDealMap(creds.token, dbs.deals);
     const board = await readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10));
+    if (!dealsUnlocked(req))
+      return NextResponse.json({ ok: true, ...board, deals: [], dealsLocked: true, dbs });
     return NextResponse.json({ ok: true, ...board, dbs });
   } catch (e) {
     return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400 });
@@ -91,6 +104,8 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as Action | null;
   if (!body?.action) return NextResponse.json({ ok: false, error: "No action given." }, { status: 400 });
+  if (DEAL_ACTIONS.includes(body.action) && !dealsUnlocked(req))
+    return NextResponse.json({ ok: false, error: "The deals are locked. Enter the passcode first." }, { status: 401 });
 
   const taskDbId = todoDbOverride(req) ?? creds.taskDbId;
   const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;
