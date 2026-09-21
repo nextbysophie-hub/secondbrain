@@ -4217,6 +4217,9 @@ function DealCard({
 }) {
   const [adding, setAdding] = useState("");
   const [script, setScript] = useState(deal.notes);
+  const [fee, setFee] = useState(deal.fee === null ? "" : String(deal.fee));
+  // A card that drags while you're in its fee box can't be typed in.
+  const [typing, setTyping] = useState(false);
   const stages = board.dealStages.filter((s) => !NOT_WORK.test(s));
   const tasks = board.todos.filter((t) => t.deal === deal.id);
   const left = tasks.filter((t) => !t.done).length;
@@ -4288,7 +4291,7 @@ function DealCard({
 
   return (
     <div
-      draggable
+      draggable={!typing}
       onDragStart={(e) => e.dataTransfer.setData("text/deal", deal.id)}
       className="rounded-xl border border-line bg-brand-cream/40 p-3 transition hover:border-ink/25"
     >
@@ -4305,10 +4308,27 @@ function DealCard({
             </span>
           ) : null}
         </button>
-        <span className="shrink-0 text-right text-[11px] text-muted">
-          {deal.fee ? money(deal.fee) : ""}
+        <span className="shrink-0 text-right">
+          <span className="flex items-center justify-end gap-0.5 text-[12px] text-muted">
+            $
+            <input
+              value={fee}
+              inputMode="decimal"
+              aria-label="Fee"
+              placeholder="fee"
+              onChange={(e) => setFee(e.target.value.replace(/[^\d.]/g, ""))}
+              onFocus={() => setTyping(true)}
+              onBlur={() => {
+                setTyping(false);
+                if (fee !== (deal.fee === null ? "" : String(deal.fee)))
+                  edit("fee", fee.trim() === "" ? null : fee.trim());
+              }}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+              className="w-[58px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right outline-none transition placeholder:text-muted/60 hover:border-line focus:border-ink/40"
+            />
+          </span>
           {deal.fee && deal.cut ? (
-            <span className="block text-[10px] text-muted/80">{money(net(deal))} yours</span>
+            <span className="block pr-1 text-[10px] text-muted/80">{money(net(deal))} yours</span>
           ) : null}
         </span>
       </div>
