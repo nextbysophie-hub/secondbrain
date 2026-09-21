@@ -63,7 +63,14 @@ const categoriesOf = (board: Board) =>
   board.categories?.length ? board.categories : CATEGORIES;
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-const TODAY = iso(new Date());
+
+/** Her day, not UTC's: after 5pm in Austin the UTC date is already tomorrow,
+ *  which used to make the board plan the wrong day every evening. */
+const localDay = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+const TODAY = localDay(new Date());
 
 function monthDays(): string[] {
   const now = new Date();
@@ -587,7 +594,7 @@ const pickedOn = (t: Todo, day: string) =>
   t.plan ? t.plan === day : t.due === day;
 
 const shiftDay = (day: string, by: number) =>
-  iso(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
+  localDay(new Date(new Date(`${day}T12:00:00`).getTime() + by * 86400000));
 
 /** The page is normally about today, so days either side get named rather
  *  than dated. */
@@ -1971,7 +1978,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 function comingMonday(): string {
   const d = new Date();
   d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
-  return iso(d);
+  return localDay(d);
 }
 
 const ideaToTodo = (idea: Idea, send: Send) => {
