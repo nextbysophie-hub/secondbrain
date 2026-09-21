@@ -2553,7 +2553,7 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
           ))}
         </div>
       ) : null}
-      <div className="max-h-[520px] space-y-1 overflow-auto">
+      <div className="max-h-[min(520px,45vh)] space-y-1 overflow-auto">
         {waiting.length ? (
           waiting.map((t) => (
             <PileRow
@@ -3211,13 +3211,14 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             </details>
           ) : null}
 
-          <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
-            <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+            {/* Seven across, so Sunday is on screen while a task is in the air. */}
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
               {days.map((d) => (
                 <PlanDay key={d} board={board} send={send} day={d} />
               ))}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:sticky xl:top-4 xl:self-start">
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
               <PlanTrash board={board} send={send} />
@@ -4707,7 +4708,10 @@ export default function BoardApp({
 
   return (
     <div className="board-theme">
-      <div className="mx-auto max-w-4xl px-5 pb-20 pt-10">
+      {/* Planning a week needs the whole desk; everything else reads better narrow. */}
+      <div
+        className={`mx-auto px-5 pb-20 pt-10 ${tab === "todos" ? "max-w-[1600px]" : "max-w-4xl"}`}
+      >
         <header className="mb-7">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
