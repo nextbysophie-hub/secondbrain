@@ -3153,7 +3153,11 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   const empty = days.filter(
     (d) => d >= TODAY && !planned.some((t) => pickedOn(t, d)),
   ).length;
-  const late = board.todos.filter((t) => !t.done && t.due && t.due < TODAY);
+  // A task with a day of its own isn't late yet — only things nobody has
+  // picked up again fall into the pile.
+  const late = board.todos.filter(
+    (t) => !t.done && t.due && t.due < TODAY && !(t.plan && t.plan >= TODAY),
+  );
   // Sunday is when the week is decided, so that's when the page offers to.
   const sunday = new Date(`${TODAY}T12:00:00`).getDay() === 0;
   const nextEmpty = pickedIn(planWeek(week + 1)).length === 0;
@@ -4278,12 +4282,15 @@ function DealCard({
    *  the week, linked back to the deal so the script travels with it. */
   const planIt = (day: string) => {
     const title = `${lane?.verb ?? "Work on"} ${deal.brand}`.slice(0, 120);
+    // A deal deadline that has already passed would drop the new task straight
+    // into the late pile, so the planned day stands on its own.
+    const keptDue = deal.due && deal.due >= TODAY ? deal.due : null;
     if (tasks.some((t) => !t.done && t.title === title)) return;
     send(
-      { action: "addTodo", title, deal: deal.id, kind: "deadline", slot: "deep", plan: day, due: deal.due },
+      { action: "addTodo", title, deal: deal.id, kind: "deadline", slot: "deep", plan: day, due: keptDue },
       (b) => ({
         ...b,
-        todos: [...b.todos, { ...newTodo(title, "deep", day), due: deal.due, deal: deal.id }],
+        todos: [...b.todos, { ...newTodo(title, "deep", day), due: keptDue, deal: deal.id }],
       }),
     );
   };
