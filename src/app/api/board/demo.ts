@@ -29,7 +29,7 @@ const ticks = habits.flatMap((h, hi) =>
 
 export function demoBoard() {
   const board: Board = {
-    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", deals: "demo" },
+    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", reminders: "demo", deals: "demo" },
     categories: ["Work", "Personal", "Health", "Money", "Other"],
     todos: [
       { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, deal: null, url: "#" },
@@ -75,6 +75,11 @@ export function demoBoard() {
       { id: "g4", name: "Build a real content bank", area: "Content", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: true },
       { id: "g5", name: "Gym 4× a week", area: "Health", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
       { id: "g6", name: "Weekend off the laptop", area: "Life", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
+    ],
+    reminders: [
+      { id: "r1", title: "Check the Crate & Barrel refund landed", due: iso(5), done: false, notes: "Returned the chairs — they said 5 business days.", url: "#" },
+      { id: "r2", title: "Chase the Notion invoice if it hasn't been paid", due: iso(-1), done: false, notes: "", url: "#" },
+      { id: "r3", title: "Cancel the trial before it charges", due: iso(12), done: false, notes: "", url: "#" },
     ],
     dealStages: ["Inquiry", "Signed", "Need to write script", "Need to film", "Need to edit", "Delivered"],
     deals: [

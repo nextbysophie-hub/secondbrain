@@ -8,7 +8,11 @@
 const NOTION_VERSION = "2022-06-28";
 const API = "https://api.notion.com/v1";
 
-async function notion<T>(token: string, endpoint: string, init?: RequestInit): Promise<T> {
+async function notion<T>(
+  token: string,
+  endpoint: string,
+  init?: RequestInit,
+): Promise<T> {
   const res = await fetch(`${API}${endpoint}`, {
     ...init,
     headers: {
@@ -23,7 +27,10 @@ async function notion<T>(token: string, endpoint: string, init?: RequestInit): P
     throw {
       status: res.status,
       code: typeof body.code === "string" ? body.code : undefined,
-      message: typeof body.message === "string" ? body.message : `Notion returned ${res.status}`,
+      message:
+        typeof body.message === "string"
+          ? body.message
+          : `Notion returned ${res.status}`,
     };
   }
   return body as T;
@@ -80,7 +87,25 @@ export type Idea = {
   url: string;
 };
 
-export type Habit = { id: string; name: string; cadence: string; bad: boolean; affirmation?: boolean };
+/** A thing to come back to on a date — "check the refund landed" — rather
+ *  than a task with work in it. Its whole value is the date, so it carries
+ *  nothing else but the note and whether it's been dealt with. */
+export type Reminder = {
+  id: string;
+  title: string;
+  due: string | null;
+  done: boolean;
+  notes: string;
+  url: string;
+};
+
+export type Habit = {
+  id: string;
+  name: string;
+  cadence: string;
+  bad: boolean;
+  affirmation?: boolean;
+};
 export type HabitTick = { id: string; habitId: string; date: string };
 /** Goals are one table at two heights: a quarter goal is the parent, and the
  *  month goals under it are what actually turn into tasks. */
@@ -162,6 +187,7 @@ export type Board = {
   habits: Habit[];
   ticks: HabitTick[];
   goals: Goal[];
+  reminders: Reminder[];
   deals: Deal[];
   dealStages: string[];
   /** Money is nobody else's business: true when the passcode hasn't been
@@ -179,6 +205,7 @@ export type BoardDbs = {
   ticks: string;
   goals: string;
   agent: string;
+  reminders: string;
   deals: string;
 };
 
@@ -212,16 +239,29 @@ type Prop = {
   relation?: { id: string }[];
 };
 
-type Row = { id: string; url: string; created_time?: string; properties: Record<string, Prop> };
+type Row = {
+  id: string;
+  url: string;
+  created_time?: string;
+  properties: Record<string, Prop>;
+};
 
 const textOf = (p?: Prop) =>
-  (p?.title ?? p?.rich_text ?? []).map((t) => t.plain_text ?? "").join("").trim();
+  (p?.title ?? p?.rich_text ?? [])
+    .map((t) => t.plain_text ?? "")
+    .join("")
+    .trim();
 const dateOf = (p?: Prop) => p?.date?.start?.slice(0, 10) ?? null;
 const selectOf = (p?: Prop) => p?.select?.name ?? null;
-const tagOf = (p?: Prop) => p?.select?.name ?? p?.status?.name ?? p?.multi_select?.[0]?.name ?? null;
+const tagOf = (p?: Prop) =>
+  p?.select?.name ?? p?.status?.name ?? p?.multi_select?.[0]?.name ?? null;
 
-const title = (s: string) => ({ title: [{ type: "text", text: { content: s.slice(0, 1900) } }] });
-const richText = (s: string) => ({ rich_text: [{ type: "text", text: { content: s.slice(0, 1900) } }] });
+const title = (s: string) => ({
+  title: [{ type: "text", text: { content: s.slice(0, 1900) } }],
+});
+const richText = (s: string) => ({
+  rich_text: [{ type: "text", text: { content: s.slice(0, 1900) } }],
+});
 const dateProp = (s: string | null) => ({ date: s ? { start: s } : null });
 const selectProp = (s: string | null) => ({ select: s ? { name: s } : null });
 const relationProp = (id: string | null) => ({ relation: id ? [{ id }] : [] });
@@ -230,17 +270,32 @@ const relationOf = (p?: Prop) => p?.relation?.[0]?.id ?? null;
 const kindOf = (r: Row, map: TaskMap): "deadline" | "want" | null => {
   if (!map.kindProp) return null;
   const v = selectOf(r.properties[map.kindProp.prop]);
-  return v === map.kindProp.deadline ? "deadline" : v === map.kindProp.want ? "want" : null;
+  return v === map.kindProp.deadline
+    ? "deadline"
+    : v === map.kindProp.want
+      ? "want"
+      : null;
 };
 
 const slotOf = (r: Row, map: TaskMap): "deep" | "quick" | null => {
   if (!map.slotProp) return null;
   const v = selectOf(r.properties[map.slotProp.prop]);
-  return v === map.slotProp.deep ? "deep" : v === map.slotProp.quick ? "quick" : null;
+  return v === map.slotProp.deep
+    ? "deep"
+    : v === map.slotProp.quick
+      ? "quick"
+      : null;
 };
 
 function selectSchema(options: string[], colors: string[]) {
-  return { select: { options: options.map((name, i) => ({ name, color: colors[i % colors.length] })) } };
+  return {
+    select: {
+      options: options.map((name, i) => ({
+        name,
+        color: colors[i % colors.length],
+      })),
+    },
+  };
 }
 
 /* ------------------------------------------------- reading someone's schema */
@@ -281,61 +336,102 @@ type SchemaProp = {
   multi_select?: { options: { name: string }[] };
   relation?: { database_id?: string };
   number?: object;
-  status?: { options: { id: string; name: string }[]; groups: { name: string; option_ids: string[] }[] };
+  status?: {
+    options: { id: string; name: string }[];
+    groups: { name: string; option_ids: string[] }[];
+  };
 };
 
 const DONE_NAMES = /^(done|complete|completed|finished)$/i;
 
-function pick(props: SchemaProp[], type: string, match?: RegExp): SchemaProp | undefined {
+function pick(
+  props: SchemaProp[],
+  type: string,
+  match?: RegExp,
+): SchemaProp | undefined {
   const ofType = props.filter((p) => p.type === type);
-  return (match && ofType.find((p) => match.test(p.name))) || (match ? undefined : ofType[0]);
+  return (
+    (match && ofType.find((p) => match.test(p.name))) ||
+    (match ? undefined : ofType[0])
+  );
 }
 
 /** A status column stands in for the Done checkbox: whatever sits in Notion's
  *  "Complete" group means done, and the first "To-do" option means not. */
-function statusDone(prop: SchemaProp): { doneName: string; openName: string } | null {
+function statusDone(
+  prop: SchemaProp,
+): { doneName: string; openName: string } | null {
   const options = prop.status?.options ?? [];
   const groups = prop.status?.groups ?? [];
-  const idsIn = (name: RegExp) => groups.find((g) => name.test(g.name))?.option_ids ?? [];
+  const idsIn = (name: RegExp) =>
+    groups.find((g) => name.test(g.name))?.option_ids ?? [];
   const byId = (ids: string[]) => options.find((o) => ids.includes(o.id))?.name;
-  const doneName = byId(idsIn(/complete|done/i)) ?? options.find((o) => DONE_NAMES.test(o.name))?.name;
-  const openName = byId(idsIn(/to-?do|not started|backlog/i)) ?? options[0]?.name;
+  const doneName =
+    byId(idsIn(/complete|done/i)) ??
+    options.find((o) => DONE_NAMES.test(o.name))?.name;
+  const openName =
+    byId(idsIn(/to-?do|not started|backlog/i)) ?? options[0]?.name;
   if (!doneName || !openName) return null;
   return { doneName, openName };
 }
 
 /** Her tracker's stage list is the source of truth; DEAL_STAGES is only the
  *  fallback for a deals table this app had to create itself. */
-export async function readDealMap(token: string, dealsDbId: string): Promise<DealMap> {
-  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${dealsDbId}`);
-  const props = Object.entries(db.properties).map(([name, p]) => ({ ...p, name }));
+export async function readDealMap(
+  token: string,
+  dealsDbId: string,
+): Promise<DealMap> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(
+    token,
+    `/databases/${dealsDbId}`,
+  );
+  const props = Object.entries(db.properties).map(([name, p]) => ({
+    ...p,
+    name,
+  }));
   const optionsOf = (p: SchemaProp) =>
-    ((p.type === "status" ? p.status?.options : p.select?.options) ?? []).map((o) => o.name);
-  const choices = props.filter((p) => p.type === "select" || p.type === "status");
+    ((p.type === "status" ? p.status?.options : p.select?.options) ?? []).map(
+      (o) => o.name,
+    );
+  const choices = props.filter(
+    (p) => p.type === "select" || p.type === "status",
+  );
   // What she asks the dashboard is "do I have to script, film, edit or post
   // this?", so the production column wins over the negotiation one wherever a
   // tracker keeps both.
   const stageProp =
     choices.find((p) => /production|workflow|progress/i.test(p.name)) ??
-    choices.find((p) => optionsOf(p).some((o) => /script|film|edit|post/i.test(o))) ??
+    choices.find((p) =>
+      optionsOf(p).some((o) => /script|film|edit|post/i.test(o)),
+    ) ??
     choices.find((p) => /stage|status/i.test(p.name)) ??
     choices[0];
-  const statusProp = choices.find((p) => p.name !== stageProp?.name && /status|stage/i.test(p.name));
+  const statusProp = choices.find(
+    (p) => p.name !== stageProp?.name && /status|stage/i.test(p.name),
+  );
   const asRole = (p?: SchemaProp) =>
     p
       ? {
           prop: p.name,
-          kind: (p.type === "status" ? "status" : "select") as "select" | "status",
+          kind: (p.type === "status" ? "status" : "select") as
+            "select" | "status",
           options: optionsOf(p),
         }
       : null;
-  const checkbox = (match: RegExp) => pick(props, "checkbox", match)?.name ?? null;
+  const checkbox = (match: RegExp) =>
+    pick(props, "checkbox", match)?.name ?? null;
   return {
     title: pick(props, "title")?.name ?? "Name",
     stage: asRole(stageProp),
     status: asRole(statusProp),
-    fee: pick(props, "number", /amount|fee|rate|price|value|\$/i)?.name ?? pick(props, "number")?.name ?? null,
-    due: pick(props, "date", /post|deliver|due|deadline|film/i)?.name ?? pick(props, "date")?.name ?? null,
+    fee:
+      pick(props, "number", /amount|fee|rate|price|value|\$/i)?.name ??
+      pick(props, "number")?.name ??
+      null,
+    due:
+      pick(props, "date", /post|deliver|due|deadline|film/i)?.name ??
+      pick(props, "date")?.name ??
+      null,
     contact: pick(props, "rich_text", /contact|person|manager/i)?.name ?? null,
     link: pick(props, "url")?.name ?? null,
     notes: pick(props, "rich_text", /note|detail|deliverable/i)?.name ?? null,
@@ -347,21 +443,42 @@ export async function readDealMap(token: string, dealsDbId: string): Promise<Dea
   };
 }
 
-export async function readTaskMap(token: string, taskDbId: string): Promise<TaskMap> {
-  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${taskDbId}`);
-  const props = Object.entries(db.properties).map(([name, p]) => ({ ...p, name }));
+export async function readTaskMap(
+  token: string,
+  taskDbId: string,
+): Promise<TaskMap> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(
+    token,
+    `/databases/${taskDbId}`,
+  );
+  const props = Object.entries(db.properties).map(([name, p]) => ({
+    ...p,
+    name,
+  }));
 
   const checkbox = pick(props, "checkbox", /done|complete/i);
   const status = pick(props, "status");
   const statusPair = status ? statusDone(status) : null;
-  const kindProp = props.find((p) => p.type === "select" && /^kind$/i.test(p.name.trim()));
-  const slotProp = props.find((p) => p.type === "select" && /^slot$/i.test(p.name.trim()));
+  const kindProp = props.find(
+    (p) => p.type === "select" && /^kind$/i.test(p.name.trim()),
+  );
+  const slotProp = props.find(
+    (p) => p.type === "select" && /^slot$/i.test(p.name.trim()),
+  );
   const slotOptions = slotProp?.select?.options ?? [];
-  const slotDeep = slotOptions.find((o) => /deep|focus|big/i.test(o.name))?.name;
-  const slotQuick = slotOptions.find((o) => /quick|batch|small|admin/i.test(o.name))?.name;
+  const slotDeep = slotOptions.find((o) =>
+    /deep|focus|big/i.test(o.name),
+  )?.name;
+  const slotQuick = slotOptions.find((o) =>
+    /quick|batch|small|admin/i.test(o.name),
+  )?.name;
   const kindOptions = kindProp?.select?.options ?? [];
-  const kindDeadline = kindOptions.find((o) => /dead ?line|hard|must/i.test(o.name))?.name;
-  const kindWant = kindOptions.find((o) => /want|wish|maybe|optional|like/i.test(o.name))?.name;
+  const kindDeadline = kindOptions.find((o) =>
+    /dead ?line|hard|must/i.test(o.name),
+  )?.name;
+  const kindWant = kindOptions.find((o) =>
+    /want|wish|maybe|optional|like/i.test(o.name),
+  )?.name;
   const category =
     pick(props, "multi_select", /category|type|area|tag|bucket/i) ??
     pick(props, "select", /category|area|bucket/i) ??
@@ -375,17 +492,33 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
       : status && statusPair
         ? { prop: status.name, kind: "status", ...statusPair }
         : null,
-    due: (dates.find((p) => /due|date/i.test(p.name)) ?? dates[0])?.name ?? null,
+    due:
+      (dates.find((p) => /due|date/i.test(p.name)) ?? dates[0])?.name ?? null,
     plan: dates.find((p) => /plan|scheduled/i.test(p.name))?.name ?? null,
     kindProp:
       kindProp && kindDeadline && kindWant
         ? { prop: kindProp.name, deadline: kindDeadline, want: kindWant }
         : null,
     slotProp:
-      slotProp && slotDeep && slotQuick ? { prop: slotProp.name, deep: slotDeep, quick: slotQuick } : null,
-    minutes: props.find((p) => p.type === "number" && /minutes|time spent|duration/i.test(p.name))?.name ?? null,
-    category: category ? { prop: category.name, kind: category.type as "select" | "multi_select" } : null,
-    categories: (category?.select?.options ?? category?.multi_select?.options ?? []).map((o) => o.name),
+      slotProp && slotDeep && slotQuick
+        ? { prop: slotProp.name, deep: slotDeep, quick: slotQuick }
+        : null,
+    minutes:
+      props.find(
+        (p) =>
+          p.type === "number" && /minutes|time spent|duration/i.test(p.name),
+      )?.name ?? null,
+    category: category
+      ? {
+          prop: category.name,
+          kind: category.type as "select" | "multi_select",
+        }
+      : null,
+    categories: (
+      category?.select?.options ??
+      category?.multi_select?.options ??
+      []
+    ).map((o) => o.name),
     priority: pick(props, "select", /priority/i)?.name ?? null,
     link: pick(props, "url")?.name ?? null,
     source: pick(props, "select", /source/i)?.name ?? null,
@@ -397,7 +530,11 @@ export async function readTaskMap(token: string, taskDbId: string): Promise<Task
 
 /** A deadline and "the day I want to do this" are different dates, and a
  *  tracker built around deadlines only has the first one. */
-export async function ensurePlanColumn(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+export async function ensurePlanColumn(
+  token: string,
+  taskDbId: string,
+  map: TaskMap,
+): Promise<TaskMap> {
   if (map.plan) return map;
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
@@ -408,25 +545,39 @@ export async function ensurePlanColumn(token: string, taskDbId: string, map: Tas
 
 /** Whether a task is owed to somebody or just wanted isn't a date or a
  *  category, so it gets its own column. */
-export async function ensureKindColumn(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+export async function ensureKindColumn(
+  token: string,
+  taskDbId: string,
+  map: TaskMap,
+): Promise<TaskMap> {
   if (map.kindProp) return map;
   const deadline = "Deadline";
   const want = "Want to do";
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: { Kind: selectSchema([deadline, want], ["red", "blue"]) } }),
+    body: JSON.stringify({
+      properties: { Kind: selectSchema([deadline, want], ["red", "blue"]) },
+    }),
   });
   return { ...map, kindProp: { prop: "Kind", deadline, want } };
 }
 
 /** The day is picked into a few deep blocks and a few quick ones, and the
  *  timer needs somewhere to leave how long each really took. */
-export async function ensureDayColumns(token: string, taskDbId: string, map: TaskMap): Promise<TaskMap> {
+export async function ensureDayColumns(
+  token: string,
+  taskDbId: string,
+  map: TaskMap,
+): Promise<TaskMap> {
   const properties: Record<string, object> = {};
-  if (!map.slotProp) properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
+  if (!map.slotProp)
+    properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
   if (!map.minutes) properties.Minutes = { number: { format: "number" } };
   if (!Object.keys(properties).length) return map;
-  await notion(token, `/databases/${taskDbId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
   return {
     ...map,
     slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
@@ -447,7 +598,13 @@ export async function ensureGoalLink(
     method: "PATCH",
     body: JSON.stringify({
       properties: {
-        Goal: { relation: { database_id: goalsDbId, type: "dual_property", dual_property: {} } },
+        Goal: {
+          relation: {
+            database_id: goalsDbId,
+            type: "dual_property",
+            dual_property: {},
+          },
+        },
       },
     }),
   });
@@ -463,7 +620,10 @@ export async function ensureDealLink(
   map: TaskMap,
 ): Promise<TaskMap> {
   if (map.deal) {
-    const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${taskDbId}`);
+    const db = await notion<{ properties: Record<string, SchemaProp> }>(
+      token,
+      `/databases/${taskDbId}`,
+    );
     const target = db.properties[map.deal]?.relation?.database_id ?? "";
     // A relation left pointing at an older deals table would quietly hide the
     // deal's to-dos, so it's rebuilt against the table actually in use.
@@ -477,7 +637,13 @@ export async function ensureDealLink(
     method: "PATCH",
     body: JSON.stringify({
       properties: {
-        Deal: { relation: { database_id: dealsDbId, type: "dual_property", dual_property: {} } },
+        Deal: {
+          relation: {
+            database_id: dealsDbId,
+            type: "dual_property",
+            dual_property: {},
+          },
+        },
       },
     }),
   });
@@ -486,19 +652,41 @@ export async function ensureDealLink(
 
 /** A goals table from before quarters existed has neither a height nor a
  *  parent, and both are what make a month's goals roll up. */
-export async function ensureGoalColumns(token: string, goalsDbId: string): Promise<void> {
-  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${goalsDbId}`);
+export async function ensureGoalColumns(
+  token: string,
+  goalsDbId: string,
+): Promise<void> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(
+    token,
+    `/databases/${goalsDbId}`,
+  );
   const missing: Record<string, object> = {};
-  if (!db.properties.Horizon) missing.Horizon = selectSchema(["Month", "Quarter"], ["blue", "purple"]);
+  if (!db.properties.Horizon)
+    missing.Horizon = selectSchema(["Month", "Quarter"], ["blue", "purple"]);
   if (!db.properties.Parent)
-    missing.Parent = { relation: { database_id: goalsDbId, type: "dual_property", dual_property: {} } };
+    missing.Parent = {
+      relation: {
+        database_id: goalsDbId,
+        type: "dual_property",
+        dual_property: {},
+      },
+    };
   if (!Object.keys(missing).length) return;
-  await notion(token, `/databases/${goalsDbId}`, { method: "PATCH", body: JSON.stringify({ properties: missing }) });
+  await notion(token, `/databases/${goalsDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: missing }),
+  });
 }
 
 /** An idea is a title until there's somewhere to write the rest of it. */
-export async function ensureIdeaNotes(token: string, ideaDbId: string): Promise<void> {
-  const db = await notion<{ properties: Record<string, SchemaProp> }>(token, `/databases/${ideaDbId}`);
+export async function ensureIdeaNotes(
+  token: string,
+  ideaDbId: string,
+): Promise<void> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(
+    token,
+    `/databases/${ideaDbId}`,
+  );
   if (db.properties.Notes) return;
   await notion(token, `/databases/${ideaDbId}`, {
     method: "PATCH",
@@ -513,28 +701,55 @@ const TICK_DB = "Habit Log";
 const GOAL_DB = "Goals";
 const AGENT_DB = "Assistant Tasks";
 const DEAL_DB = "Brand Deals";
+const REMINDER_DB = "Reminders";
 const AGENT_DB_LEGACY = "Agent Tasks";
 
 export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
 
 /** A tracker somebody named "\u{1F4B0} Brand Deals \u2014 Tracker" is still the brand deals
  *  table, so the deals side matches on the words rather than the exact name. */
-async function findDatabaseLike(token: string, query: string, match: RegExp): Promise<string | null> {
-  const res = await notion<{ results: { id: string; title?: { plain_text?: string }[] }[] }>(token, "/search", {
+async function findDatabaseLike(
+  token: string,
+  query: string,
+  match: RegExp,
+): Promise<string | null> {
+  const res = await notion<{
+    results: { id: string; title?: { plain_text?: string }[] }[];
+  }>(token, "/search", {
     method: "POST",
-    body: JSON.stringify({ query, filter: { value: "database", property: "object" }, page_size: 20 }),
+    body: JSON.stringify({
+      query,
+      filter: { value: "database", property: "object" },
+      page_size: 20,
+    }),
   });
-  const found = res.results.find((d) => match.test((d.title ?? []).map((t) => t.plain_text ?? "").join("")));
+  const found = res.results.find((d) =>
+    match.test((d.title ?? []).map((t) => t.plain_text ?? "").join("")),
+  );
   return found?.id ?? null;
 }
 
-async function findDatabase(token: string, name: string): Promise<string | null> {
-  const res = await notion<{ results: { id: string; title?: { plain_text?: string }[] }[] }>(token, "/search", {
+async function findDatabase(
+  token: string,
+  name: string,
+): Promise<string | null> {
+  const res = await notion<{
+    results: { id: string; title?: { plain_text?: string }[] }[];
+  }>(token, "/search", {
     method: "POST",
-    body: JSON.stringify({ query: name, filter: { value: "database", property: "object" }, page_size: 20 }),
+    body: JSON.stringify({
+      query: name,
+      filter: { value: "database", property: "object" },
+      page_size: 20,
+    }),
   });
   const match = res.results.find(
-    (d) => (d.title ?? []).map((t) => t.plain_text ?? "").join("").trim().toLowerCase() === name.toLowerCase(),
+    (d) =>
+      (d.title ?? [])
+        .map((t) => t.plain_text ?? "")
+        .join("")
+        .trim()
+        .toLowerCase() === name.toLowerCase(),
   );
   return match?.id ?? null;
 }
@@ -542,15 +757,25 @@ async function findDatabase(token: string, name: string): Promise<string | null>
 /** Notion's search index lags a few minutes behind a database being created,
  *  so the page's own children are the only trustworthy answer to "does this
  *  already exist" — without it every visit makes another copy. */
-async function childDatabases(token: string, parentPageId: string): Promise<Map<string, string>> {
+async function childDatabases(
+  token: string,
+  parentPageId: string,
+): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   let cursor: string | undefined;
   for (let page = 0; page < 5; page++) {
     const res = await notion<{
-      results: { id: string; type?: string; child_database?: { title?: string } }[];
+      results: {
+        id: string;
+        type?: string;
+        child_database?: { title?: string };
+      }[];
       has_more?: boolean;
       next_cursor?: string | null;
-    }>(token, `/blocks/${parentPageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`);
+    }>(
+      token,
+      `/blocks/${parentPageId}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`,
+    );
     for (const block of res.results) {
       const name = block.child_database?.title?.trim().toLowerCase();
       if (name && !found.has(name)) found.set(name, block.id);
@@ -563,18 +788,31 @@ async function childDatabases(token: string, parentPageId: string): Promise<Map<
 
 /** Habits and goals are created beside whichever of the user's databases lives
  *  in a page — a top-level database has no page to hang them off. */
-async function parentPageOf(token: string, databaseIds: string[]): Promise<string> {
+async function parentPageOf(
+  token: string,
+  databaseIds: string[],
+): Promise<string> {
   for (const id of databaseIds) {
-    const db = await notion<{ parent?: { page_id?: string } }>(token, `/databases/${id}`);
+    const db = await notion<{ parent?: { page_id?: string } }>(
+      token,
+      `/databases/${id}`,
+    );
     if (db.parent?.page_id) return db.parent.page_id;
   }
   throw {
     status: 400,
-    message: "None of your databases sit inside a Notion page, so there's nowhere to put the habits and goals ones.",
+    message:
+      "None of your databases sit inside a Notion page, so there's nowhere to put the habits and goals ones.",
   };
 }
 
-async function createDatabase(token: string, parentPageId: string, name: string, emoji: string, properties: object) {
+async function createDatabase(
+  token: string,
+  parentPageId: string,
+  name: string,
+  emoji: string,
+  properties: object,
+) {
   const db = await notion<{ id: string }>(token, "/databases", {
     method: "POST",
     body: JSON.stringify({
@@ -590,27 +828,60 @@ async function createDatabase(token: string, parentPageId: string, name: string,
 /** The wizard's own To-dos database gains the two columns the dashboard adds;
  *  a database the user built themselves is left exactly as they made it. */
 async function ensureTaskColumns(token: string, taskDbId: string) {
-  const db = await notion<{ properties: Record<string, unknown> }>(token, `/databases/${taskDbId}`);
+  const db = await notion<{ properties: Record<string, unknown> }>(
+    token,
+    `/databases/${taskDbId}`,
+  );
   if (!db.properties.Task || !db.properties.Done) return;
   const missing: Record<string, unknown> = {};
   if (!db.properties.Plan) missing.Plan = { date: {} };
   if (!db.properties.Category)
-    missing.Category = selectSchema(CATEGORIES, ["blue", "green", "orange", "pink", "gray"]);
+    missing.Category = selectSchema(CATEGORIES, [
+      "blue",
+      "green",
+      "orange",
+      "pink",
+      "gray",
+    ]);
   if (Object.keys(missing).length === 0) return;
-  await notion(token, `/databases/${taskDbId}`, { method: "PATCH", body: JSON.stringify({ properties: missing }) });
+  await notion(token, `/databases/${taskDbId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: missing }),
+  });
 }
 
-export async function ensureBoardDbs(token: string, contentDbId: string, taskDbId: string): Promise<BoardDbs> {
+export async function ensureBoardDbs(
+  token: string,
+  contentDbId: string,
+  taskDbId: string,
+): Promise<BoardDbs> {
   await ensureTaskColumns(token, taskDbId);
 
-  const [foundHabits, foundTicks, foundGoals, foundAgent, foundDeals] = await Promise.all([
+  const [
+    foundHabits,
+    foundTicks,
+    foundGoals,
+    foundAgent,
+    foundReminders,
+    foundDeals,
+  ] = await Promise.all([
     findDatabase(token, HABIT_DB),
     findDatabase(token, TICK_DB),
     findDatabase(token, GOAL_DB),
-    findDatabase(token, AGENT_DB).then((id) => id ?? findDatabase(token, AGENT_DB_LEGACY)),
+    findDatabase(token, AGENT_DB).then(
+      (id) => id ?? findDatabase(token, AGENT_DB_LEGACY),
+    ),
+    findDatabase(token, REMINDER_DB),
     findDatabaseLike(token, "brand deals", /brand\s*deals?/i),
   ]);
-  if (foundHabits && foundTicks && foundGoals && foundAgent && foundDeals)
+  if (
+    foundHabits &&
+    foundTicks &&
+    foundGoals &&
+    foundAgent &&
+    foundReminders &&
+    foundDeals
+  )
     return {
       content: contentDbId,
       task: taskDbId,
@@ -618,6 +889,7 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       ticks: foundTicks,
       goals: foundGoals,
       agent: foundAgent,
+      reminders: foundReminders,
       deals: foundDeals,
     };
 
@@ -630,7 +902,10 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
     (await createDatabase(token, parent, HABIT_DB, "\u{1F525}", {
       Habit: { title: {} },
       Cadence: selectSchema(CADENCES, ["green", "blue", "purple"]),
-      Kind: selectSchema(["Habit", "Bad habit", "Affirmation"], ["green", "red", "purple"]),
+      Kind: selectSchema(
+        ["Habit", "Bad habit", "Affirmation"],
+        ["green", "red", "purple"],
+      ),
       Archived: { checkbox: {} },
     }));
   const ticks =
@@ -663,6 +938,15 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       Result: { rich_text: {} },
       From: { url: {} },
     }));
+  const reminders =
+    foundReminders ??
+    existing(REMINDER_DB) ??
+    (await createDatabase(token, parent, REMINDER_DB, "\u{23F0}", {
+      Reminder: { title: {} },
+      Due: { date: {} },
+      Done: { checkbox: {} },
+      Notes: { rich_text: {} },
+    }));
   const deals =
     foundDeals ??
     existing(DEAL_DB) ??
@@ -683,21 +967,42 @@ export async function ensureBoardDbs(token: string, contentDbId: string, taskDbI
       Link: { url: {} },
       Notes: { rich_text: {} },
     }));
-  return { content: contentDbId, task: taskDbId, habits, ticks, goals, agent, deals };
+  return {
+    content: contentDbId,
+    task: taskDbId,
+    habits,
+    ticks,
+    goals,
+    agent,
+    reminders,
+    deals,
+  };
 }
 
 /* --------------------------------------------------------------- the reads */
 
 /** Notion pages at 100 rows and a lived-in tracker has more than that. */
-async function query(token: string, dbId: string, body: object = {}, maxPages = 4): Promise<Row[]> {
+async function query(
+  token: string,
+  dbId: string,
+  body: object = {},
+  maxPages = 4,
+): Promise<Row[]> {
   const rows: Row[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page++) {
-    const res = await notion<{ results: Row[]; has_more?: boolean; next_cursor?: string | null }>(
-      token,
-      `/databases/${dbId}/query`,
-      { method: "POST", body: JSON.stringify({ page_size: 100, ...body, ...(cursor ? { start_cursor: cursor } : {}) }) },
-    );
+    const res = await notion<{
+      results: Row[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    }>(token, `/databases/${dbId}/query`, {
+      method: "POST",
+      body: JSON.stringify({
+        page_size: 100,
+        ...body,
+        ...(cursor ? { start_cursor: cursor } : {}),
+      }),
+    });
     rows.push(...res.results);
     if (!res.has_more || !res.next_cursor) break;
     cursor = res.next_cursor;
@@ -708,7 +1013,8 @@ async function query(token: string, dbId: string, body: object = {}, maxPages = 
 /** Field names differ between a database the wizard built and one someone made
  *  by hand, so the title column is whichever one Notion marks as the title. */
 function titleOf(row: Row): string {
-  for (const prop of Object.values(row.properties)) if (prop.type === "title") return textOf(prop);
+  for (const prop of Object.values(row.properties))
+    if (prop.type === "title") return textOf(prop);
   return "";
 }
 
@@ -722,7 +1028,9 @@ export async function readBoard(
   const doneOf = (r: Row) => {
     if (!map.done) return false;
     const p = r.properties[map.done.prop];
-    return map.done.kind === "checkbox" ? (p?.checkbox ?? false) : p?.status?.name === map.done.doneName;
+    return map.done.kind === "checkbox"
+      ? (p?.checkbox ?? false)
+      : p?.status?.name === map.done.doneName;
   };
 
   // A years-old tracker holds hundreds of finished rows; only the open ones and
@@ -732,8 +1040,14 @@ export async function readBoard(
         or: [
           map.done.kind === "checkbox"
             ? { property: map.done.prop, checkbox: { equals: false } }
-            : { property: map.done.prop, status: { does_not_equal: map.done.doneName } },
-          { timestamp: "last_edited_time", last_edited_time: { on_or_after: since } },
+            : {
+                property: map.done.prop,
+                status: { does_not_equal: map.done.doneName },
+              },
+          {
+            timestamp: "last_edited_time",
+            last_edited_time: { on_or_after: since },
+          },
         ],
       }
     : undefined;
@@ -747,13 +1061,32 @@ export async function readBoard(
       })
     : Promise.resolve([] as Row[]);
 
-  const [todoRows, ideaRows, habitRows, tickRows, goalRows, agentRows, dealRows, timedRows] = await Promise.all([
+  const [
+    todoRows,
+    ideaRows,
+    habitRows,
+    tickRows,
+    goalRows,
+    agentRows,
+    reminderRows,
+    dealRows,
+    timedRows,
+  ] = await Promise.all([
     query(token, dbs.task, openFilter ? { filter: openFilter } : {}),
-    query(token, dbs.content, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
+    query(token, dbs.content, {
+      page_size: 60,
+      sorts: [{ timestamp: "created_time", direction: "descending" }],
+    }),
     query(token, dbs.habits),
-    query(token, dbs.ticks, { filter: { property: "Date", date: { on_or_after: since } } }),
+    query(token, dbs.ticks, {
+      filter: { property: "Date", date: { on_or_after: since } },
+    }),
     query(token, dbs.goals),
-    query(token, dbs.agent, { page_size: 60, sorts: [{ timestamp: "created_time", direction: "descending" }] }),
+    query(token, dbs.agent, {
+      page_size: 60,
+      sorts: [{ timestamp: "created_time", direction: "descending" }],
+    }),
+    query(token, dbs.reminders, { page_size: 100 }),
     query(token, dbs.deals, { page_size: 100 }),
     timedQuery,
   ]);
@@ -762,7 +1095,10 @@ export async function readBoard(
     categories: map.categories,
     timings: map.minutes
       ? timedRows
-          .map((r) => ({ title: titleOf(r), minutes: r.properties[map.minutes as string]?.number ?? 0 }))
+          .map((r) => ({
+            title: titleOf(r),
+            minutes: r.properties[map.minutes as string]?.number ?? 0,
+          }))
           .filter((t) => t.title && t.minutes > 0)
       : [],
     todos: todoRows.map((r) => ({
@@ -799,7 +1135,8 @@ export async function readBoard(
       notes: textOf(r.properties.Notes),
       status: tagOf(r.properties.Status),
       link: r.properties.Link?.url ?? r.properties.URL?.url ?? null,
-      captured: dateOf(r.properties.Captured) ?? r.created_time?.slice(0, 10) ?? null,
+      captured:
+        dateOf(r.properties.Captured) ?? r.created_time?.slice(0, 10) ?? null,
       url: r.url,
     })),
     habits: habitRows
@@ -821,9 +1158,18 @@ export async function readBoard(
       name: titleOf(r),
       area: selectOf(r.properties.Area) ?? AREAS[0],
       period: textOf(r.properties.Period),
-      horizon: selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
+      horizon:
+        selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
+    })),
+    reminders: reminderRows.map((r) => ({
+      id: r.id,
+      title: titleOf(r),
+      due: dateOf(r.properties.Due),
+      done: r.properties.Done?.checkbox ?? false,
+      notes: textOf(r.properties.Notes),
+      url: r.url,
     })),
     dealStages: deals.stage?.options.length ? deals.stage.options : DEAL_STAGES,
     deals: dealRows.map((r) => ({
@@ -836,11 +1182,15 @@ export async function readBoard(
       contact: deals.contact ? textOf(r.properties[deals.contact]) : "",
       link: deals.link ? (r.properties[deals.link]?.url ?? null) : null,
       notes: deals.notes ? textOf(r.properties[deals.notes]) : "",
-      invoiced: deals.invoiced ? (r.properties[deals.invoiced]?.checkbox ?? false) : null,
+      invoiced: deals.invoiced
+        ? (r.properties[deals.invoiced]?.checkbox ?? false)
+        : null,
       paid: deals.paid ? (r.properties[deals.paid]?.checkbox ?? false) : null,
       paidOn: deals.paidOn ? dateOf(r.properties[deals.paidOn]) : null,
       cut: deals.cut ? (r.properties[deals.cut]?.checkbox ?? false) : null,
-      waiting: deals.waiting ? (r.properties[deals.waiting]?.checkbox ?? false) : null,
+      waiting: deals.waiting
+        ? (r.properties[deals.waiting]?.checkbox ?? false)
+        : null,
       url: r.url,
     })),
   };
@@ -848,7 +1198,11 @@ export async function readBoard(
 
 /* ------------------------------------------------------------- the writes */
 
-async function createPage(token: string, dbId: string, properties: object): Promise<string> {
+async function createPage(
+  token: string,
+  dbId: string,
+  properties: object,
+): Promise<string> {
   const page = await notion<{ id: string }>(token, "/pages", {
     method: "POST",
     body: JSON.stringify({ parent: { database_id: dbId }, properties }),
@@ -857,11 +1211,17 @@ async function createPage(token: string, dbId: string, properties: object): Prom
 }
 
 async function updatePage(token: string, pageId: string, properties: object) {
-  await notion(token, `/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ properties }) });
+  await notion(token, `/pages/${pageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
 }
 
 async function archivePage(token: string, pageId: string) {
-  await notion(token, `/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+  await notion(token, `/pages/${pageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true }),
+  });
 }
 
 export type Action =
@@ -879,21 +1239,55 @@ export type Action =
   | {
       action: "editTodo";
       id: string;
-      field: "title" | "due" | "plan" | "category" | "kind" | "slot" | "minutes" | "goal" | "deal";
+      field:
+        | "title"
+        | "due"
+        | "plan"
+        | "category"
+        | "kind"
+        | "slot"
+        | "minutes"
+        | "goal"
+        | "deal";
       value: string | null;
     }
   | { action: "toggleTodo"; id: string; done: boolean }
   | { action: "deleteTodo"; id: string }
-  | { action: "sendToAgent"; title: string; details?: string; due?: string | null; from?: string | null }
+  | {
+      action: "sendToAgent";
+      title: string;
+      details?: string;
+      due?: string | null;
+      from?: string | null;
+    }
   | { action: "agentStatus"; id: string; status: string }
   | { action: "deleteAgent"; id: string }
   | { action: "ideaStatus"; id: string; status: string }
   | { action: "editIdea"; id: string; title?: string; notes?: string }
-  | { action: "ideaToTodo"; id: string; title: string; link?: string | null; plan?: string | null }
+  | {
+      action: "ideaToTodo";
+      id: string;
+      title: string;
+      link?: string | null;
+      plan?: string | null;
+    }
   | { action: "deleteIdea"; id: string }
-  | { action: "addHabit"; name: string; cadence: string; bad: boolean; affirmation?: boolean }
+  | {
+      action: "addHabit";
+      name: string;
+      cadence: string;
+      bad: boolean;
+      affirmation?: boolean;
+    }
   | { action: "deleteHabit"; id: string }
-  | { action: "tickHabit"; habitId: string; habitName: string; date: string; on: boolean; tickId?: string }
+  | {
+      action: "tickHabit";
+      habitId: string;
+      habitName: string;
+      date: string;
+      on: boolean;
+      tickId?: string;
+    }
   | {
       action: "addGoal";
       name: string;
@@ -904,6 +1298,15 @@ export type Action =
     }
   | { action: "toggleGoal"; id: string; done: boolean }
   | { action: "deleteGoal"; id: string }
+  | { action: "addReminder"; title: string; due: string | null; notes?: string }
+  | {
+      action: "editReminder";
+      id: string;
+      field: "title" | "due" | "notes";
+      value: string | null;
+    }
+  | { action: "toggleReminder"; id: string; done: boolean }
+  | { action: "deleteReminder"; id: string }
   | {
       action: "addDeal";
       brand: string;
@@ -946,25 +1349,45 @@ function taskProps(
     out[map.done.prop] =
       map.done.kind === "checkbox"
         ? { checkbox: fields.done }
-        : { status: { name: fields.done ? map.done.doneName : map.done.openName } };
+        : {
+            status: {
+              name: fields.done ? map.done.doneName : map.done.openName,
+            },
+          };
   if (fields.due !== undefined && map.due) out[map.due] = dateProp(fields.due);
-  if (fields.plan !== undefined && map.plan) out[map.plan] = dateProp(fields.plan);
+  if (fields.plan !== undefined && map.plan)
+    out[map.plan] = dateProp(fields.plan);
   if (fields.kind !== undefined && map.kindProp)
     out[map.kindProp.prop] = selectProp(
-      fields.kind === "deadline" ? map.kindProp.deadline : fields.kind === "want" ? map.kindProp.want : null,
+      fields.kind === "deadline"
+        ? map.kindProp.deadline
+        : fields.kind === "want"
+          ? map.kindProp.want
+          : null,
     );
   if (fields.slot !== undefined && map.slotProp)
     out[map.slotProp.prop] = selectProp(
-      fields.slot === "deep" ? map.slotProp.deep : fields.slot === "quick" ? map.slotProp.quick : null,
+      fields.slot === "deep"
+        ? map.slotProp.deep
+        : fields.slot === "quick"
+          ? map.slotProp.quick
+          : null,
     );
-  if (fields.minutes !== undefined && map.minutes) out[map.minutes] = { number: fields.minutes };
-  if (fields.category !== undefined && map.category && (!fields.category || map.categories.includes(fields.category)))
+  if (fields.minutes !== undefined && map.minutes)
+    out[map.minutes] = { number: fields.minutes };
+  if (
+    fields.category !== undefined &&
+    map.category &&
+    (!fields.category || map.categories.includes(fields.category))
+  )
     out[map.category.prop] =
       map.category.kind === "multi_select"
         ? { multi_select: fields.category ? [{ name: fields.category }] : [] }
         : selectProp(fields.category);
-  if (fields.goal !== undefined && map.goal) out[map.goal] = relationProp(fields.goal);
-  if (fields.deal !== undefined && map.deal) out[map.deal] = relationProp(fields.deal);
+  if (fields.goal !== undefined && map.goal)
+    out[map.goal] = relationProp(fields.goal);
+  if (fields.deal !== undefined && map.deal)
+    out[map.deal] = relationProp(fields.deal);
   if (fields.link && map.link) out[map.link] = { url: fields.link };
   if (fields.source && map.source) out[map.source] = selectProp(fields.source);
   if (fields.title !== undefined && map.captured)
@@ -980,7 +1403,12 @@ function dealProps(
 ): Record<string, unknown> {
   const choice = (role: DealMap["stage"]) =>
     role
-      ? { [role.prop]: role.kind === "status" ? { status: value ? { name: value } : null } : selectProp(value) }
+      ? {
+          [role.prop]:
+            role.kind === "status"
+              ? { status: value ? { name: value } : null }
+              : selectProp(value),
+        }
       : {};
   switch (field) {
     case "brand":
@@ -990,7 +1418,11 @@ function dealProps(
     case "status":
       return choice(deals.status);
     case "fee":
-      return deals.fee ? { [deals.fee]: { number: value === null ? null : Number(value) || 0 } } : {};
+      return deals.fee
+        ? {
+            [deals.fee]: { number: value === null ? null : Number(value) || 0 },
+          }
+        : {};
     case "due":
       return deals.due ? { [deals.due]: dateProp(value) } : {};
     case "contact":
@@ -1000,7 +1432,9 @@ function dealProps(
     case "notes":
       return deals.notes ? { [deals.notes]: richText(value ?? "") } : {};
     case "invoiced":
-      return deals.invoiced ? { [deals.invoiced]: { checkbox: value === "on" } } : {};
+      return deals.invoiced
+        ? { [deals.invoiced]: { checkbox: value === "on" } }
+        : {};
     case "paid":
       return deals.paid ? { [deals.paid]: { checkbox: value === "on" } } : {};
     case "paidOn":
@@ -1008,11 +1442,61 @@ function dealProps(
     case "cut":
       return deals.cut ? { [deals.cut]: { checkbox: value === "on" } } : {};
     case "waiting":
-      return deals.waiting ? { [deals.waiting]: { checkbox: value === "on" } } : {};
+      return deals.waiting
+        ? { [deals.waiting]: { checkbox: value === "on" } }
+        : {};
   }
 }
 
-export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, deals: DealMap, body: Action): Promise<void> {
+/** Her tracker keeps the money in two places: the "Payment Received" checkbox
+ *  and a status column with a Paid option. Ticking paid on the dashboard moves
+ *  both, so the tracker reads the same as the wall. Unticking only steps the
+ *  status back when it was sitting on Paid. */
+async function paidStatus(
+  token: string,
+  deals: DealMap,
+  id: string,
+  on: boolean,
+): Promise<Record<string, unknown>> {
+  const role = deals.status ?? deals.stage;
+  if (!role) return {};
+  const paidOption = role.options.find((o) => /paid/i.test(o));
+  if (!paidOption) return {};
+  const write = (name: string | null) => ({
+    [role.prop]:
+      role.kind === "status"
+        ? { status: name ? { name } : null }
+        : selectProp(name),
+  });
+  if (on) return write(paidOption);
+  const page = await notion<Row>(token, `/pages/${id}`);
+  if (tagOf(page.properties[role.prop]) !== paidOption) return {};
+  return write(role.options.find((o) => /deliver/i.test(o)) ?? null);
+}
+
+/** Moving a task in the dashboard has to move it in Notion too, where she only
+ *  ever looks at the due date. A real deadline she set herself is left alone:
+ *  the two dates are kept in step only while they already agree. */
+async function planFields(
+  token: string,
+  map: TaskMap,
+  id: string,
+  plan: string | null,
+): Promise<{ plan: string | null; due?: string | null }> {
+  if (!map.due || !map.plan || map.due === map.plan) return { plan };
+  const page = await notion<Row>(token, `/pages/${id}`);
+  const due = dateOf(page.properties[map.due]);
+  const wasPlan = dateOf(page.properties[map.plan]);
+  return due === null || due === wasPlan ? { plan, due: plan } : { plan };
+}
+
+export async function applyAction(
+  token: string,
+  dbs: BoardDbs,
+  map: TaskMap,
+  deals: DealMap,
+  body: Action,
+): Promise<void> {
   switch (body.action) {
     case "addTodo":
       await createPage(
@@ -1021,7 +1505,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
         taskProps(map, {
           title: body.title,
           done: false,
-          due: body.due ?? null,
+          due: body.due ?? body.plan ?? null,
           plan: body.plan ?? null,
           kind: body.kind ?? null,
           slot: body.slot ?? null,
@@ -1034,12 +1518,26 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
       return;
     case "editTodo": {
       const value = body.value || null;
+      if (body.field === "plan") {
+        await updatePage(
+          token,
+          body.id,
+          taskProps(map, await planFields(token, map, body.id, value)),
+        );
+        return;
+      }
       const fields = {
         title: { title: value ?? "" },
         due: { due: value },
         plan: { plan: value },
-        kind: { kind: (value === "deadline" || value === "want" ? value : null) as "deadline" | "want" | null },
-        slot: { slot: (value === "deep" || value === "quick" ? value : null) as "deep" | "quick" | null },
+        kind: {
+          kind: (value === "deadline" || value === "want" ? value : null) as
+            "deadline" | "want" | null,
+        },
+        slot: {
+          slot: (value === "deep" || value === "quick" ? value : null) as
+            "deep" | "quick" | null,
+        },
         minutes: { minutes: value === null ? null : Number(value) || 0 },
         category: { category: value },
         goal: { goal: value },
@@ -1064,6 +1562,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
     case "agentStatus":
       await updatePage(token, body.id, { Status: selectProp(body.status) });
       return;
+    case "deleteReminder":
     case "deleteDeal":
     case "deleteAgent":
     case "deleteTodo":
@@ -1080,7 +1579,9 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
       if (body.notes !== undefined) props.Notes = richText(body.notes);
       if (body.title !== undefined) {
         const page = await notion<Row>(token, `/pages/${body.id}`);
-        const key = Object.entries(page.properties).find(([, p]) => p.type === "title")?.[0];
+        const key = Object.entries(page.properties).find(
+          ([, p]) => p.type === "title",
+        )?.[0];
         if (key) props[key] = title(body.title);
       }
       if (Object.keys(props).length) await updatePage(token, body.id, props);
@@ -1093,6 +1594,7 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
         taskProps(map, {
           title: body.title,
           done: false,
+          due: body.plan ?? null,
           plan: body.plan ?? null,
           kind: "want",
           link: body.link ?? null,
@@ -1105,7 +1607,9 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
       await createPage(token, dbs.habits, {
         Habit: title(body.name),
         Cadence: selectProp(body.cadence),
-        Kind: selectProp(body.affirmation ? "Affirmation" : body.bad ? "Bad habit" : "Habit"),
+        Kind: selectProp(
+          body.affirmation ? "Affirmation" : body.bad ? "Bad habit" : "Habit",
+        ),
         Archived: { checkbox: false },
       });
       return;
@@ -1133,11 +1637,38 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
     case "toggleGoal":
       await updatePage(token, body.id, { Done: { checkbox: body.done } });
       return;
+    case "addReminder":
+      await createPage(token, dbs.reminders, {
+        Reminder: title(body.title),
+        Due: dateProp(body.due),
+        Done: { checkbox: false },
+        Notes: richText(body.notes ?? ""),
+      });
+      return;
+    case "editReminder": {
+      const props =
+        body.field === "title"
+          ? { Reminder: title(body.value ?? "") }
+          : body.field === "due"
+            ? { Due: dateProp(body.value || null) }
+            : { Notes: richText(body.value ?? "") };
+      await updatePage(token, body.id, props);
+      return;
+    }
+    case "toggleReminder":
+      await updatePage(token, body.id, { Done: { checkbox: body.done } });
+      return;
     case "addDeal":
       await createPage(token, dbs.deals, {
         ...dealProps(deals, "brand", body.brand),
-        ...dealProps(deals, "stage", body.stage ?? deals.stage?.options[0] ?? DEAL_STAGES[0]),
-        ...(body.fee === undefined || body.fee === null ? {} : dealProps(deals, "fee", String(body.fee))),
+        ...dealProps(
+          deals,
+          "stage",
+          body.stage ?? deals.stage?.options[0] ?? DEAL_STAGES[0],
+        ),
+        ...(body.fee === undefined || body.fee === null
+          ? {}
+          : dealProps(deals, "fee", String(body.fee))),
         ...(body.due ? dealProps(deals, "due", body.due) : {}),
         ...(body.contact ? dealProps(deals, "contact", body.contact) : {}),
         ...(body.link ? dealProps(deals, "link", body.link) : {}),
@@ -1148,6 +1679,11 @@ export async function applyAction(token: string, dbs: BoardDbs, map: TaskMap, de
       return;
     case "editDeal": {
       const props = dealProps(deals, body.field, body.value);
+      if (body.field === "paid")
+        Object.assign(
+          props,
+          await paidStatus(token, deals, body.id, body.value === "on"),
+        );
       if (Object.keys(props).length) await updatePage(token, body.id, props);
       return;
     }

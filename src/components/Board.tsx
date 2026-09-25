@@ -16,6 +16,7 @@ import type {
   Habit,
   HabitTick,
   Idea,
+  Reminder,
   Timing,
   Todo,
 } from "@/lib/board";
@@ -58,6 +59,17 @@ const isMoney = (t: Todo) =>
 /** A fixed money item only behaves that way once it has a date to sit on. */
 const moneyDay = (t: Todo) => t.due ?? t.plan;
 const isFixed = (t: Todo) => isMoney(t) && !!moneyDay(t);
+
+/** A follow-up: your side is finished, theirs isn't. The agreement went out
+ *  today, the signature is somebody else's move, so the day it gets chased on
+ *  is its own line. It stays a normal to-do row in Notion — marked in the
+ *  title, so the phone can write one too — and is kept out of the three and
+ *  the quick batch, which are for work, not waiting. */
+const CHECK_PREFIX = "Check on: ";
+const CHECK_RE = /^check on:\s*/i;
+const isCheck = (t: Todo) => CHECK_RE.test(t.title);
+const checkLabel = (t: Todo) => t.title.replace(CHECK_RE, "");
+const checkDay = (t: Todo) => t.plan ?? t.due;
 
 const categoriesOf = (board: Board) =>
   board.categories?.length ? board.categories : CATEGORIES;
@@ -1074,7 +1086,9 @@ function rescheduleLate(late: Todo[], send: Send) {
         { action: "editTodo", id: todo.id, field: "slot", value: null },
         (b) => ({
           ...b,
-          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot: null } : t)),
+          todos: b.todos.map((t) =>
+            t.id === todo.id ? { ...t, slot: null } : t,
+          ),
         }),
       );
     if (todo.plan)
@@ -1082,14 +1096,18 @@ function rescheduleLate(late: Todo[], send: Send) {
         { action: "editTodo", id: todo.id, field: "plan", value: null },
         (b) => ({
           ...b,
-          todos: b.todos.map((t) => (t.id === todo.id ? { ...t, plan: null } : t)),
+          todos: b.todos.map((t) =>
+            t.id === todo.id ? { ...t, plan: null } : t,
+          ),
         }),
       );
     send(
       { action: "editTodo", id: todo.id, field: "due", value: monday },
       (b) => ({
         ...b,
-        todos: b.todos.map((t) => (t.id === todo.id ? { ...t, due: monday } : t)),
+        todos: b.todos.map((t) =>
+          t.id === todo.id ? { ...t, due: monday } : t,
+        ),
       }),
     );
   }
@@ -1188,7 +1206,7 @@ function suggestFor(board: Board, day: string): Suggestion[] {
   };
 
   return board.todos
-    .filter((t) => !t.done && !(t.slot && pickedOn(t, day)))
+    .filter((t) => !t.done && !isCheck(t) && !(t.slot && pickedOn(t, day)))
     .map(rank)
     .filter((s): s is Suggestion => s !== null)
     .sort((a, b) => b.score - a.score);
@@ -1384,7 +1402,11 @@ function EmptySlot({
   const [browsing, setBrowsing] = useState(false);
   const urgent = suggestFor(board, day).map((s) => s.todo);
   const rest = board.todos.filter(
-    (t) => !t.done && !(t.slot && pickedOn(t, day)) && !urgent.includes(t),
+    (t) =>
+      !t.done &&
+      !isCheck(t) &&
+      !(t.slot && pickedOn(t, day)) &&
+      !urgent.includes(t),
   );
   const candidates = [...urgent, ...rest].slice(0, 40);
 
@@ -1525,6 +1547,7 @@ function DeepRow({
           </span>
         ) : null}
         <Timer todo={todo} send={send} />
+        <ChaseIt todo={todo} board={board} send={send} day={day} />
         <button
           type="button"
           onClick={() => park(todo, send, day)}
@@ -1539,11 +1562,13 @@ function DeepRow({
 
 function QuickRow({
   todo,
+  board,
   send,
   locked,
   day,
 }: {
   todo: Todo;
+  board: Board;
   send: Send;
   locked?: boolean;
   day: string;
@@ -1568,6 +1593,9 @@ function QuickRow({
         <span className="shrink-0 text-[11px] text-muted">every day</span>
       ) : null}
       <Timer todo={todo} send={send} />
+      {locked ? null : (
+        <ChaseIt todo={todo} board={board} send={send} day={day} />
+      )}
       {locked ? null : (
         <button
           type="button"
@@ -1647,6 +1675,187 @@ function Arrow({
     >
       {children}
     </button>
+  );
+}
+
+/** Writes the follow-up as its own to-do on the day it should be chased. */
+function addCheck(title: string, day: string, send: Send) {
+  const full = `${CHECK_PREFIX}${title}`.slice(0, 120);
+  send({ action: "addTodo", title: full, plan: day, kind: "want" }, (b) => ({
+    ...b,
+    todos: [...b.todos, { ...newTodo(full, "quick", day), slot: null }],
+  }));
+}
+
+/** Offered on a task the moment it's ticked: sending the thing is done, but
+ *  whether it came back is a different day's question. */
+function ChaseIt({
+  todo,
+  board,
+  send,
+  day,
+}: {
+  todo: Todo;
+  board: Board;
+  send: Send;
+  day: string;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!todo.done || isCheck(todo)) return null;
+  if (
+    board.todos.some(
+      (t) => isCheck(t) && !t.done && checkLabel(t) === todo.title,
+    )
+  )
+    return null;
+
+  const whens = [
+    { label: "tomorrow", on: shiftDay(day, 1) },
+    { label: "in 3 days", on: shiftDay(day, 3) },
+    { label: "next week", on: shiftDay(day, 7) },
+  ];
+
+  return open ? (
+    <span className="flex shrink-0 items-center gap-1.5">
+      {whens.map((w) => (
+        <button
+          key={w.label}
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            addCheck(todo.title, w.on, send);
+          }}
+          className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted transition hover:border-ink/30 hover:text-ink"
+        >
+          {w.label}
+        </button>
+      ))}
+    </span>
+  ) : (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+    >
+      check on it
+    </button>
+  );
+}
+
+/** The waiting column: things you finished that somebody else still owes you
+ *  an answer on, sitting on the day you said you'd chase them. */
+function CheckPane({
+  board,
+  send,
+  day,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const all = board.todos.filter(isCheck);
+  const due = all.filter((t) => !t.done && checkDay(t) === day);
+  const over =
+    day === TODAY
+      ? all.filter((t) => {
+          const on = checkDay(t);
+          return !t.done && on !== null && on < day;
+        })
+      : [];
+  const ticked = all.filter((t) => t.done && checkDay(t) === day);
+
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    addCheck(title, day, send);
+  };
+
+  const tick = (t: Todo, done: boolean) =>
+    send({ action: "toggleTodo", id: t.id, done }, (b) => ({
+      ...b,
+      todos: b.todos.map((x) => (x.id === t.id ? { ...x, done } : x)),
+    }));
+
+  const push = (t: Todo) => {
+    const on = shiftDay(checkDay(t) ?? day, 1);
+    send({ action: "editTodo", id: t.id, field: "plan", value: on }, (b) => ({
+      ...b,
+      todos: b.todos.map((x) => (x.id === t.id ? { ...x, plan: on } : x)),
+    }));
+  };
+
+  const row = (t: Todo, late?: boolean) => (
+    <div
+      key={t.id}
+      className="flex items-center gap-3 border-b border-line/60 py-2 last:border-none"
+    >
+      <Box on={t.done} onChange={(done) => tick(t, done)} />
+      <span
+        className={`min-w-0 flex-1 text-[13px] leading-snug ${
+          t.done ? "text-muted line-through" : ""
+        }`}
+      >
+        {checkLabel(t)}
+        {late ? (
+          <span className="ml-1.5 text-[11px] text-bad">
+            {pretty(checkDay(t))}
+          </span>
+        ) : null}
+      </span>
+      {t.done ? null : (
+        <button
+          type="button"
+          aria-label="Check tomorrow instead"
+          onClick={() => push(t)}
+          className="shrink-0 text-[11px] text-muted transition hover:text-ink"
+        >
+          +1d
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <aside className="day-card p-6">
+      <h3 className="text-[13px] font-semibold">Check on</h3>
+      <p className="mt-1 text-[12px] leading-snug text-muted">
+        Done on your side, not on theirs — did it land, did they sign, did they
+        reply.
+      </p>
+
+      {over.length ? (
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-bad">
+            Still waiting
+          </p>
+          <div className="mt-1">{over.map((t) => row(t, true))}</div>
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        {due.length ? (
+          due.map((t) => row(t))
+        ) : over.length ? null : (
+          <p className="text-[13px] text-muted">
+            Nothing to chase {day === TODAY ? "today" : "that day"}.
+          </p>
+        )}
+      </div>
+
+      {ticked.length ? (
+        <div className="mt-2 opacity-60">{ticked.map((t) => row(t))}</div>
+      ) : null}
+
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        placeholder="Something to check on…"
+        className="mt-4 w-full border-b border-line bg-transparent py-1.5 text-[13px] outline-none placeholder:text-muted/70 focus:border-ink/40"
+      />
+    </aside>
   );
 }
 
@@ -1740,234 +1949,254 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   return (
     <>
       {day === TODAY ? <Affirmations board={board} send={send} /> : null}
-      <div className="day-card p-7 sm:p-10">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-              {dayStamp(day)}
-            </p>
-            <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">
-              {dayQuestion(day)}
-            </h2>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
-              ←
-            </Arrow>
-            {day === TODAY ? null : (
-              <button
-                type="button"
-                onClick={() => setDay(TODAY)}
-                className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="day-card p-7 sm:p-10">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+                {dayStamp(day)}
+              </p>
+              <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">
+                {dayQuestion(day)}
+              </h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Arrow
+                label="Day before"
+                onClick={() => setDay(shiftDay(day, -1))}
               >
-                today
-              </button>
-            )}
-            <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
-              →
-            </Arrow>
-          </div>
-        </div>
-
-        {nudge ? (
-          <button
-            type="button"
-            onClick={() => setDay(tomorrow)}
-            className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
-          >
-            <span className="text-[14px]">
-              Tomorrow is still empty. Pick its three while today is fresh.
-            </span>
-            <span className="shrink-0 text-[13px] text-muted">choose →</span>
-          </button>
-        ) : null}
-
-        <section className="mt-9">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-[13px] font-semibold">
-              {day === TODAY ? "Today\u2019s three" : "The three"}
-            </h3>
-            <span className="text-[12px] text-muted">
-              {deep.filter((t) => !t.done).length}/3 taken
-            </span>
+                ←
+              </Arrow>
+              {day === TODAY ? null : (
+                <button
+                  type="button"
+                  onClick={() => setDay(TODAY)}
+                  className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+                >
+                  today
+                </button>
+              )}
+              <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
+                →
+              </Arrow>
+            </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-4 pb-1">
-            <span className="text-[15px]">
-              Hours available {day === TODAY ? "today" : "that day"}
-            </span>
-            <span className="flex items-baseline gap-1">
-              <input
-                value={hours}
-                onChange={(e) =>
-                  setAvailable(e.target.value.replace(/[^\d.]/g, ""))
-                }
-                placeholder="—"
-                inputMode="decimal"
-                className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
-              />
-              <span className="text-[14px] text-muted">h</span>
-            </span>
-          </div>
+          {nudge ? (
+            <button
+              type="button"
+              onClick={() => setDay(tomorrow)}
+              className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+            >
+              <span className="text-[14px]">
+                Tomorrow is still empty. Pick its three while today is fresh.
+              </span>
+              <span className="shrink-0 text-[13px] text-muted">choose →</span>
+            </button>
+          ) : null}
 
-          {calendar ? (
-            <p className="text-[12px] text-muted">
-              {calendar.connected ? (
-                calendar.busy !== undefined ? (
-                  calendar.busy > 0 ? (
-                    `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
+          <DueReminders board={board} send={send} day={day} />
+
+          <section className="mt-9">
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-[13px] font-semibold">
+                {day === TODAY ? "Today\u2019s three" : "The three"}
+              </h3>
+              <span className="text-[12px] text-muted">
+                {deep.filter((t) => !t.done).length}/3 taken
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between gap-4 pb-1">
+              <span className="text-[15px]">
+                Hours available {day === TODAY ? "today" : "that day"}
+              </span>
+              <span className="flex items-baseline gap-1">
+                <input
+                  value={hours}
+                  onChange={(e) =>
+                    setAvailable(e.target.value.replace(/[^\d.]/g, ""))
+                  }
+                  placeholder="—"
+                  inputMode="decimal"
+                  className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
+                />
+                <span className="text-[14px] text-muted">h</span>
+              </span>
+            </div>
+
+            {calendar ? (
+              <p className="text-[12px] text-muted">
+                {calendar.connected ? (
+                  calendar.busy !== undefined ? (
+                    calendar.busy > 0 ? (
+                      `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
+                    ) : (
+                      "Nothing left in your calendar today."
+                    )
                   ) : (
-                    "Nothing left in your calendar today."
+                    calendar.error
                   )
                 ) : (
-                  calendar.error
-                )
-              ) : (
-                <a
-                  className="underline underline-offset-2 hover:text-ink"
-                  href={connectCalendarHref()}
-                >
-                  {calendar.error ?? "Use my Google Calendar"}
-                </a>
-              )}
-            </p>
-          ) : null}
+                  <a
+                    className="underline underline-offset-2 hover:text-ink"
+                    href={connectCalendarHref()}
+                  >
+                    {calendar.error ?? "Use my Google Calendar"}
+                  </a>
+                )}
+              </p>
+            ) : null}
 
-          {load > 0 ? (
-            <p
-              className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}
-            >
-              {overloaded
-                ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
-                : `Based on how long these took before, that's about ${spell(load)} of work.`}
-            </p>
-          ) : null}
+            {load > 0 ? (
+              <p
+                className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}
+              >
+                {overloaded
+                  ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
+                  : `Based on how long these took before, that's about ${spell(load)} of work.`}
+              </p>
+            ) : null}
 
-          {cleared ? (
-            <NextUp board={board} send={send} day={day} />
-          ) : deep.length < DEEP_CAP ? (
-            <Suggested
-              board={board}
-              send={send}
-              day={day}
-              room={DEEP_CAP - deep.length}
-              free={Math.max(0, free - load)}
-            />
-          ) : null}
-
-          <div className="mt-3">
-            {deep.map((t) => (
-              <DeepRow
-                key={t.id}
-                todo={t}
+            {cleared ? (
+              <NextUp board={board} send={send} day={day} />
+            ) : deep.length < DEEP_CAP ? (
+              <Suggested
                 board={board}
                 send={send}
                 day={day}
+                room={DEEP_CAP - deep.length}
+                free={Math.max(0, free - load)}
               />
-            ))}
-            {Array.from(
-              { length: Math.max(0, DEEP_CAP - deep.length) },
-              (_, i) => (
-                <EmptySlot
-                  key={`deep-${i}`}
+            ) : null}
+
+            <div className="mt-3">
+              {deep.map((t) => (
+                <DeepRow
+                  key={t.id}
+                  todo={t}
                   board={board}
                   send={send}
-                  slot="deep"
                   day={day}
-                  dim={deep.length + i > 0}
-                  placeholder={
-                    DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"
-                  }
                 />
-              ),
-            )}
-          </div>
-        </section>
-
-        <section className="mt-10">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-[13px] font-semibold">Quick batch</h3>
-            <span className="text-[12px] text-muted">
-              three, and one of them is email
-            </span>
-          </div>
-          <div className="mt-3">
-            {emails ? (
-              <QuickRow todo={emails} send={send} locked day={day} />
-            ) : (
-              <button
-                type="button"
-                onClick={addEmails}
-                className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
-              >
-                <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
-                <span className="min-w-0 flex-1 text-[15px] text-muted">
-                  Go through emails
-                </span>
-                <span className="shrink-0 text-[11px] text-muted">
-                  tap to take it on
-                </span>
-              </button>
-            )}
-            {otherQuick.map((t) => (
-              <QuickRow key={t.id} todo={t} send={send} day={day} />
-            ))}
-            {Array.from(
-              { length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) },
-              (_, i) => (
-                <EmptySlot
-                  key={`quick-${i}`}
-                  board={board}
-                  send={send}
-                  slot="quick"
-                  day={day}
-                  placeholder="Quick thing to clear"
-                />
-              ),
-            )}
-          </div>
-        </section>
-
-        {dailyHabits.length ? (
-          <section className="mt-10">
-            <h3 className="text-[13px] font-semibold">Habits</h3>
-            <div className="mt-4 flex flex-wrap gap-6">
-              {dailyHabits.map((h) => {
-                const on = doneToday.has(h.id);
-                const streak = streakOf(board.ticks, h.id, day);
-                const best = bestStreak(board.ticks, h.id);
-                return (
-                  <button
-                    key={h.id}
-                    type="button"
-                    onClick={() => tickHabit(board, send, h, day, !on)}
-                    className="w-20"
-                  >
-                    <span
-                      className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
-                        on
-                          ? "bg-warn text-brand-cream"
-                          : "border border-line bg-panel-2 text-muted"
-                      }`}
-                    >
-                      {streak || ""}
-                    </span>
-                    <span className="mt-2 block truncate text-[12px] text-muted">
-                      {h.name}
-                    </span>
-                    <span className="mt-0.5 block text-[10px] text-muted/80">
-                      {streak
-                        ? `🔥 ${streak} day${streak === 1 ? "" : "s"}`
-                        : best
-                          ? `best ${best}`
-                          : "start it"}
-                    </span>
-                  </button>
-                );
-              })}
+              ))}
+              {Array.from(
+                { length: Math.max(0, DEEP_CAP - deep.length) },
+                (_, i) => (
+                  <EmptySlot
+                    key={`deep-${i}`}
+                    board={board}
+                    send={send}
+                    slot="deep"
+                    day={day}
+                    dim={deep.length + i > 0}
+                    placeholder={
+                      DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"
+                    }
+                  />
+                ),
+              )}
             </div>
           </section>
-        ) : null}
+
+          <section className="mt-10">
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-[13px] font-semibold">Quick batch</h3>
+              <span className="text-[12px] text-muted">
+                three, and one of them is email
+              </span>
+            </div>
+            <div className="mt-3">
+              {emails ? (
+                <QuickRow
+                  todo={emails}
+                  board={board}
+                  send={send}
+                  locked
+                  day={day}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={addEmails}
+                  className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
+                >
+                  <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
+                  <span className="min-w-0 flex-1 text-[15px] text-muted">
+                    Go through emails
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted">
+                    tap to take it on
+                  </span>
+                </button>
+              )}
+              {otherQuick.map((t) => (
+                <QuickRow
+                  key={t.id}
+                  todo={t}
+                  board={board}
+                  send={send}
+                  day={day}
+                />
+              ))}
+              {Array.from(
+                { length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) },
+                (_, i) => (
+                  <EmptySlot
+                    key={`quick-${i}`}
+                    board={board}
+                    send={send}
+                    slot="quick"
+                    day={day}
+                    placeholder="Quick thing to clear"
+                  />
+                ),
+              )}
+            </div>
+          </section>
+
+          {dailyHabits.length ? (
+            <section className="mt-10">
+              <h3 className="text-[13px] font-semibold">Habits</h3>
+              <div className="mt-4 flex flex-wrap gap-6">
+                {dailyHabits.map((h) => {
+                  const on = doneToday.has(h.id);
+                  const streak = streakOf(board.ticks, h.id, day);
+                  const best = bestStreak(board.ticks, h.id);
+                  return (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onClick={() => tickHabit(board, send, h, day, !on)}
+                      className="w-20"
+                    >
+                      <span
+                        className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
+                          on
+                            ? "bg-warn text-brand-cream"
+                            : "border border-line bg-panel-2 text-muted"
+                        }`}
+                      >
+                        {streak || ""}
+                      </span>
+                      <span className="mt-2 block truncate text-[12px] text-muted">
+                        {h.name}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] text-muted/80">
+                        {streak
+                          ? `🔥 ${streak} day${streak === 1 ? "" : "s"}`
+                          : best
+                            ? `best ${best}`
+                            : "start it"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+        </div>
+        <CheckPane board={board} send={send} day={day} />
       </div>
     </>
   );
@@ -2370,7 +2599,9 @@ function EditTitle({
     if (!value || value === todo.title) return;
     send({ action: "editTodo", id: todo.id, field: "title", value }, (b) => ({
       ...b,
-      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, title: value } : t)),
+      todos: b.todos.map((t) =>
+        t.id === todo.id ? { ...t, title: value } : t,
+      ),
     }));
   };
 
@@ -2409,7 +2640,9 @@ function EditDue({ todo, send }: { todo: Todo; send: Send }) {
   return (
     <span
       className="relative shrink-0"
-      title={todo.due ? `Due ${pretty(todo.due)} — tap to change` : "Set a date"}
+      title={
+        todo.due ? `Due ${pretty(todo.due)} — tap to change` : "Set a date"
+      }
     >
       <span
         className={`text-[11px] ${late ? "text-bad" : todo.due ? "text-muted" : "text-muted/40"}`}
@@ -2498,7 +2731,9 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
   const [q, setQ] = useState("");
   const [goal, setGoal] = useState("");
   const [over, setOver] = useState(false);
-  const open = board.todos.filter((t) => !t.done && !t.slot && !isFixed(t));
+  const open = board.todos.filter(
+    (t) => !t.done && !t.slot && !isFixed(t) && !isCheck(t),
+  );
   const goals = board.goals.filter(
     (g) => !g.done && open.some((t) => t.goal === g.id),
   );
@@ -2526,7 +2761,9 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
       className={`rounded-xl border p-3 transition ${over ? "border-ink/40 bg-ink/5" : "border-line"}`}
     >
       <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[12px] font-medium">{over ? "Drop it back here" : "Waiting in Notion"}</span>
+        <span className="text-[12px] font-medium">
+          {over ? "Drop it back here" : "Waiting in Notion"}
+        </span>
         <span className="text-[11px] text-muted">{waiting.length}</span>
       </div>
       <input
@@ -2570,7 +2807,8 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
         )}
       </div>
       <p className="mt-2 text-[12px] text-muted">
-        Drag one onto a day, or drag one back here to unplan it. On a phone, use + deep / + quick and × instead.
+        Drag one onto a day, or drag one back here to unplan it. On a phone, use
+        + deep / + quick and × instead.
       </p>
     </div>
   );
@@ -2796,7 +3034,7 @@ function PlanDay({
     into: "deep" | "quick";
   } | null>(null);
   const picked = board.todos.filter(
-    (t) => t.slot && pickedOn(t, day) && !isFixed(t),
+    (t) => t.slot && pickedOn(t, day) && !isFixed(t) && !isCheck(t),
   );
   const fixed = board.todos.filter((t) => isFixed(t) && moneyDay(t) === day);
   const deep = picked.filter((t) => t.slot === "deep");
@@ -2808,6 +3046,7 @@ function PlanDay({
     (t) =>
       !t.done &&
       !isFixed(t) &&
+      !isCheck(t) &&
       !(t.slot && pickedOn(t, day)) &&
       !urgent.some((s) => s.todo.id === t.id),
   );
@@ -3156,7 +3395,12 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   // A task with a day of its own isn't late yet — only things nobody has
   // picked up again fall into the pile.
   const late = board.todos.filter(
-    (t) => !t.done && t.due && t.due < TODAY && !(t.plan && t.plan >= TODAY),
+    (t) =>
+      !t.done &&
+      !isCheck(t) &&
+      t.due &&
+      t.due < TODAY &&
+      !(t.plan && t.plan >= TODAY),
   );
   // Sunday is when the week is decided, so that's when the page offers to.
   const sunday = new Date(`${TODAY}T12:00:00`).getDay() === 0;
@@ -4105,9 +4349,19 @@ const NOT_WORK = /passed|declined|inquiry|negotiat|prospect|contact|testing/i;
  *  the in-between waits ("waiting on script approval") hang under the step
  *  they belong to instead of becoming a column nobody drops into. */
 const LANES = [
-  { id: "script", label: "Script", match: /script|signed/i, verb: "Write the script for" },
+  {
+    id: "script",
+    label: "Script",
+    match: /script|signed/i,
+    verb: "Write the script for",
+  },
   { id: "film", label: "Film", match: /film|shoot/i, verb: "Film" },
-  { id: "edit", label: "Edit", match: /edit|feedback|approval to post|post/i, verb: "Edit" },
+  {
+    id: "edit",
+    label: "Edit",
+    match: /edit|feedback|approval to post|post/i,
+    verb: "Edit",
+  },
   { id: "delivered", label: "Delivered", match: /deliver/i, verb: "Send over" },
   // Handing the work over isn't the end of it: a delivered deal sits here
   // until the money actually lands.
@@ -4148,7 +4402,8 @@ function moveToLane(deal: Deal, lane: Lane, stages: string[], send: Send) {
 
   if (lane.id === "paid") {
     const delivered = stageFor(LANES[3], stages);
-    if (delivered && !/deliver/i.test(deal.stage ?? "")) editDeal("stage", delivered);
+    if (delivered && !/deliver/i.test(deal.stage ?? ""))
+      editDeal("stage", delivered);
     if (!isPaid(deal)) editDeal("paid", "on");
     // Which month it counts towards depends on this date, so the drop fills
     // it in rather than leaving the earnings guessing.
@@ -4193,7 +4448,9 @@ function MoneyFlag({
       type="button"
       onClick={onChange.bind(null, !on)}
       className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
-        on ? "border-ok bg-ok text-brand-cream" : "border-line text-muted hover:text-ink"
+        on
+          ? "border-ok bg-ok text-brand-cream"
+          : "border-line text-muted hover:text-ink"
       }`}
     >
       {on ? `✓ ${label}` : label}
@@ -4275,7 +4532,8 @@ function DealCard({
 
   const move = (by: number) => {
     const target = LANES[Math.min(LANES.length - 1, Math.max(0, at + by))];
-    if (target && target.id !== lane?.id) moveToLane(deal, target, stages, send);
+    if (target && target.id !== lane?.id)
+      moveToLane(deal, target, stages, send);
   };
 
   /** The whole point of the tab: the step on the wall becomes a real task in
@@ -4287,10 +4545,21 @@ function DealCard({
     const keptDue = deal.due && deal.due >= TODAY ? deal.due : null;
     if (tasks.some((t) => !t.done && t.title === title)) return;
     send(
-      { action: "addTodo", title, deal: deal.id, kind: "deadline", slot: "deep", plan: day, due: keptDue },
+      {
+        action: "addTodo",
+        title,
+        deal: deal.id,
+        kind: "deadline",
+        slot: "deep",
+        plan: day,
+        due: keptDue,
+      },
       (b) => ({
         ...b,
-        todos: [...b.todos, { ...newTodo(title, "deep", day), due: keptDue, deal: deal.id }],
+        todos: [
+          ...b.todos,
+          { ...newTodo(title, "deep", day), due: keptDue, deal: deal.id },
+        ],
       }),
     );
   };
@@ -4299,14 +4568,28 @@ function DealCard({
     const title = adding.trim();
     if (!title) return;
     setAdding("");
-    send({ action: "addTodo", title, deal: deal.id, kind: "deadline" }, (b) => ({
-      ...b,
-      todos: [...b.todos, { ...newTodo(title, "deep", ""), plan: null, slot: null, deal: deal.id }],
-    }));
+    send(
+      { action: "addTodo", title, deal: deal.id, kind: "deadline" },
+      (b) => ({
+        ...b,
+        todos: [
+          ...b.todos,
+          {
+            ...newTodo(title, "deep", ""),
+            plan: null,
+            slot: null,
+            deal: deal.id,
+          },
+        ],
+      }),
+    );
   };
 
   const late =
-    deal.due && deal.due < TODAY && lane?.id !== "delivered" && lane?.id !== "paid";
+    deal.due &&
+    deal.due < TODAY &&
+    lane?.id !== "delivered" &&
+    lane?.id !== "paid";
 
   return (
     <div
@@ -4320,7 +4603,9 @@ function DealCard({
           onClick={() => onOpen(open ? null : deal.id)}
           className="min-w-0 flex-1 text-left"
         >
-          <span className="block truncate text-[14px] font-medium">{deal.brand}</span>
+          <span className="block truncate text-[14px] font-medium">
+            {deal.brand}
+          </span>
           {deal.notes ? (
             <span className="block truncate text-[11px] text-muted">
               {deal.notes.split("\n")[0]}
@@ -4347,7 +4632,9 @@ function DealCard({
             />
           </span>
           {deal.fee && deal.cut ? (
-            <span className="block pr-1 text-[10px] text-muted/80">{money(net(deal))} yours</span>
+            <span className="block pr-1 text-[10px] text-muted/80">
+              {money(net(deal))} yours
+            </span>
           ) : null}
         </span>
       </div>
@@ -4483,18 +4770,27 @@ function DealCard({
                   type="button"
                   aria-label={t.done ? "Mark as not done" : "Mark done"}
                   onClick={() =>
-                    send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
-                      ...b,
-                      todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
-                    }))
+                    send(
+                      { action: "toggleTodo", id: t.id, done: !t.done },
+                      (b) => ({
+                        ...b,
+                        todos: b.todos.map((x) =>
+                          x.id === t.id ? { ...x, done: !t.done } : x,
+                        ),
+                      }),
+                    )
                   }
                   className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
-                    t.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"
+                    t.done
+                      ? "border-ink bg-ink text-brand-cream"
+                      : "border-line hover:border-ink/40"
                   }`}
                 >
                   {t.done ? "✓" : ""}
                 </button>
-                <span className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}>
+                <span
+                  className={`min-w-0 flex-1 truncate text-[12px] ${t.done ? "text-muted line-through" : ""}`}
+                >
                   {t.title}
                 </span>
                 <span className="shrink-0 text-[10px] text-muted">
@@ -4585,7 +4881,9 @@ function DealsLock({
         </button>
       </form>
       {tried ? (
-        <p className="mt-2 text-[12px] text-bad">That passcode didn&apos;t work.</p>
+        <p className="mt-2 text-[12px] text-bad">
+          That passcode didn&apos;t work.
+        </p>
       ) : null}
     </div>
   );
@@ -4614,7 +4912,9 @@ function Earnings({ deals }: { deals: Deal[] }) {
     row.deals.push(d);
     byMonth.set(key, row);
   }
-  const months = [...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  const months = [...byMonth.entries()].sort((a, b) =>
+    b[0].localeCompare(a[0]),
+  );
   const shown = all ? months : months.slice(0, 6);
   const peak = Math.max(1, ...months.map(([, r]) => r.net));
   const thisMonth = byMonth.get(TODAY.slice(0, 7))?.net ?? 0;
@@ -4637,7 +4937,10 @@ function Earnings({ deals }: { deals: Deal[] }) {
       title="Earnings"
       right={
         <span className="text-[12px] text-muted">
-          {money(lifetime)} lifetime{gross > lifetime ? ` · ${money(gross - lifetime)} to the manager` : ""}
+          {money(lifetime)} lifetime
+          {gross > lifetime
+            ? ` · ${money(gross - lifetime)} to the manager`
+            : ""}
         </span>
       }
     >
@@ -4648,47 +4951,61 @@ function Earnings({ deals }: { deals: Deal[] }) {
           { label: "Best month", value: best },
           { label: "Delivered, unpaid", value: owedOut, warn: true },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-line px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted">{s.label}</p>
-            <p className={`text-[18px] ${s.warn && s.value ? "text-bad" : ""}`}>{money(s.value)}</p>
+          <div
+            key={s.label}
+            className="rounded-xl border border-line px-3 py-2"
+          >
+            <p className="text-[10px] uppercase tracking-wide text-muted">
+              {s.label}
+            </p>
+            <p className={`text-[18px] ${s.warn && s.value ? "text-bad" : ""}`}>
+              {money(s.value)}
+            </p>
           </div>
         ))}
       </div>
 
       <p className="mt-3 text-[12px] text-muted">
-        Everything below is what lands with you — the manager&apos;s 20% is already off the deals
-        it applies to (tick &ldquo;manager 20%&rdquo; on a card to include it). {money(coming)} is
-        still in production.
+        Everything below is what lands with you — the manager&apos;s 20% is
+        already off the deals it applies to (tick &ldquo;manager 20%&rdquo; on a
+        card to include it). {money(coming)} is still in production.
       </p>
 
       <p className="mt-1 text-[11px] text-muted/80">
-        Lifetime pipeline {money(pipeline)} — every deal ever signed, paid or not ({money(lifetime)}{" "}
-        in, {money(pipeline - lifetime)} still coming).
+        Lifetime pipeline {money(pipeline)} — every deal ever signed, paid or
+        not ({money(lifetime)} in, {money(pipeline - lifetime)} still coming).
       </p>
 
       <div className="mt-3 space-y-1.5">
         {shown.length ? (
           shown.map(([key, row]) => (
             <div key={key} className="flex items-center gap-3">
-              <span className="w-[72px] shrink-0 text-[12px] text-muted">{monthName(key)}</span>
+              <span className="w-[72px] shrink-0 text-[12px] text-muted">
+                {monthName(key)}
+              </span>
               <span className="h-2 flex-1 overflow-hidden rounded-full bg-line/50">
                 <span
                   className="block h-full rounded-full bg-ink/70"
                   style={{ width: `${Math.max(3, (row.net / peak) * 100)}%` }}
                 />
               </span>
-              <span className="w-[72px] shrink-0 text-right text-[12px]">{money(row.net)}</span>
+              <span className="w-[72px] shrink-0 text-right text-[12px]">
+                {money(row.net)}
+              </span>
               <span
                 className="w-[150px] shrink-0 truncate text-right text-[11px] text-muted"
                 title={row.deals.map((d) => d.brand).join(", ")}
               >
-                {row.deals.map((d) => d.brand.split(/[—–-]/)[0].trim()).join(", ")}
+                {row.deals
+                  .map((d) => d.brand.split(/[—–-]/)[0].trim())
+                  .join(", ")}
               </span>
             </div>
           ))
         ) : (
           <p className="text-[12px] italic text-muted">
-            Nothing marked paid yet — drag a delivered card to Paid and it lands here.
+            Nothing marked paid yet — drag a delivered card to Paid and it lands
+            here.
           </p>
         )}
       </div>
@@ -4705,7 +5022,8 @@ function Earnings({ deals }: { deals: Deal[] }) {
         ) : null}
         {undated ? (
           <span className="text-[11px] text-muted">
-            {money(undated)} paid with no date — give those cards a payment date to place them.
+            {money(undated)} paid with no date — give those cards a payment date
+            to place them.
           </span>
         ) : null}
       </div>
@@ -4730,13 +5048,15 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
     .filter((d) => laneFor(d)?.id === "delivered")
     .reduce((n, d) => n + net(d), 0);
   const loose = board.todos.filter(
-    (t) => !t.deal && !t.done && /brand|deal|sponsor|ugc|film|script/i.test(t.title),
+    (t) =>
+      !t.deal && !t.done && /brand|deal|sponsor|ugc|film|script/i.test(t.title),
   );
 
   const drop = (lane: Lane, id: string) => {
     setOver(null);
     const deal = board.deals.find((d) => d.id === id);
-    if (deal && laneFor(deal)?.id !== lane.id) moveToLane(deal, lane, stages, send);
+    if (deal && laneFor(deal)?.id !== lane.id)
+      moveToLane(deal, lane, stages, send);
   };
 
   const bin = (id: string) => {
@@ -4764,8 +5084,8 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
         }
       >
         <p className="mb-3 text-[12px] text-muted">
-          Just the making-of — script, film, edit, delivered, paid. Delivered means the money is
-          still out; drag it to Paid when it lands.
+          Just the making-of — script, film, edit, delivered, paid. Delivered
+          means the money is still out; drag it to Paid when it lands.
         </p>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
           {LANES.map((lane) => {
@@ -4821,7 +5141,9 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                       />
                     ))
                   ) : (
-                    <p className="px-1 py-2 text-[11px] italic text-muted">Nothing here yet.</p>
+                    <p className="px-1 py-2 text-[11px] italic text-muted">
+                      Nothing here yet.
+                    </p>
                   )}
                 </div>
               </div>
@@ -4895,7 +5217,12 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                   onChange={(e) =>
                     e.target.value &&
                     send(
-                      { action: "editTodo", id: t.id, field: "deal", value: e.target.value },
+                      {
+                        action: "editTodo",
+                        id: t.id,
+                        field: "deal",
+                        value: e.target.value,
+                      },
                       (b) => ({
                         ...b,
                         todos: b.todos.map((x) =>
@@ -4922,12 +5249,523 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/* --------------------------------------------------------------- reminders */
+
+const shiftDays = (from: Date, days: number) => {
+  const d = new Date(from);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+/** "5 business days" is the phrase refunds, banks and support tickets are
+ *  always promised in, so weekends don't count towards it. */
+function shiftBusinessDays(from: Date, days: number) {
+  const d = new Date(from);
+  let left = days;
+  while (left > 0) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) left--;
+  }
+  return d;
+}
+
+const WEEKDAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
+/** The next time that weekday comes round, never today. */
+function nextWeekday(from: Date, target: number) {
+  const ahead = (target - from.getDay() + 7) % 7 || 7;
+  return shiftDays(from, ahead);
+}
+
+/**
+ * A reminder is typed the way it's thought — "check the Crate & Barrel refund
+ * in 5 business days" — so the date is read out of the sentence and the phrase
+ * is taken back out of the title.
+ */
+function parseWhen(text: string): { title: string; due: string | null } {
+  const now = new Date();
+  const patterns: {
+    re: RegExp;
+    date: (m: RegExpMatchArray) => Date;
+  }[] = [
+    {
+      re: /\b(?:in|after)\s+(\d+)\s+(?:business|working|work)\s+days?\b/i,
+      date: (m) => shiftBusinessDays(now, Number(m[1])),
+    },
+    {
+      re: /\b(?:in|after)\s+(?:(\d+)|a|one)\s+(day|week|month)s?\b/i,
+      date: (m) => {
+        const n = m[1] ? Number(m[1]) : 1;
+        const unit = m[2].toLowerCase();
+        if (unit === "day") return shiftDays(now, n);
+        if (unit === "week") return shiftDays(now, n * 7);
+        const d = new Date(now);
+        d.setMonth(d.getMonth() + n);
+        return d;
+      },
+    },
+    { re: /\btomorrow\b/i, date: () => shiftDays(now, 1) },
+    { re: /\btonight\b|\btoday\b/i, date: () => now },
+    { re: /\bnext\s+week\b/i, date: () => shiftDays(now, 7) },
+    {
+      re: /\bnext\s+month\b/i,
+      date: () => {
+        const d = new Date(now);
+        d.setMonth(d.getMonth() + 1);
+        return d;
+      },
+    },
+    {
+      re: /\b(?:on\s+|next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i,
+      date: (m) => nextWeekday(now, WEEKDAY_NAMES.indexOf(m[1].toLowerCase())),
+    },
+  ];
+
+  for (const p of patterns) {
+    const m = text.match(p.re);
+    if (!m) continue;
+    const title = text
+      .replace(p.re, " ")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s+([,.])/g, "$1")
+      .replace(/[\s,]+$/, "")
+      .trim();
+    return { title: title || text.trim(), due: localDay(p.date(m)) };
+  }
+  return { title: text.trim(), due: null };
+}
+
+const WHEN_CHIPS: { label: string; days: number; business?: boolean }[] = [
+  { label: "tomorrow", days: 1 },
+  { label: "in 3 days", days: 3 },
+  { label: "in 5 business days", days: 5, business: true },
+  { label: "next week", days: 7 },
+  { label: "in 2 weeks", days: 14 },
+  { label: "in a month", days: 30 },
+];
+
+const dueLabel = (due: string | null) => {
+  if (!due) return "no date";
+  if (due === TODAY) return "today";
+  const days = Math.round(
+    (new Date(`${due}T12:00:00Z`).getTime() -
+      new Date(`${TODAY}T12:00:00Z`).getTime()) /
+      86400000,
+  );
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  if (days < 0) return `${-days} days ago`;
+  if (days <= 14) return `in ${days} days · ${pretty(due)}`;
+  return pretty(due);
+};
+
+function ReminderRow({ r, send }: { r: Reminder; send: Send }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(r.title);
+  const overdue = !r.done && r.due !== null && r.due < TODAY;
+  const today = !r.done && r.due === TODAY;
+
+  const edit = (field: "title" | "due", value: string | null) =>
+    send({ action: "editReminder", id: r.id, field, value }, (b) => ({
+      ...b,
+      reminders: b.reminders.map((x) =>
+        x.id === r.id ? { ...x, [field]: value } : x,
+      ),
+    }));
+
+  return (
+    <div className="group flex items-start gap-3 border-b border-line/60 py-2.5 last:border-0">
+      <div className="pt-0.5">
+        <Tick
+          on={r.done}
+          onChange={(done) =>
+            send({ action: "toggleReminder", id: r.id, done }, (b) => ({
+              ...b,
+              reminders: b.reminders.map((x) =>
+                x.id === r.id ? { ...x, done } : x,
+              ),
+            }))
+          }
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              setEditing(false);
+              if (draft.trim() && draft !== r.title)
+                edit("title", draft.trim());
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            className="w-full rounded-lg border border-line bg-panel px-2 py-1 text-[14px] outline-none"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(r.title);
+              setEditing(true);
+            }}
+            className={`text-left text-[14px] leading-snug ${
+              r.done ? "text-muted line-through" : "text-ink"
+            }`}
+          >
+            {r.title}
+          </button>
+        )}
+        {r.notes ? (
+          <p className="mt-0.5 text-[12px] leading-snug text-muted">
+            {r.notes}
+          </p>
+        ) : null}
+        <div className="mt-1 flex items-center gap-2">
+          <span
+            className={`text-[12px] ${
+              overdue ? "text-bad" : today ? "text-accent-2" : "text-muted"
+            }`}
+          >
+            {dueLabel(r.due)}
+          </span>
+          <input
+            type="date"
+            value={r.due ?? ""}
+            onChange={(e) => edit("due", e.target.value || null)}
+            aria-label="Change the date"
+            className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-muted opacity-0 transition focus:opacity-100 group-hover:opacity-100"
+          />
+          {!r.done && r.due ? (
+            <button
+              type="button"
+              onClick={() => edit("due", localDay(shiftDays(new Date(), 7)))}
+              className="text-[11px] text-muted opacity-0 transition hover:text-ink group-hover:opacity-100"
+            >
+              push a week
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() =>
+          send({ action: "deleteReminder", id: r.id }, (b) => ({
+            ...b,
+            reminders: b.reminders.filter((x) => x.id !== r.id),
+          }))
+        }
+        aria-label="Delete reminder"
+        className="shrink-0 text-[13px] text-muted opacity-0 transition hover:text-bad group-hover:opacity-100"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/** A reminder is only useful on the morning it comes due, so the day it lands
+ *  (and every day after, until it's ticked) it surfaces inside Today. */
+function DueReminders({
+  board,
+  send,
+  day,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+}) {
+  const due = board.reminders.filter(
+    (r) =>
+      !r.done &&
+      r.due !== null &&
+      (day >= TODAY ? r.due <= day : r.due === day),
+  );
+  if (!due.length) return null;
+
+  const push = (r: Reminder, days: number) =>
+    send(
+      {
+        action: "editReminder",
+        id: r.id,
+        field: "due",
+        value: localDay(shiftDays(new Date(), days)),
+      },
+      (b) => ({
+        ...b,
+        reminders: b.reminders.map((x) =>
+          x.id === r.id
+            ? { ...x, due: localDay(shiftDays(new Date(), days)) }
+            : x,
+        ),
+      }),
+    );
+
+  return (
+    <section className="mt-7 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-[13px] font-semibold">Check on this</h3>
+        <span className="text-[12px] text-muted">
+          {due.length === 1 ? "1 reminder" : `${due.length} reminders`}
+        </span>
+      </div>
+      <div className="mt-2">
+        {due.map((r) => (
+          <div
+            key={r.id}
+            className="group flex items-start gap-3 border-b border-line/50 py-2.5 last:border-0"
+          >
+            <div className="pt-0.5">
+              <Tick
+                on={false}
+                onChange={(done) =>
+                  send({ action: "toggleReminder", id: r.id, done }, (b) => ({
+                    ...b,
+                    reminders: b.reminders.map((x) =>
+                      x.id === r.id ? { ...x, done } : x,
+                    ),
+                  }))
+                }
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] leading-snug">{r.title}</p>
+              {r.notes ? (
+                <p className="mt-0.5 text-[12px] leading-snug text-muted">
+                  {r.notes}
+                </p>
+              ) : null}
+              <span
+                className={`text-[12px] ${r.due !== null && r.due < TODAY ? "text-bad" : "text-muted"}`}
+              >
+                {dueLabel(r.due)}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => push(r, 1)}
+                className="text-[11px] text-muted transition hover:text-ink"
+              >
+                tomorrow
+              </button>
+              <button
+                type="button"
+                onClick={() => push(r, 7)}
+                className="text-[11px] text-muted transition hover:text-ink"
+              >
+                a week
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RemindersPane({ board, send }: { board: Board; send: Send }) {
+  const [text, setText] = useState("");
+  const [when, setWhen] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+
+  const parsed = parseWhen(text);
+  const due = when ?? parsed.due;
+
+  const add = () => {
+    const title = parsed.title.trim();
+    if (!title) return;
+    send({ action: "addReminder", title, due: due ?? null }, (b) => ({
+      ...b,
+      reminders: [
+        {
+          id: `tmp-${Date.now()}`,
+          title,
+          due: due ?? null,
+          done: false,
+          notes: "",
+          url: "#",
+        },
+        ...b.reminders,
+      ],
+    }));
+    setText("");
+    setWhen(null);
+  };
+
+  const open = board.reminders
+    .filter((r) => !r.done)
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+  const done = board.reminders.filter((r) => r.done);
+  const overdue = open.filter((r) => r.due !== null && r.due < TODAY);
+  const nowish = open.filter((r) => r.due === TODAY);
+  const soon = open.filter(
+    (r) =>
+      r.due !== null &&
+      r.due > TODAY &&
+      r.due <= localDay(shiftDays(new Date(), 14)),
+  );
+  const later = open.filter(
+    (r) => r.due === null || r.due > localDay(shiftDays(new Date(), 14)),
+  );
+
+  const dbUrl =
+    board.dbs.reminders !== "demo"
+      ? `https://notion.so/${board.dbs.reminders.replace(/-/g, "")}`
+      : null;
+
+  const group = (title: string, rows: Reminder[]) =>
+    rows.length ? (
+      <Panel
+        key={title}
+        title={title}
+        right={<span className="text-[12px] text-muted">{rows.length}</span>}
+      >
+        <div>
+          {rows.map((r) => (
+            <ReminderRow key={r.id} r={r} send={send} />
+          ))}
+        </div>
+      </Panel>
+    ) : null;
+
+  return (
+    <div className="space-y-4">
+      <Panel title="Remind me to…">
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder="check the Crate & Barrel refund in 5 business days"
+              className="min-w-0 flex-1 rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[14px] outline-none transition placeholder:text-muted focus:border-ink/30 focus:bg-panel-2"
+            />
+            <button
+              type="button"
+              onClick={add}
+              className="shrink-0 rounded-xl bg-accent px-4 text-[14px] font-medium text-brand-cream transition hover:opacity-85"
+            >
+              Add
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {WHEN_CHIPS.map((c) => {
+              const date = localDay(
+                c.business
+                  ? shiftBusinessDays(new Date(), c.days)
+                  : shiftDays(new Date(), c.days),
+              );
+              return (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => setWhen(when === date ? null : date)}
+                  className={`rounded-full border px-3 py-1 text-[12px] transition ${
+                    when === date
+                      ? "border-ink bg-ink text-brand-cream"
+                      : "border-line bg-panel text-muted hover:border-ink/30 hover:text-ink"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+            <input
+              type="date"
+              value={when ?? ""}
+              onChange={(e) => setWhen(e.target.value || null)}
+              aria-label="Pick a date"
+              className="rounded-full border border-line bg-panel px-2.5 py-1 text-[12px] text-muted outline-none"
+            />
+          </div>
+          <p className="text-[12px] leading-relaxed text-muted">
+            {due ? (
+              <>
+                Lands on <span className="text-ink">{weekday(due)}</span>
+                {parsed.due && !when ? " — read out of what you typed." : "."}
+              </>
+            ) : (
+              <>
+                Write when you want it back: &ldquo;in 5 business days&rdquo;,
+                &ldquo;next week&rdquo;, &ldquo;on Friday&rdquo; — or tap a
+                chip.
+              </>
+            )}
+          </p>
+          {dbUrl ? (
+            <p className="text-[12px] text-muted">
+              These live in the <span className="text-ink">Reminders</span>{" "}
+              database in Notion.{" "}
+              <a
+                href={dbUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent-2 underline"
+              >
+                Open it
+              </a>
+            </p>
+          ) : null}
+        </div>
+      </Panel>
+
+      {group("Overdue", overdue)}
+      {group("Today", nowish)}
+      {group("Next two weeks", soon)}
+      {group("Later", later)}
+
+      {!open.length ? (
+        <p className="py-10 text-center text-[14px] text-muted">
+          Nothing to come back to. Add the first one above.
+        </p>
+      ) : null}
+
+      {done.length ? (
+        <Panel
+          title="Done"
+          right={
+            <button
+              type="button"
+              onClick={() => setShowDone(!showDone)}
+              className="text-[12px] text-muted transition hover:text-ink"
+            >
+              {showDone ? "hide" : `show ${done.length}`}
+            </button>
+          }
+        >
+          {showDone ? (
+            <div>
+              {done.map((r) => (
+                <ReminderRow key={r.id} r={r} send={send} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted">
+              {done.length} dealt with this month.
+            </p>
+          )}
+        </Panel>
+      ) : null}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- shell */
 
 const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
   { id: "todos", label: "Plan week" },
+  { id: "reminders", label: "Reminders" },
   { id: "deals", label: "Deals" },
   { id: "agent", label: "Assistant" },
   { id: "habits", label: "Habits" },
@@ -5150,6 +5988,18 @@ export default function BoardApp({
                 }`}
               >
                 {t.label}
+                {t.id === "reminders" && board
+                  ? (() => {
+                      const dueNow = board.reminders.filter(
+                        (r) => !r.done && r.due !== null && r.due <= TODAY,
+                      ).length;
+                      return dueNow ? (
+                        <span className="ml-1.5 rounded-full bg-bad px-1.5 py-0.5 text-[10px] text-brand-cream">
+                          {dueNow}
+                        </span>
+                      ) : null;
+                    })()
+                  : null}
               </button>
             ))}
           </nav>
@@ -5183,6 +6033,8 @@ export default function BoardApp({
           ) : (
             <DealsPane board={board} send={send} />
           )
+        ) : tab === "reminders" ? (
+          <RemindersPane board={board} send={send} />
         ) : tab === "agent" ? (
           <AgentPane board={board} send={send} />
         ) : tab === "habits" ? (
