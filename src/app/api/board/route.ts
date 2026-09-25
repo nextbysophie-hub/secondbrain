@@ -5,6 +5,7 @@ import {
   ensureBoardDbs,
   ensureDayColumns,
   ensureDealLink,
+  ensureDealMoney,
   ensureGoalColumns,
   ensureGoalLink,
   ensureIdeaNotes,
@@ -86,7 +87,11 @@ export async function GET(req: Request) {
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
     const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
-    const dealMap = await readDealMap(creds.token, dbs.deals);
+    const dealMap = await ensureDealMoney(
+      creds.token,
+      dbs.deals,
+      await readDealMap(creds.token, dbs.deals),
+    );
     const board = await readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10));
     if (!dealsUnlocked(req))
       return NextResponse.json({ ok: true, ...board, deals: [], dealsLocked: true, dbs });
@@ -113,7 +118,11 @@ export async function POST(req: Request) {
   try {
     const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
     const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
-    const dealMap = await readDealMap(creds.token, dbs.deals);
+    const dealMap = await ensureDealMoney(
+      creds.token,
+      dbs.deals,
+      await readDealMap(creds.token, dbs.deals),
+    );
     await applyAction(creds.token, dbs, map, dealMap, body);
     return NextResponse.json({ ok: true });
   } catch (e) {

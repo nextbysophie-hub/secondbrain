@@ -4424,9 +4424,11 @@ const stageFor = (lane: Lane, stages: string[]) =>
 
 const isPaid = (d: Deal) => (d.paid === null ? d.stage === "Paid" : d.paid);
 
-/** The manager brokered it, so a fifth of the fee is theirs. */
+/** The manager brokered it, so a fifth of the fee is theirs unless that deal
+ *  was cut at another rate in Notion. */
 const CUT = 0.2;
-const net = (d: Deal) => Math.round((d.fee ?? 0) * (d.cut ? 1 - CUT : 1));
+const cutOf = (d: Deal) => (d.cut ? (d.cutPct ?? CUT) : 0);
+const net = (d: Deal) => Math.round((d.fee ?? 0) * (1 - cutOf(d)));
 /** Earnings are counted the day the money landed; a deal marked paid with no
  *  payment date falls back to its post date so it still shows up in a month. */
 const earnedOn = (d: Deal) => d.paidOn ?? d.due;
@@ -4497,6 +4499,7 @@ function DealCard({
       | "paid"
       | "paidOn"
       | "cut"
+      | "cutPct"
       | "waiting",
     value: string | null,
   ) =>
@@ -4522,6 +4525,13 @@ function DealCard({
                             ? { paidOn: value }
                             : field === "cut"
                               ? { cut: value === "on" }
+                              : field === "cutPct"
+                                ? {
+                                    cutPct:
+                                      value === null
+                                        ? null
+                                        : (Number(value) || 0) / 100,
+                                  }
                               : field === "waiting"
                                 ? { waiting: value === "on" }
                                 : { stage: value }),
@@ -4633,7 +4643,7 @@ function DealCard({
           </span>
           {deal.fee && deal.cut ? (
             <span className="block pr-1 text-[10px] text-muted/80">
-              {money(net(deal))} yours
+              {money(net(deal))} yours after {Math.round(cutOf(deal) * 100)}%
             </span>
           ) : null}
         </span>
@@ -4725,9 +4735,29 @@ function DealCard({
             ) : null}
             {deal.cut !== null ? (
               <MoneyFlag
-                label="manager 20%"
+                label={`manager ${Math.round((deal.cutPct ?? CUT) * 100)}%`}
                 on={deal.cut}
                 onChange={(on) => edit("cut", on ? "on" : "off")}
+              />
+            ) : null}
+            {/* Not every deal is brokered at the same rate, and what she keeps
+                is only right if the tracker knows which. */}
+            {deal.cut ? (
+              <input
+                type="number"
+                min={0}
+                max={100}
+                defaultValue={Math.round((deal.cutPct ?? CUT) * 100)}
+                aria-label="Manager's share, in percent"
+                onFocus={() => setTyping(true)}
+                onBlur={(e) => {
+                  setTyping(false);
+                  const pct = e.target.value.trim();
+                  if (pct !== String(Math.round((deal.cutPct ?? CUT) * 100)))
+                    edit("cutPct", pct === "" ? null : pct);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                className="w-[42px] rounded-full border border-line bg-transparent px-2 py-0.5 text-[10px] text-muted outline-none focus:border-ink/40"
               />
             ) : null}
             {isPaid(deal) ? (
@@ -5190,6 +5220,8 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
                     paid: false,
                     paidOn: null,
                     cut: true,
+                    cutPct: null,
+                    keep: null,
                     waiting: false,
                     url: "#",
                   },

@@ -140,6 +140,12 @@ export type Deal = {
   paidOn: string | null;
   /** True when the manager brokered it and takes their 20%. */
   cut: boolean | null;
+  /** The manager's share as a fraction, so a deal cut at 15% isn't counted
+   *  at 20%. Null means the tracker has no column for it. */
+  cutPct: number | null;
+  /** What lands in her account after the manager, held in Notion rather than
+   *  worked out on screen. */
+  keep: number | null;
   /** True while the ball is in the brand's court, so the wall separates
    *  "nothing I can do" from "this one is on me". */
   waiting: boolean | null;
@@ -159,6 +165,7 @@ export type DealField =
   | "paid"
   | "paidOn"
   | "cut"
+  | "cutPct"
   | "waiting";
 
 /** A brand-deal tracker somebody keeps by hand has its own column names and
@@ -177,6 +184,8 @@ export type DealMap = {
   paid: string | null;
   paidOn: string | null;
   cut: string | null;
+  cutPct: string | null;
+  keep: string | null;
   waiting: string | null;
 };
 
@@ -236,6 +245,7 @@ type Prop = {
   multi_select?: { name?: string }[];
   url?: string | null;
   number?: number | null;
+  formula?: { number?: number | null };
   relation?: { id: string }[];
 };
 
@@ -252,6 +262,9 @@ const textOf = (p?: Prop) =>
     .join("")
     .trim();
 const dateOf = (p?: Prop) => p?.date?.start?.slice(0, 10) ?? null;
+/** Take-home can be a plain number she types or a formula off the fee, and
+ *  the dashboard shouldn't care which. */
+const numberOf = (p?: Prop) => p?.number ?? p?.formula?.number ?? null;
 const selectOf = (p?: Prop) => p?.select?.name ?? null;
 const tagOf = (p?: Prop) =>
   p?.select?.name ?? p?.status?.name ?? p?.multi_select?.[0]?.name ?? null;
@@ -420,13 +433,17 @@ export async function readDealMap(
       : null;
   const checkbox = (match: RegExp) =>
     pick(props, "checkbox", match)?.name ?? null;
+  // The manager's share is a number in its own right, so it must never be
+  // mistaken for the deal's fee.
+  const cutPct = pick(props, "number", /manager|commission|agency/i)?.name ?? null;
+  const money = props.filter((p) => p.name !== cutPct);
   return {
     title: pick(props, "title")?.name ?? "Name",
     stage: asRole(stageProp),
     status: asRole(statusProp),
     fee:
-      pick(props, "number", /amount|fee|rate|price|value|\$/i)?.name ??
-      pick(props, "number")?.name ??
+      pick(money, "number", /amount|fee|rate|price|value|\$/i)?.name ??
+      pick(money, "number")?.name ??
       null,
     due:
       pick(props, "date", /post|deliver|due|deadline|film/i)?.name ??
@@ -439,6 +456,13 @@ export async function readDealMap(
     paid: checkbox(/paid|payment received|received/i),
     paidOn: pick(props, "date", /payment|paid/i)?.name ?? null,
     cut: checkbox(/manager|commission|agency/i),
+    cutPct,
+    keep:
+      props.find(
+        (p) =>
+          (p.type === "formula" || p.type === "number") &&
+          /i keep|take.?home|net|after (the )?manager/i.test(p.name),
+      )?.name ?? null,
     waiting: checkbox(/waiting on (brand|them)|their court/i),
   };
 }
@@ -692,6 +716,36 @@ export async function ensureIdeaNotes(
     method: "PATCH",
     body: JSON.stringify({ properties: { Notes: { rich_text: {} } } }),
   });
+}
+
+/**
+ * What she actually keeps belongs in the tracker, not only on the dashboard:
+ * a percent she can change per deal, the manager's share worked out from it,
+ * and the take-home. The last two are Notion formulas, so they stay right when
+ * a fee is edited in Notion itself.
+ */
+export async function ensureDealMoney(
+  token: string,
+  dealsDbId: string,
+  map: DealMap,
+): Promise<DealMap> {
+  if (!map.fee || !map.cut || (map.cutPct && map.keep)) return map;
+  const pct = map.cutPct ?? "Manager %";
+  const patch = (properties: Record<string, object>) =>
+    notion(token, `/databases/${dealsDbId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties }),
+    });
+  // The formulas name the percent column, so it has to exist by itself first.
+  if (!map.cutPct) await patch({ [pct]: { number: { format: "percent" } } });
+  const share = `if(prop("${map.cut}"), prop("${map.fee}") * (if(empty(prop("${pct}")), 0.2, prop("${pct}"))), 0)`;
+  await patch({ "Manager fee": { formula: { expression: share } } });
+  await patch({
+    "I keep": {
+      formula: { expression: `prop("${map.fee}") - prop("Manager fee")` },
+    },
+  });
+  return { ...map, cutPct: pct, keep: "I keep" };
 }
 
 /* --------------------------------------------------------- database lookup */
@@ -1188,6 +1242,8 @@ export async function readBoard(
       paid: deals.paid ? (r.properties[deals.paid]?.checkbox ?? false) : null,
       paidOn: deals.paidOn ? dateOf(r.properties[deals.paidOn]) : null,
       cut: deals.cut ? (r.properties[deals.cut]?.checkbox ?? false) : null,
+      cutPct: deals.cutPct ? numberOf(r.properties[deals.cutPct]) : null,
+      keep: deals.keep ? numberOf(r.properties[deals.keep]) : null,
       waiting: deals.waiting
         ? (r.properties[deals.waiting]?.checkbox ?? false)
         : null,
@@ -1441,6 +1497,15 @@ function dealProps(
       return deals.paidOn ? { [deals.paidOn]: dateProp(value) } : {};
     case "cut":
       return deals.cut ? { [deals.cut]: { checkbox: value === "on" } } : {};
+    // Typed as "15" on the card, stored the way Notion stores a percent.
+    case "cutPct":
+      return deals.cutPct
+        ? {
+            [deals.cutPct]: {
+              number: value === null ? null : (Number(value) || 0) / 100,
+            },
+          }
+        : {};
     case "waiting":
       return deals.waiting
         ? { [deals.waiting]: { checkbox: value === "on" } }
