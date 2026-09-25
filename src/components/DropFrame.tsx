@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 const WORLD = "https://hey-siri-write-that-down.vercel.app";
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -16,7 +16,21 @@ function post(path: string, body: unknown) {
   }).then((r) => r.json() as Promise<{ ok?: boolean; state?: { code?: string } }>);
 }
 
-export function DropFrame({ finished, hideTitle = false }: { finished: boolean; hideTitle?: boolean }) {
+export function DropFrame({
+  finished,
+  hideTitle = false,
+  label = "Drop 01 · free",
+  freebie = "Drop 01 — Siri capture",
+  title,
+  sub = "Ten minutes. Say it out loud, it lands in Notion.",
+}: {
+  finished: boolean;
+  hideTitle?: boolean;
+  label?: string;
+  freebie?: string;
+  title?: ReactNode;
+  sub?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [everOpened, setEverOpened] = useState(false);
   const [joined, setJoined] = useState(false);
@@ -72,7 +86,7 @@ export function DropFrame({ finished, hideTitle = false }: { finished: boolean; 
       kind: "waitlist",
       email: clean,
       name: name.trim(),
-      freebie: "Drop 01 — Siri capture",
+      freebie,
       question: answers.join("\n"),
     }).catch(() => undefined);
     setJoined(true);
@@ -98,16 +112,20 @@ export function DropFrame({ finished, hideTitle = false }: { finished: boolean; 
             ← back
           </a>
           <span className="squircle bg-accent px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-brand-cream">
-            Drop 01 · free
+            {label}
           </span>
         </div>
         {hideTitle ? null : (
           <>
             <h2 className="mt-4 text-center text-[26px] font-bold leading-tight tracking-tight sm:text-[30px]">
-              &ldquo;Hey Siri &mdash; <span className="text-accent">write that down.</span>&rdquo;
+              {title ?? (
+                <>
+                  &ldquo;Hey Siri &mdash; <span className="text-accent">write that down.</span>&rdquo;
+                </>
+              )}
             </h2>
             <p className="mt-2 text-center text-[14px] font-semibold leading-relaxed text-muted">
-              Ten minutes. Say it out loud, it lands in Notion.
+              {sub}
             </p>
           </>
         )}
