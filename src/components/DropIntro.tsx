@@ -9,7 +9,7 @@ export function DropIntro({ next }: StepProps) {
     <div className="space-y-8">
       <div className="text-center">
         <span className="inline-block rounded-full bg-accent px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-brand-cream">
-          Drop 01 · free
+          Drop 01
         </span>
         <h1 className="mt-4 text-[38px] font-black leading-[0.95] tracking-[-0.045em] sm:text-[52px]">
           Talk to your
@@ -49,7 +49,7 @@ export function DropIntro({ next }: StepProps) {
         {[
           ["10 min", "start to finish"],
           ["0 code", "copy, paste, tap"],
-          ["iPhone", "+ a free Notion"],
+          ["iPhone", "+ a Notion account"],
         ].map(([big, small]) => (
           <div key={big} className="rounded-2xl border border-line bg-panel px-2 py-3">
             <div className="text-[17px] font-bold leading-none tracking-tight">{big}</div>

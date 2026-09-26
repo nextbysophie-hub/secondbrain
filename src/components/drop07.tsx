@@ -11,7 +11,7 @@ const CRON =
 
 export const DROP07: GuideSpec = {
   slug: "drop07",
-  label: "Drop 07 · free",
+  label: "Drop 07",
   freebie: "Drop 07 — Proactive agent",
   headline: (
     <>
@@ -44,7 +44,7 @@ export const DROP07: GuideSpec = {
   stats: [
     ["15 min", "start to finish"],
     ["0 code", "path 1 is clicks"],
-    ["Free", "on your Claude plan"],
+    ["Claude", "the plan you have"],
   ],
   outline: [
     ["Check what it can reach", "Gmail, Calendar and Notion from episode 3"],

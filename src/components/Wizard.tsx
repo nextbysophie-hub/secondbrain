@@ -198,7 +198,7 @@ export function Wizard({ drop = false }: { drop?: boolean }) {
             <div className="absolute inset-0 flex items-start justify-center bg-gradient-to-b from-transparent via-[rgba(242,231,218,0.72)] to-[var(--brand-cream)] pt-6">
               <div className="sticky top-6 w-full max-w-sm rounded-[26px] bg-brand-periwinkle p-5 text-center shadow-[0_18px_44px_rgba(27,27,42,0.28)]">
                 <span className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-brand-rust">
-                  the rest is free too
+                  the rest of the build
                 </span>
                 <h2 className="mt-2 text-[23px] font-black leading-[1.05] tracking-[-0.03em] text-[#1B1B2A]">
                   Drop your email to finish the build.
@@ -212,7 +212,7 @@ export function Wizard({ drop = false }: { drop?: boolean }) {
                   onClick={() => window.dispatchEvent(new Event(OPEN_EVENT))}
                   className="mt-4 w-full rounded-full bg-brand-yellow px-5 py-3.5 text-[16px] font-extrabold text-[#3A2A15] shadow-[0_8px_22px_rgba(251,196,46,0.38)] active:translate-y-px"
                 >
-                  unlock the rest &mdash; free
+                  unlock the rest
                 </button>
               </div>
             </div>

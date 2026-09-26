@@ -19,7 +19,7 @@ function post(path: string, body: unknown) {
 export function DropFrame({
   finished,
   hideTitle = false,
-  label = "Drop 01 · free",
+  label = "Drop 01",
   freebie = "Drop 01 — Siri capture",
   title,
   sub = "Ten minutes. Say it out loud, it lands in Notion.",
@@ -150,7 +150,9 @@ export function DropFrame({
                   the offer
                 </span>
                 <h3 className="mt-2 text-center text-[24px] font-black leading-[1.05] tracking-[-0.03em] text-[#1B1B2A]">
-                  {finished ? "That one’s done. Want the next?" : "One email. Interactive guides that get AI working for you."}
+                  {finished
+                    ? "That one’s done. Want the next?"
+                    : "One email. Interactive guides that get AI working for you."}
                 </h3>
                 <p className="mx-auto mt-2 max-w-[330px] text-center text-[13.5px] leading-relaxed text-[#33305A]">
                   Not tips. Not news. Hands-on builds like this one &mdash; and your bot levels up with every
@@ -208,7 +210,7 @@ export function DropFrame({
                   >
                     {busy ? "Signing you up…" : "sign up!"}
                   </button>
-                  <p className="mt-2 text-center text-[11.5px] text-[#9E8776]">Free. One tap to unsubscribe.</p>
+                  <p className="mt-2 text-center text-[11.5px] text-[#9E8776]">One tap to unsubscribe.</p>
                 </div>
 
                 <button
