@@ -3,6 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 
 const WORLD = "https://hey-siri-write-that-down.vercel.app";
+const BACK = "https://nextbysophie.com/newsletter";
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export const SEEN_KEY = "nbs-drop01-joined";
 export const JOINED_EVENT = "nbs-drop01-joined";
@@ -106,7 +107,7 @@ export function DropFrame({
       >
         <div className="flex items-center justify-between gap-3">
           <a
-            href={`${WORLD}/join`}
+            href={BACK}
             className="inline-flex items-center gap-1.5 rounded-full border-2 border-brand-cocoa bg-brand-periwinkle px-3.5 py-2 text-[13px] font-bold text-brand-cocoa shadow-[3px_4px_0_var(--brand-cocoa)] hover:brightness-105"
           >
             ← back
