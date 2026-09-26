@@ -148,16 +148,15 @@ export function DropFrame({
             {!joined ? (
               <>
                 <span className="block text-center text-[11px] font-extrabold uppercase tracking-[0.16em] text-brand-rust">
-                  the offer
+                  liking this guide?
                 </span>
                 <h3 className="mt-2 text-center text-[24px] font-black leading-[1.05] tracking-[-0.03em] text-[#1B1B2A]">
                   {finished
                     ? "That one’s done. Want the next?"
-                    : "One email. Interactive guides that get AI working for you."}
+                    : "I send free interactive guides like this one a couple of times a month."}
                 </h3>
                 <p className="mx-auto mt-2 max-w-[330px] text-center text-[13.5px] leading-relaxed text-[#33305A]">
-                  Not tips. Not news. Hands-on builds like this one &mdash; and your bot levels up with every
-                  guide you finish.
+                  Not spam, not news &mdash; hands-on builds to help you actually use AI. Sign up here!
                 </p>
 
                 <div className="mt-4 rounded-[22px] bg-brand-cream p-4">
