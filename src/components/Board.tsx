@@ -12,6 +12,7 @@ import type {
   AgentTask,
   Board,
   Deal,
+  Every,
   Goal,
   Habit,
   HabitTick,
@@ -54,14 +55,46 @@ function catColour(name: string | null): string {
 const moneyDay = (t: Todo) => t.due ?? t.plan;
 const isFixed = (t: Todo) => t.fixed && !!moneyDay(t) && !isCheck(t);
 
+/** The same date one repeat later (or earlier); month steps stick to the
+ *  month's last day rather than spilling into the next. */
+function stepEvery(day: string, every: Every, by: 1 | -1): string {
+  const d = new Date(`${day}T12:00:00`);
+  if (every.unit === "day" || every.unit === "week")
+    return shiftDay(day, by * every.n * (every.unit === "week" ? 7 : 1));
+  const months = by * every.n * (every.unit === "year" ? 12 : 1);
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1, 12);
+  const last = new Date(
+    target.getFullYear(),
+    target.getMonth() + 1,
+    0,
+  ).getDate();
+  target.setDate(Math.min(d.getDate(), last));
+  return localDay(target);
+}
+
+/** A repeating locked item that's been paid has already rolled to its next
+ *  date; it still belongs, ticked, on the day it was paid for. */
+const paidFor = (t: Todo, day: string) =>
+  isFixed(t) &&
+  !!t.every &&
+  stepEvery(moneyDay(t) as string, t.every, -1) === day;
+
 /** Pin a task to its date, or let it move again. Locking without a date pins
  *  it to whichever day it was planned for, else today. */
 function setLocked(todo: Todo, on: boolean, send: Send) {
   const due = on && !moneyDay(todo) ? TODAY : todo.due;
   if (due !== todo.due)
-    send({ action: "editTodo", id: todo.id, field: "due", value: due }, (b) => b);
+    send(
+      { action: "editTodo", id: todo.id, field: "due", value: due },
+      (b) => b,
+    );
   send(
-    { action: "editTodo", id: todo.id, field: "fixed", value: on ? "on" : null },
+    {
+      action: "editTodo",
+      id: todo.id,
+      field: "fixed",
+      value: on ? "on" : null,
+    },
     (b) => ({
       ...b,
       todos: b.todos.map((t) =>
@@ -72,7 +105,10 @@ function setLocked(todo: Todo, on: boolean, send: Send) {
     }),
   );
   if (on && todo.slot)
-    send({ action: "editTodo", id: todo.id, field: "slot", value: null }, (b) => b);
+    send(
+      { action: "editTodo", id: todo.id, field: "slot", value: null },
+      (b) => b,
+    );
 }
 
 function LockButton({
@@ -1192,6 +1228,7 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   goal: null,
   deal: null,
   fixed: false,
+  every: null,
   url: "#",
 });
 
@@ -1981,7 +2018,11 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const locked = board.todos.filter((t) => {
     if (!isFixed(t)) return false;
     const owed = moneyDay(t) as string;
-    return owed === day || (day === TODAY && !t.done && owed < TODAY);
+    return (
+      owed === day ||
+      paidFor(t, day) ||
+      (day === TODAY && !t.done && owed < TODAY)
+    );
   });
 
   const addEmails = () =>
@@ -2050,7 +2091,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
           {locked.length ? (
             <div className="mt-6">
-              <MoneyDue rows={locked} send={send} />
+              <MoneyDue rows={locked} send={send} day={day} />
             </div>
           ) : null}
 
@@ -2299,6 +2340,7 @@ const ideaToTodo = (idea: Idea, send: Send) => {
           source: "Manual",
           deal: null,
           fixed: false,
+          every: null,
           url: "#",
         },
       ],
@@ -2464,6 +2506,7 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
           source: "Manual",
           deal: null,
           fixed: false,
+          every: null,
           url: "#",
         },
       ],
@@ -3064,7 +3107,33 @@ function OverCap({
 }
 
 /** Money owed on a day: shown, tickable, and deliberately immovable. */
-function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
+function MoneyDue({
+  rows,
+  send,
+  day,
+}: {
+  rows: Todo[];
+  send: Send;
+  day: string;
+}) {
+  // A repeating one is paid by rolling it to its next date, so ticking it
+  // keeps it here crossed off and brings it back next time.
+  const tick = (t: Todo, paid: boolean) => {
+    if (!t.every) {
+      send({ action: "toggleTodo", id: t.id, done: !paid }, (b) => ({
+        ...b,
+        todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !paid } : x)),
+      }));
+      return;
+    }
+    const field = t.due ? "due" : "plan";
+    const value = stepEvery(moneyDay(t) as string, t.every, paid ? -1 : 1);
+    send({ action: "editTodo", id: t.id, field, value }, (b) => ({
+      ...b,
+      todos: b.todos.map((x) => (x.id === t.id ? { ...x, [field]: value } : x)),
+    }));
+  };
+
   return (
     <div className="zone-money mb-1.5 rounded-lg border px-2 py-1.5">
       <div className="mb-0.5 flex items-baseline justify-between">
@@ -3073,44 +3142,40 @@ function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
         </span>
         <span className="text-[10px] opacity-70">can&rsquo;t be moved</span>
       </div>
-      {rows.map((t) => (
-        <div key={t.id} className="flex items-center gap-2 py-0.5">
-          <button
-            type="button"
-            aria-label={t.done ? "Mark as not paid" : "Mark paid"}
-            onClick={() =>
-              send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
-                ...b,
-                todos: b.todos.map((x) =>
-                  x.id === t.id ? { ...x, done: !t.done } : x,
-                ),
-              }))
-            }
-            className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
-              t.done
-                ? "border-current bg-current text-brand-cream"
-                : "border-current/40 hover:border-current"
-            }`}
-          >
-            {t.done ? "✓" : ""}
-          </button>
-          <EditTitle
-            todo={t}
-            send={send}
-            className={t.done ? "line-through opacity-60" : ""}
-          />
-          <EditDue todo={t} send={send} />
-          <button
-            type="button"
-            title="Unlock — make it a movable reminder"
-            aria-label="Unlock"
-            onClick={() => setLocked(t, false, send)}
-            className="shrink-0 text-[11px] opacity-70 transition hover:opacity-100"
-          >
-            🔒
-          </button>
-        </div>
-      ))}
+      {rows.map((t) => {
+        const paid = t.done || paidFor(t, day);
+        return (
+          <div key={t.id} className="flex items-center gap-2 py-0.5">
+            <button
+              type="button"
+              aria-label={paid ? "Mark as not paid" : "Mark paid"}
+              onClick={() => tick(t, paid)}
+              className={`grid h-4 w-4 shrink-0 place-items-center rounded border text-[9px] transition ${
+                paid
+                  ? "border-current bg-current text-brand-cream"
+                  : "border-current/40 hover:border-current"
+              }`}
+            >
+              {paid ? "✓" : ""}
+            </button>
+            <EditTitle
+              todo={t}
+              send={send}
+              className={paid ? "line-through opacity-60" : ""}
+            />
+            <EditDue todo={t} send={send} />
+            <button
+              type="button"
+              title="Unlock — make it a movable reminder"
+              aria-label="Unlock"
+              onClick={() => setLocked(t, false, send)}
+              className="shrink-0 text-[11px] opacity-70 transition hover:opacity-100"
+            >
+              🔒
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -3137,7 +3202,9 @@ function PlanDay({
   const picked = board.todos.filter(
     (t) => t.slot && pickedOn(t, day) && !isFixed(t) && !isCheck(t),
   );
-  const fixed = board.todos.filter((t) => isFixed(t) && moneyDay(t) === day);
+  const fixed = board.todos.filter(
+    (t) => isFixed(t) && (moneyDay(t) === day || paidFor(t, day)),
+  );
   const deep = picked.filter((t) => t.slot === "deep");
   const quick = picked.filter((t) => t.slot === "quick");
   const slot = open ?? "deep";
@@ -3282,7 +3349,7 @@ function PlanDay({
         </span>
       </div>
 
-      {fixed.length ? <MoneyDue rows={fixed} send={send} /> : null}
+      {fixed.length ? <MoneyDue rows={fixed} send={send} day={day} /> : null}
 
       <div className="mb-1 space-y-1">
         {zone("deep", deep)}
@@ -4673,9 +4740,9 @@ function DealCard({
                                         ? null
                                         : (Number(value) || 0) / 100,
                                   }
-                              : field === "waiting"
-                                ? { waiting: value === "on" }
-                                : { stage: value }),
+                                : field === "waiting"
+                                  ? { waiting: value === "on" }
+                                  : { stage: value }),
             }
           : d,
       ),

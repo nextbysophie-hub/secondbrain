@@ -61,8 +61,13 @@ export type Todo = {
   deal: string | null;
   // Locked to its date by hand, like rent: shown on the day, never moved.
   fixed: boolean;
+  // How often it comes back (rent: every 1 month), from the tracker's own
+  // recur columns.
+  every: Every | null;
   url: string;
 };
+
+export type Every = { n: number; unit: "day" | "week" | "month" | "year" };
 
 /** How long a finished task really took, kept for estimating the next one. */
 export type Timing = { title: string; minutes: number };
@@ -343,6 +348,7 @@ export type TaskMap = {
   goal: string | null;
   deal: string | null;
   fixed: string | null;
+  recur: { interval: string; units: string } | null;
 };
 
 type SchemaProp = {
@@ -553,7 +559,32 @@ export async function readTaskMap(
     goal: pick(props, "relation", /goal/i)?.name ?? null,
     deal: pick(props, "relation", /deal|brand/i)?.name ?? null,
     fixed: pick(props, "checkbox", /^(fixed|locked)$/i)?.name ?? null,
+    recur: recurOf(props),
   };
+}
+
+function recurOf(props: SchemaProp[]): TaskMap["recur"] {
+  const interval = pick(props, "number", /recur.*interval|repeat.*every/i);
+  const units = pick(props, "select", /recur.*unit|repeat.*unit/i);
+  return interval && units
+    ? { interval: interval.name, units: units.name }
+    : null;
+}
+
+function everyOf(r: Row, map: TaskMap): Every | null {
+  if (!map.recur) return null;
+  const n = r.properties[map.recur.interval]?.number ?? 0;
+  const name = selectOf(r.properties[map.recur.units]) ?? "";
+  const unit = /day/i.test(name)
+    ? "day"
+    : /week/i.test(name)
+      ? "week"
+      : /month/i.test(name)
+        ? "month"
+        : /year/i.test(name)
+          ? "year"
+          : null;
+  return n > 0 && unit ? { n, unit } : null;
 }
 
 /** A deadline and "the day I want to do this" are different dates, and a
@@ -1177,6 +1208,7 @@ export async function readBoard(
       goal: map.goal ? relationOf(r.properties[map.goal]) : null,
       deal: map.deal ? relationOf(r.properties[map.deal]) : null,
       fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
+      every: everyOf(r, map),
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
