@@ -24,6 +24,7 @@ export function DropFrame({
   freebie = "Drop 01 — Siri capture",
   title,
   sub = "Ten minutes. Say it out loud, it lands in Notion.",
+  noSignup = false,
 }: {
   finished: boolean;
   hideTitle?: boolean;
@@ -31,6 +32,7 @@ export function DropFrame({
   freebie?: string;
   title?: ReactNode;
   sub?: string;
+  noSignup?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [everOpened, setEverOpened] = useState(false);
@@ -52,8 +54,8 @@ export function DropFrame({
   }, []);
 
   useEffect(() => {
-    if (finished && !joined) setOpen(true);
-  }, [finished, joined]);
+    if (finished && !joined && !noSignup) setOpen(true);
+  }, [finished, joined, noSignup]);
 
   useEffect(() => {
     const onOpen = () => setOpen(true);
@@ -62,13 +64,13 @@ export function DropFrame({
   }, []);
 
   useEffect(() => {
-    if (joined || everOpened) return;
+    if (joined || everOpened || noSignup) return;
     const t = setTimeout(() => {
       setOpen(true);
       setEverOpened(true);
     }, 6000);
     return () => clearTimeout(t);
-  }, [joined, everOpened]);
+  }, [joined, everOpened, noSignup]);
 
   async function submit() {
     const clean = email.trim().toLowerCase();
@@ -132,7 +134,7 @@ export function DropFrame({
         )}
       </div>
 
-      {!open && !joined ? (
+      {!open && !joined && !noSignup ? (
         <button
           type="button"
           onClick={() => setOpen(true)}

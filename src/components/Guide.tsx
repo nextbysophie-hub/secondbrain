@@ -21,6 +21,8 @@ export type GuideSpec = {
   steps: GuideStep[];
   /** Screens that stay open before the email wall. */
   gateAt: number;
+  /** Given away whole: no wall, no signup popup. */
+  open?: boolean;
 };
 
 const TINTS: [string, string][] = [
@@ -76,7 +78,7 @@ export function Guide({ spec }: { spec: GuideSpec }) {
   const step = intro ? spec.steps[0] : spec.steps[index - 1];
   const Body = step.Body;
   const finished = index === spec.steps.length;
-  const locked = !joined && index > spec.gateAt;
+  const locked = !spec.open && !joined && index > spec.gateAt;
   const progress = (index / spec.steps.length) * 100;
 
   return (
@@ -88,6 +90,7 @@ export function Guide({ spec }: { spec: GuideSpec }) {
         freebie={spec.freebie}
         title={spec.frameTitle}
         sub={typeof spec.promise === "string" ? spec.promise : undefined}
+        noSignup={spec.open}
       />
 
       {intro ? (

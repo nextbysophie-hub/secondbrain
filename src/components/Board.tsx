@@ -49,16 +49,54 @@ function catColour(name: string | null): string {
 /** Rent doesn't care which day suits you. Money that leaves on a date
  *  somebody else set isn't planning material, so the week shows it where it
  *  falls and refuses to let it be dragged somewhere more convenient. */
-const MONEY =
-  /\b(rent|mortgage|bill|bills|invoice|invoices|payment|pay|paid|tax|taxes|insurance|loan|premium|subscription|dues|deposit|transfer|utilities|electric|water bill|card)\b/i;
-
-const isMoney = (t: Todo) =>
-  MONEY.test(t.title) ||
-  (t.category ? /financ|money|bill|payment/i.test(t.category) : false);
-
-/** A fixed money item only behaves that way once it has a date to sit on. */
+/** Only something locked by hand (rent, a bill) is pinned to its date; every
+ *  other money item is still a reminder that can move. */
 const moneyDay = (t: Todo) => t.due ?? t.plan;
-const isFixed = (t: Todo) => isMoney(t) && !!moneyDay(t);
+const isFixed = (t: Todo) => t.fixed && !!moneyDay(t) && !isCheck(t);
+
+/** Pin a task to its date, or let it move again. Locking without a date pins
+ *  it to whichever day it was planned for, else today. */
+function setLocked(todo: Todo, on: boolean, send: Send) {
+  const due = on && !moneyDay(todo) ? TODAY : todo.due;
+  if (due !== todo.due)
+    send({ action: "editTodo", id: todo.id, field: "due", value: due }, (b) => b);
+  send(
+    { action: "editTodo", id: todo.id, field: "fixed", value: on ? "on" : null },
+    (b) => ({
+      ...b,
+      todos: b.todos.map((t) =>
+        t.id === todo.id
+          ? { ...t, fixed: on, due, slot: on ? null : t.slot }
+          : t,
+      ),
+    }),
+  );
+  if (on && todo.slot)
+    send({ action: "editTodo", id: todo.id, field: "slot", value: null }, (b) => b);
+}
+
+function LockButton({
+  todo,
+  send,
+  onDone,
+}: {
+  todo: Todo;
+  send: Send;
+  onDone?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setLocked(todo, !todo.fixed, send);
+        onDone?.();
+      }}
+      className="rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted transition hover:text-ink"
+    >
+      {todo.fixed ? "🔓 Unlock — make it movable" : "🔒 Lock — fixed date"}
+    </button>
+  );
+}
 
 /** A follow-up: your side is finished, theirs isn't. The agreement went out
  *  today, the signature is somebody else's move, so the day it gets chased on
@@ -463,6 +501,11 @@ function TodoRow({
         {todo.source === "Siri" ? (
           <span className="shrink-0 text-[11px] text-muted">🎙</span>
         ) : null}
+        {todo.fixed ? (
+          <span className="shrink-0 text-[11px]" title="Locked to its date">
+            🔒
+          </span>
+        ) : null}
         <KindChip todo={todo} send={send} />
         {sent ? (
           <span
@@ -521,6 +564,7 @@ function TodoRow({
           >
             🤖 Hand to assistant
           </button>
+          <LockButton todo={todo} send={send} onDone={() => setMenu(false)} />
           <button
             type="button"
             onClick={() => setMenu(false)}
@@ -1147,6 +1191,7 @@ const newTodo = (title: string, slot: "deep" | "quick", day: string): Todo => ({
   source: "Manual",
   goal: null,
   deal: null,
+  fixed: false,
   url: "#",
 });
 
@@ -1931,6 +1976,14 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   // than let the momentum go.
   const cleared = dayCleared(board.todos, day);
 
+  // Locked things owed today sit above everything; unpaid ones from earlier
+  // days stay on today until they're ticked.
+  const locked = board.todos.filter((t) => {
+    if (!isFixed(t)) return false;
+    const owed = moneyDay(t) as string;
+    return owed === day || (day === TODAY && !t.done && owed < TODAY);
+  });
+
   const addEmails = () =>
     send(
       {
@@ -1993,6 +2046,12 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
               </span>
               <span className="shrink-0 text-[13px] text-muted">choose →</span>
             </button>
+          ) : null}
+
+          {locked.length ? (
+            <div className="mt-6">
+              <MoneyDue rows={locked} send={send} />
+            </div>
           ) : null}
 
           <DueReminders board={board} send={send} day={day} />
@@ -2239,6 +2298,7 @@ const ideaToTodo = (idea: Idea, send: Send) => {
           link: idea.link,
           source: "Manual",
           deal: null,
+          fixed: false,
           url: "#",
         },
       ],
@@ -2403,6 +2463,7 @@ function TrendCard({ trend, send }: { trend: Trend; send: Send }) {
           link: null,
           source: "Manual",
           deal: null,
+          fixed: false,
           url: "#",
         },
       ],
@@ -2825,24 +2886,54 @@ function PileRow({
   goalName: string | null;
 }) {
   const [editing, setEditing] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdEnd = () => {
+    if (held.current) clearTimeout(held.current);
+    held.current = null;
+  };
 
   return (
     <div
       draggable={!editing}
       onDragStart={(e) => {
+        holdEnd();
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className="flex cursor-grab items-center gap-2 rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
+      onPointerDown={() => {
+        if (!editing) held.current = setTimeout(() => setMenu(true), 500);
+      }}
+      onPointerUp={holdEnd}
+      onPointerLeave={holdEnd}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu(true);
+      }}
+      className="cursor-grab rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
     >
-      <span className="shrink-0 text-[11px] text-muted">⠿</span>
-      <EditTitle todo={todo} send={send} onEditing={setEditing} />
-      {goalName ? (
-        <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
-          {goalName}
-        </span>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[11px] text-muted">⠿</span>
+        <EditTitle todo={todo} send={send} onEditing={setEditing} />
+        {goalName ? (
+          <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
+            {goalName}
+          </span>
+        ) : null}
+        <EditDue todo={todo} send={send} />
+      </div>
+      {menu ? (
+        <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+          <LockButton todo={todo} send={send} onDone={() => setMenu(false)} />
+          <button
+            type="button"
+            onClick={() => setMenu(false)}
+            className="rounded-full border border-transparent px-2 py-0.5 text-[11px] text-muted/70 hover:text-ink"
+          >
+            cancel
+          </button>
+        </div>
       ) : null}
-      <EditDue todo={todo} send={send} />
     </div>
   );
 }
@@ -2977,7 +3068,9 @@ function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
   return (
     <div className="zone-money mb-1.5 rounded-lg border px-2 py-1.5">
       <div className="mb-0.5 flex items-baseline justify-between">
-        <span className="text-[10px] uppercase tracking-widest">money due</span>
+        <span className="text-[10px] uppercase tracking-widest">
+          locked · due
+        </span>
         <span className="text-[10px] opacity-70">can&rsquo;t be moved</span>
       </div>
       {rows.map((t) => (
@@ -3007,7 +3100,15 @@ function MoneyDue({ rows, send }: { rows: Todo[]; send: Send }) {
             className={t.done ? "line-through opacity-60" : ""}
           />
           <EditDue todo={t} send={send} />
-          <span className="shrink-0 text-[11px] opacity-70">💸</span>
+          <button
+            type="button"
+            title="Unlock — make it a movable reminder"
+            aria-label="Unlock"
+            onClick={() => setLocked(t, false, send)}
+            className="shrink-0 text-[11px] opacity-70 transition hover:opacity-100"
+          >
+            🔒
+          </button>
         </div>
       ))}
     </div>
@@ -4460,6 +4561,46 @@ function MoneyFlag({
   );
 }
 
+/** Some deals come through the manager and some don't, so the cut is a switch
+ *  on the face of the card rather than a setting buried inside it. */
+function CutSwitch({
+  on,
+  pct,
+  onChange,
+}: {
+  on: boolean;
+  pct: number;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Manager takes a cut"
+      onClick={() => onChange(!on)}
+      className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] transition ${
+        on
+          ? "border-ink/30 bg-panel text-ink"
+          : "border-line text-muted hover:text-ink"
+      }`}
+    >
+      <span
+        className={`relative inline-block h-3 w-[22px] rounded-full transition ${
+          on ? "bg-ink" : "bg-line"
+        }`}
+      >
+        <span
+          className={`absolute top-[2px] h-2 w-2 rounded-full bg-brand-cream transition-all ${
+            on ? "left-[12px]" : "left-[2px]"
+          }`}
+        />
+      </span>
+      {on ? `manager ${pct}%` : "no manager"}
+    </button>
+  );
+}
+
 /** One deal, as a card on the wall. Everything you can do to it — move it a
  *  step, give it a date, put the work in your week, write the script — is on
  *  the card, because the tab is meant to answer "what am I making next". */
@@ -4641,15 +4782,17 @@ function DealCard({
               className="w-[58px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right outline-none transition placeholder:text-muted/60 hover:border-line focus:border-ink/40"
             />
           </span>
-          {deal.fee && deal.cut ? (
+          {deal.fee ? (
             <span className="block pr-1 text-[10px] text-muted/80">
-              {money(net(deal))} yours after {Math.round(cutOf(deal) * 100)}%
+              {deal.cut
+                ? `${money(net(deal))} yours after ${Math.round(cutOf(deal) * 100)}%`
+                : `${money(deal.fee)} all yours`}
             </span>
           ) : null}
         </span>
       </div>
 
-      <div className="mt-2">
+      <div className="mt-2 flex flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => edit("waiting", deal.waiting ? "off" : "on")}
@@ -4662,6 +4805,13 @@ function DealCard({
         >
           {deal.waiting ? "⏳ waiting on them" : "🎯 my move"}
         </button>
+        {deal.cut !== null ? (
+          <CutSwitch
+            on={deal.cut}
+            pct={Math.round((deal.cutPct ?? CUT) * 100)}
+            onChange={(on) => edit("cut", on ? "on" : "off")}
+          />
+        ) : null}
       </div>
 
       <div className="mt-2 flex items-center gap-1">
@@ -4731,13 +4881,6 @@ function DealCard({
                 label="paid"
                 on={deal.paid}
                 onChange={(on) => edit("paid", on ? "on" : "off")}
-              />
-            ) : null}
-            {deal.cut !== null ? (
-              <MoneyFlag
-                label={`manager ${Math.round((deal.cutPct ?? CUT) * 100)}%`}
-                on={deal.cut}
-                onChange={(on) => edit("cut", on ? "on" : "off")}
               />
             ) : null}
             {/* Not every deal is brokered at the same rate, and what she keeps

@@ -59,6 +59,8 @@ export type Todo = {
   goal: string | null;
   // The brand deal this is owed to, if any.
   deal: string | null;
+  // Locked to its date by hand, like rent: shown on the day, never moved.
+  fixed: boolean;
   url: string;
 };
 
@@ -340,6 +342,7 @@ export type TaskMap = {
   captured: string | null;
   goal: string | null;
   deal: string | null;
+  fixed: string | null;
 };
 
 type SchemaProp = {
@@ -549,6 +552,7 @@ export async function readTaskMap(
     captured: dates.find((p) => /captured|created/i.test(p.name))?.name ?? null,
     goal: pick(props, "relation", /goal/i)?.name ?? null,
     deal: pick(props, "relation", /deal|brand/i)?.name ?? null,
+    fixed: pick(props, "checkbox", /^(fixed|locked)$/i)?.name ?? null,
   };
 }
 
@@ -597,6 +601,7 @@ export async function ensureDayColumns(
   if (!map.slotProp)
     properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
   if (!map.minutes) properties.Minutes = { number: { format: "number" } };
+  if (!map.fixed) properties.Fixed = { checkbox: {} };
   if (!Object.keys(properties).length) return map;
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
@@ -606,6 +611,7 @@ export async function ensureDayColumns(
     ...map,
     slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
     minutes: map.minutes ?? "Minutes",
+    fixed: map.fixed ?? "Fixed",
   };
 }
 
@@ -1170,6 +1176,7 @@ export async function readBoard(
       source: map.source ? selectOf(r.properties[map.source]) : null,
       goal: map.goal ? relationOf(r.properties[map.goal]) : null,
       deal: map.deal ? relationOf(r.properties[map.deal]) : null,
+      fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
@@ -1304,7 +1311,8 @@ export type Action =
         | "slot"
         | "minutes"
         | "goal"
-        | "deal";
+        | "deal"
+        | "fixed";
       value: string | null;
     }
   | { action: "toggleTodo"; id: string; done: boolean }
@@ -1397,6 +1405,7 @@ function taskProps(
     source?: string;
     goal?: string | null;
     deal?: string | null;
+    fixed?: boolean;
   },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -1444,6 +1453,8 @@ function taskProps(
     out[map.goal] = relationProp(fields.goal);
   if (fields.deal !== undefined && map.deal)
     out[map.deal] = relationProp(fields.deal);
+  if (fields.fixed !== undefined && map.fixed)
+    out[map.fixed] = { checkbox: fields.fixed };
   if (fields.link && map.link) out[map.link] = { url: fields.link };
   if (fields.source && map.source) out[map.source] = selectProp(fields.source);
   if (fields.title !== undefined && map.captured)
@@ -1607,6 +1618,7 @@ export async function applyAction(
         category: { category: value },
         goal: { goal: value },
         deal: { deal: value },
+        fixed: { fixed: value === "on" },
       }[body.field];
       await updatePage(token, body.id, taskProps(map, fields));
       return;
