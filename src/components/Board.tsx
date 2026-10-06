@@ -1375,9 +1375,9 @@ function Suggested({
 
   return (
     <div className="mt-2 rounded-xl border border-dashed border-line-2 bg-panel-2/60 px-3 py-2.5">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
         <span className="h-6 w-6 shrink-0 rounded-full border border-dashed border-line-2" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[10rem] flex-1">
           <p className="eyebrow text-accent/80">
             {ordinal} slot · suggested from Notion
           </p>
@@ -1392,7 +1392,7 @@ function Suggested({
             </span>
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
           {all.length > 1 ? (
             <button
               type="button"
