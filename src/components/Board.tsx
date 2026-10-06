@@ -2098,7 +2098,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
   return (
     <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
@@ -2349,7 +2349,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         ) : null}
       </div>
 
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <EmailItems board={board} send={send} day={day} />
         <CheckPane board={board} send={send} day={day} />
         {day === TODAY ? <Affirmations board={board} send={send} /> : null}
@@ -3921,7 +3921,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
                 <PlanDay key={c[0]} board={board} send={send} days={c} />
               ))}
             </div>
-            <div className="space-y-3 xl:sticky xl:top-4 xl:self-start">
+            <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
               <PlanTrash board={board} send={send} />
