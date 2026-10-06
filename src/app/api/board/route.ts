@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   Action,
@@ -84,7 +85,8 @@ async function loadSetup(token: string, ideaDbId: string, taskDbId: string) {
 /** Database ids and column maps only change when someone edits the Notion
  *  schema, so they are remembered for a few minutes per workspace. */
 async function setup(token: string, ideaDbId: string, taskDbId: string) {
-  const found = await setupMemo(`${token.slice(-10)}:${ideaDbId}:${taskDbId}`, () =>
+  const tokenKey = createHash("sha256").update(token).digest("hex").slice(0, 16);
+  const found = await setupMemo(`${tokenKey}:${ideaDbId}:${taskDbId}`, () =>
     loadSetup(token, ideaDbId, taskDbId),
   );
   // The email database may be shared after the rest was remembered; keep

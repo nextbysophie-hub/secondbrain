@@ -1230,7 +1230,7 @@ function sweepWeek(leftover: Todo[], send: Send) {
   for (const todo of leftover) {
     if (isFixed(todo)) continue;
     const patch: Partial<Todo> = { slot: null, plan: null };
-    if (!todo.due || todo.due < TODAY) patch.due = monday;
+    if (todo.due && todo.due < TODAY) patch.due = monday;
     for (const [field, value] of Object.entries(patch) as [
       "slot" | "plan" | "due",
       string | null,
@@ -2855,7 +2855,7 @@ function PlanOn({ todo, send }: { todo: Todo; send: Send }) {
           const day = e.target.value;
           if (!day) return;
           pick(todo, "quick", send, day);
-          if (!todo.due || todo.due < day)
+          if (!todo.due)
             send(
               { action: "editTodo", id: todo.id, field: "due", value: day },
               (b) => ({
@@ -6971,6 +6971,10 @@ export default function BoardApp({
       } | null;
       if (!json?.ok)
         setError(json?.error ?? "That didn't save to Notion — reloading.");
+      if (reload.current) clearTimeout(reload.current);
+      reload.current = setTimeout(() => void load(), 800);
+    }).catch(() => {
+      setError("That didn't save to Notion — reloading.");
       if (reload.current) clearTimeout(reload.current);
       reload.current = setTimeout(() => void load(), 800);
     });
