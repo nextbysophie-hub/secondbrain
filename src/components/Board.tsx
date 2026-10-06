@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import type {
@@ -3913,10 +3914,8 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div
-              className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3"
-              style={{
-                gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`,
-              }}
+              className="grid gap-2.5 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]"
+              style={{ "--cols": columns.length } as CSSProperties}
             >
               {columns.map((c) => (
                 <PlanDay key={c[0]} board={board} send={send} days={c} />
