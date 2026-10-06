@@ -13,15 +13,23 @@ async function notion<T>(
   endpoint: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(`${API}${endpoint}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Notion-Version": NOTION_VERSION,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let res: Response;
+  // Notion allows ~3 requests a second; when it says slow down, wait the
+  // time it asks for and go again instead of failing the whole click.
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(`${API}${endpoint}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+    if (res.status !== 429 || attempt >= 4) break;
+    const after = Number(res.headers.get("retry-after")) || 1;
+    await new Promise((r) => setTimeout(r, Math.min(after, 5) * 1000 + 200));
+  }
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     throw {
@@ -34,6 +42,62 @@ async function notion<T>(
     };
   }
   return body as T;
+}
+
+function parseProgress(s: string): Record<string, number> {
+  try {
+    const v = JSON.parse(s || "{}") as unknown;
+    if (!v || typeof v !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>).filter(
+        (e): e is [string, number] => typeof e[1] === "number",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** To-dos that carry their own checklist on the page: a flight day and the
+ *  like. */
+export const SPECIAL_RE = /✈|flight\s*day/i;
+
+type ToDoBlock = {
+  id: string;
+  type: string;
+  to_do?: { rich_text: { plain_text?: string }[]; checked: boolean };
+};
+
+async function readChecks(token: string, pageId: string): Promise<Check[]> {
+  const res = await notion<{ results: ToDoBlock[] }>(
+    token,
+    `/blocks/${pageId}/children?page_size=100`,
+  );
+  return res.results
+    .filter((b) => b.type === "to_do" && b.to_do)
+    .map((b) => ({
+      id: b.id,
+      text: (b.to_do as NonNullable<ToDoBlock["to_do"]>).rich_text
+        .map((t) => t.plain_text ?? "")
+        .join(""),
+      done: (b.to_do as NonNullable<ToDoBlock["to_do"]>).checked,
+    }));
+}
+
+/** Remembers slow, rarely-changing answers (schemas, database ids) for a
+ *  while so each click costs one or two Notion calls instead of forty. */
+export function memo<T>(ttlMs: number) {
+  const cache = new Map<string, { at: number; value: Promise<T> }>();
+  return (key: string, make: () => Promise<T>): Promise<T> => {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+    const value = make().catch((e) => {
+      cache.delete(key);
+      throw e;
+    });
+    cache.set(key, { at: Date.now(), value });
+    return value;
+  };
 }
 
 /* ------------------------------------------------------------------ shapes */
@@ -104,6 +168,21 @@ export type Reminder = {
   done: boolean;
   notes: string;
   url: string;
+};
+
+/** Something a mail-reading bot found in the inbox and wrote to its own
+ *  Notion table. The dashboard never creates these; it only surfaces them for
+ *  the day and lets them be dealt with, dated, or turned into a real task. */
+export type EmailItem = {
+  id: string;
+  title: string;
+  date: string | null;
+  done: boolean;
+  notes: string;
+  link: string | null;
+  from: string | null;
+  url: string;
+  created: string;
 };
 
 export type Habit = {
@@ -196,14 +275,35 @@ export type DealMap = {
   waiting: string | null;
 };
 
+/** One line of a to-do page's own checklist (Notion to-do blocks). */
+export type Check = { id: string; text: string; done: boolean };
+
+/** One thing the week is for. `perDay` > 0 makes it a daily count (post 3
+ *  videos a day) ticked per day in `progress`; otherwise one tick finishes it.
+ *  Sub-goals are to-do blocks on its page, read into `Board.checks`. */
+export type WeekGoal = {
+  id: string;
+  title: string;
+  /** Monday of the week it belongs to. */
+  week: string;
+  perDay: number;
+  done: boolean;
+  progress: Record<string, number>;
+  url: string;
+};
+
 export type Board = {
+  weekGoals: WeekGoal[];
   todos: Todo[];
+  /** Checklists living inside special to-dos (a flight day), by to-do id. */
+  checks: Record<string, Check[]>;
   agent: AgentTask[];
   ideas: Idea[];
   habits: Habit[];
   ticks: HabitTick[];
   goals: Goal[];
   reminders: Reminder[];
+  emails: EmailItem[];
   deals: Deal[];
   dealStages: string[];
   /** Money is nobody else's business: true when the passcode hasn't been
@@ -223,6 +323,9 @@ export type BoardDbs = {
   agent: string;
   reminders: string;
   deals: string;
+  weekGoals: string;
+  /** The bot's own table, found by name and never created here. */
+  emails: string | null;
 };
 
 export const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
@@ -251,6 +354,7 @@ type Prop = {
   status?: { name?: string } | null;
   multi_select?: { name?: string }[];
   url?: string | null;
+  email?: string | null;
   number?: number | null;
   formula?: { number?: number | null };
   relation?: { id: string }[];
@@ -793,13 +897,14 @@ const GOAL_DB = "Goals";
 const AGENT_DB = "Assistant Tasks";
 const DEAL_DB = "Brand Deals";
 const REMINDER_DB = "Reminders";
+const WEEKGOAL_DB = "Week Goals";
 const AGENT_DB_LEGACY = "Agent Tasks";
 
 export const AGENT_STATUSES = ["Queued", "Working", "Done", "Failed"];
 
 /** A tracker somebody named "\u{1F4B0} Brand Deals \u2014 Tracker" is still the brand deals
  *  table, so the deals side matches on the words rather than the exact name. */
-async function findDatabaseLike(
+export async function findDatabaseLike(
   token: string,
   query: string,
   match: RegExp,
@@ -955,6 +1060,8 @@ export async function ensureBoardDbs(
     foundAgent,
     foundReminders,
     foundDeals,
+    foundEmails,
+    foundWeekGoals,
   ] = await Promise.all([
     findDatabase(token, HABIT_DB),
     findDatabase(token, TICK_DB),
@@ -964,6 +1071,8 @@ export async function ensureBoardDbs(
     ),
     findDatabase(token, REMINDER_DB),
     findDatabaseLike(token, "brand deals", /brand\s*deals?/i),
+    findDatabaseLike(token, "grok bot tasks", /grok\s*bot/i),
+    findDatabase(token, WEEKGOAL_DB),
   ]);
   if (
     foundHabits &&
@@ -971,7 +1080,8 @@ export async function ensureBoardDbs(
     foundGoals &&
     foundAgent &&
     foundReminders &&
-    foundDeals
+    foundDeals &&
+    foundWeekGoals
   )
     return {
       content: contentDbId,
@@ -982,6 +1092,8 @@ export async function ensureBoardDbs(
       agent: foundAgent,
       reminders: foundReminders,
       deals: foundDeals,
+      emails: foundEmails,
+      weekGoals: foundWeekGoals,
     };
 
   const parent = await parentPageOf(token, [taskDbId, contentDbId]);
@@ -1058,6 +1170,16 @@ export async function ensureBoardDbs(
       Link: { url: {} },
       Notes: { rich_text: {} },
     }));
+  const weekGoals =
+    foundWeekGoals ??
+    existing(WEEKGOAL_DB) ??
+    (await createDatabase(token, parent, WEEKGOAL_DB, "\u{1F3C1}", {
+      Goal: { title: {} },
+      Week: { date: {} },
+      "Per day": { number: {} },
+      Done: { checkbox: {} },
+      Progress: { rich_text: {} },
+    }));
   return {
     content: contentDbId,
     task: taskDbId,
@@ -1067,7 +1189,132 @@ export async function ensureBoardDbs(
     agent,
     reminders,
     deals,
+    emails: foundEmails,
+    weekGoals,
   };
+}
+
+/* ------------------------------------------------------------ email items */
+
+type EmailMap = {
+  date: string | null;
+  done: { prop: string; kind: "checkbox" | "status"; doneName: string } | null;
+  notes: string | null;
+  link: string | null;
+  from: string | null;
+};
+
+/** The bot's table was made by hand (or by the bot), so columns are matched by
+ *  shape and name. A table with no way to mark a row handled gets a Done
+ *  checkbox added, since ticking is the whole point of showing it. */
+const emailMapMemo = memo<EmailMap>(10 * 60 * 1000);
+
+export function readEmailMap(token: string, dbId: string): Promise<EmailMap> {
+  return emailMapMemo(`${token.slice(-8)}:${dbId}`, () =>
+    loadEmailMap(token, dbId),
+  );
+}
+
+async function loadEmailMap(token: string, dbId: string): Promise<EmailMap> {
+  const db = await notion<{ properties: Record<string, SchemaProp> }>(
+    token,
+    `/databases/${dbId}`,
+  );
+  const props = Object.entries(db.properties).map(([name, p]) => ({
+    ...p,
+    name,
+  }));
+  const date =
+    pick(props, "date", /due|deadline|date|when|day/i) ?? pick(props, "date");
+  const checkbox =
+    pick(props, "checkbox", /done|complete|handled|dealt/i) ??
+    pick(props, "checkbox");
+  const status = props.find(
+    (p) =>
+      p.type === "status" && p.status?.options.some((o) => DONE_NAMES.test(o.name)),
+  );
+  let done: EmailMap["done"] = checkbox
+    ? { prop: checkbox.name, kind: "checkbox", doneName: "" }
+    : status
+      ? {
+          prop: status.name,
+          kind: "status",
+          doneName:
+            status.status?.options.find((o) => DONE_NAMES.test(o.name))?.name ??
+            "Done",
+        }
+      : null;
+  if (!done) {
+    await notion(token, `/databases/${dbId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties: { Done: { checkbox: {} } } }),
+    });
+    done = { prop: "Done", kind: "checkbox", doneName: "" };
+  }
+  const notes =
+    pick(props, "rich_text", /note|detail|summary|why|context|from|sender|subject/i) ??
+    pick(props, "rich_text");
+  const link = pick(props, "url", /link|email|mail|url/i) ?? pick(props, "url");
+  const from = props.find(
+    (p) =>
+      p.name !== notes?.name &&
+      (p.type === "rich_text" || p.type === "url" || p.type === "email") &&
+      /^(from|sender|who)$/i.test(p.name),
+  );
+  return {
+    date: date?.name ?? null,
+    done,
+    notes: notes?.name ?? null,
+    link: link?.name ?? null,
+    from: from?.name ?? null,
+  };
+}
+
+function emailDoneProps(map: EmailMap, done: boolean): object {
+  if (!map.done) return {};
+  return map.done.kind === "checkbox"
+    ? { [map.done.prop]: { checkbox: done } }
+    : { [map.done.prop]: { status: done ? { name: map.done.doneName } : null } };
+}
+
+async function readEmails(
+  token: string,
+  dbId: string | null,
+): Promise<EmailItem[]> {
+  if (!dbId) return [];
+  const map = await readEmailMap(token, dbId);
+  const rows = await query(
+    token,
+    dbId,
+    { page_size: 100, sorts: [{ timestamp: "created_time", direction: "descending" }] },
+    1,
+  );
+  const isDone = (r: Row) => {
+    if (!map.done) return false;
+    const p = r.properties[map.done.prop];
+    return map.done.kind === "checkbox"
+      ? (p?.checkbox ?? false)
+      : p?.status?.name === map.done.doneName;
+  };
+  return rows
+    .map((r) => ({
+      id: r.id,
+      title: titleOf(r),
+      date: map.date ? dateOf(r.properties[map.date]) : null,
+      done: isDone(r),
+      notes: map.notes ? textOf(r.properties[map.notes]) : "",
+      link: map.link ? (r.properties[map.link]?.url ?? null) : null,
+      from: map.from
+        ? (() => {
+            const p = r.properties[map.from];
+            const v = p?.url ?? p?.email ?? (p ? textOf(p) : "");
+            return v ? v.replace(/^mailto:/, "") : null;
+          })()
+        : null,
+      url: r.url,
+      created: (r.created_time ?? "").slice(0, 10),
+    }))
+    .filter((e) => e.title);
 }
 
 /* --------------------------------------------------------------- the reads */
@@ -1162,6 +1409,8 @@ export async function readBoard(
     reminderRows,
     dealRows,
     timedRows,
+    emails,
+    weekGoalRows,
   ] = await Promise.all([
     query(token, dbs.task, openFilter ? { filter: openFilter } : {}),
     query(token, dbs.content, {
@@ -1180,9 +1429,35 @@ export async function readBoard(
     query(token, dbs.reminders, { page_size: 100 }),
     query(token, dbs.deals, { page_size: 100 }),
     timedQuery,
+    readEmails(token, dbs.emails).catch(() => [] as EmailItem[]),
+    query(token, dbs.weekGoals, {
+      page_size: 60,
+      sorts: [{ timestamp: "created_time", direction: "ascending" }],
+    }),
   ]);
 
+  const special = [
+    ...todoRows.filter((r) => SPECIAL_RE.test(titleOf(r))),
+    ...weekGoalRows,
+  ];
+  const checkLists = await Promise.all(
+    special.map((r) => readChecks(token, r.id).catch(() => [] as Check[])),
+  );
+  const checks = Object.fromEntries(
+    special.map((r, i) => [r.id, checkLists[i]]),
+  ) as Record<string, Check[]>;
+
   return {
+    checks,
+    weekGoals: weekGoalRows.map((r) => ({
+      id: r.id,
+      title: titleOf(r),
+      week: dateOf(r.properties.Week) ?? "",
+      perDay: r.properties["Per day"]?.number ?? 0,
+      done: r.properties.Done?.checkbox ?? false,
+      progress: parseProgress(textOf(r.properties.Progress)),
+      url: r.url,
+    })),
     categories: map.categories,
     timings: map.minutes
       ? timedRows
@@ -1256,6 +1531,7 @@ export async function readBoard(
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
     })),
+    emails,
     reminders: reminderRows.map((r) => ({
       id: r.id,
       title: titleOf(r),
@@ -1403,6 +1679,26 @@ export type Action =
     }
   | { action: "toggleReminder"; id: string; done: boolean }
   | { action: "deleteReminder"; id: string }
+  | { action: "emailDone"; id: string; done: boolean }
+  | { action: "emailDate"; id: string; date: string | null }
+  | { action: "addWeekGoal"; title: string; week: string; perDay: number }
+  | { action: "weekGoalDone"; id: string; done: boolean }
+  | {
+      action: "weekGoalProgress";
+      id: string;
+      progress: Record<string, number>;
+    }
+  | { action: "deleteWeekGoal"; id: string }
+  | { action: "tickCheck"; id: string; done: boolean }
+  | { action: "addCheck"; page: string; text: string }
+  | {
+      action: "emailToTodo";
+      id: string;
+      title: string;
+      due: string | null;
+      plan: string | null;
+      slot: "deep" | "quick" | null;
+    }
   | {
       action: "addDeal";
       brand: string;
@@ -1767,6 +2063,88 @@ export async function applyAction(
     case "toggleReminder":
       await updatePage(token, body.id, { Done: { checkbox: body.done } });
       return;
+    case "emailDone": {
+      if (!dbs.emails) return;
+      const em = await readEmailMap(token, dbs.emails);
+      await updatePage(token, body.id, emailDoneProps(em, body.done));
+      return;
+    }
+    case "emailDate": {
+      if (!dbs.emails) return;
+      const em = await readEmailMap(token, dbs.emails);
+      if (em.date)
+        await updatePage(token, body.id, { [em.date]: dateProp(body.date) });
+      return;
+    }
+    case "addWeekGoal":
+      await createPage(token, dbs.weekGoals, {
+        Goal: title(body.title),
+        Week: dateProp(body.week),
+        "Per day": { number: body.perDay > 0 ? body.perDay : null },
+        Done: { checkbox: false },
+        Progress: richText("{}"),
+      });
+      return;
+    case "weekGoalDone":
+      await updatePage(token, body.id, { Done: { checkbox: body.done } });
+      return;
+    case "weekGoalProgress":
+      await updatePage(token, body.id, {
+        Progress: richText(JSON.stringify(body.progress)),
+      });
+      return;
+    case "deleteWeekGoal":
+      await notion(token, `/pages/${body.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: true }),
+      });
+      return;
+    case "tickCheck":
+      await notion(token, `/blocks/${body.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ to_do: { checked: body.done } }),
+      });
+      return;
+    case "addCheck":
+      await notion(token, `/blocks/${body.page}/children`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          children: [
+            {
+              object: "block",
+              type: "to_do",
+              to_do: {
+                rich_text: [{ type: "text", text: { content: body.text } }],
+                checked: false,
+              },
+            },
+          ],
+        }),
+      });
+      return;
+    case "emailToTodo": {
+      await createPage(
+        token,
+        dbs.task,
+        taskProps(map, {
+          title: body.title,
+          done: false,
+          due: body.due ?? body.plan ?? null,
+          plan: body.plan ?? null,
+          kind: body.slot === "deep" ? "deadline" : "want",
+          slot: body.slot ?? null,
+          goal: null,
+          deal: null,
+          category: null,
+          source: "Email",
+        }),
+      );
+      if (dbs.emails) {
+        const em = await readEmailMap(token, dbs.emails);
+        await updatePage(token, body.id, emailDoneProps(em, true));
+      }
+      return;
+    }
     case "addDeal":
       await createPage(token, dbs.deals, {
         ...dealProps(deals, "brand", body.brand),

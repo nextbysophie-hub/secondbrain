@@ -11,6 +11,8 @@ import {
   ensureIdeaNotes,
   ensureKindColumn,
   ensurePlanColumn,
+  findDatabaseLike,
+  memo,
   readBoard,
   readDealMap,
   readTaskMap,
@@ -69,6 +71,29 @@ async function taskMap(
   return ensureDealLink(token, taskDbId, dealsDbId, linked);
 }
 
+type Setup = Awaited<ReturnType<typeof loadSetup>>;
+const setupMemo = memo<Setup>(10 * 60 * 1000);
+
+async function loadSetup(token: string, ideaDbId: string, taskDbId: string) {
+  const dbs = await ensureBoardDbs(token, ideaDbId, taskDbId);
+  const map = await taskMap(token, dbs.task, dbs.goals, dbs.content, dbs.deals);
+  const dealMap = await ensureDealMoney(token, dbs.deals, await readDealMap(token, dbs.deals));
+  return { dbs, map, dealMap };
+}
+
+/** Database ids and column maps only change when someone edits the Notion
+ *  schema, so they are remembered for a few minutes per workspace. */
+async function setup(token: string, ideaDbId: string, taskDbId: string) {
+  const found = await setupMemo(`${token.slice(-10)}:${ideaDbId}:${taskDbId}`, () =>
+    loadSetup(token, ideaDbId, taskDbId),
+  );
+  // The email database may be shared after the rest was remembered; keep
+  // looking for it on every load until it turns up.
+  if (found.dbs.emails) return found;
+  const emails = await findDatabaseLike(token, "grok bot tasks", /grok\s*bot/i).catch(() => null);
+  return emails ? { ...found, dbs: { ...found.dbs, emails } } : found;
+}
+
 /** Everything the dashboard renders, in one round trip. */
 export async function GET(req: Request) {
   const key = new URL(req.url).searchParams.get("key")?.trim() || undefined;
@@ -85,13 +110,7 @@ export async function GET(req: Request) {
   const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;
 
   try {
-    const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
-    const dealMap = await ensureDealMoney(
-      creds.token,
-      dbs.deals,
-      await readDealMap(creds.token, dbs.deals),
-    );
+    const { dbs, map, dealMap } = await setup(creds.token, ideaDbId, taskDbId);
     const board = await readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10));
     if (!dealsUnlocked(req))
       return NextResponse.json({ ok: true, ...board, deals: [], dealsLocked: true, dbs });
@@ -116,13 +135,7 @@ export async function POST(req: Request) {
   const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;
 
   try {
-    const dbs = await ensureBoardDbs(creds.token, ideaDbId, taskDbId);
-    const map = await taskMap(creds.token, dbs.task, dbs.goals, dbs.content, dbs.deals);
-    const dealMap = await ensureDealMoney(
-      creds.token,
-      dbs.deals,
-      await readDealMap(creds.token, dbs.deals),
-    );
+    const { dbs, map, dealMap } = await setup(creds.token, ideaDbId, taskDbId);
     await applyAction(creds.token, dbs, map, dealMap, body);
     return NextResponse.json({ ok: true });
   } catch (e) {

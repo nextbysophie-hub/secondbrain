@@ -29,7 +29,7 @@ const ticks = habits.flatMap((h, hi) =>
 
 export function demoBoard() {
   const board: Board = {
-    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", reminders: "demo", deals: "demo" },
+    dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", reminders: "demo", deals: "demo", emails: null, weekGoals: "demo" },
     categories: ["Work", "Personal", "Health", "Money", "Other"],
     todos: [
       { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, deal: null, fixed: false, every: null, url: "#" },
@@ -75,6 +75,12 @@ export function demoBoard() {
       { id: "g4", name: "Build a real content bank", area: "Content", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: true },
       { id: "g5", name: "Gym 4× a week", area: "Health", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
       { id: "g6", name: "Weekend off the laptop", area: "Life", period: `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`, horizon: "quarter" as const, parent: null, done: false },
+    ],
+    checks: {},
+    weekGoals: [],
+    emails: [
+      { id: "e1", title: "Reply to Fish Audio about the usage terms", date: iso(0), done: false, notes: "They asked for an answer by Friday.", link: null, from: "Fish Audio", url: "#", created: iso(0) },
+      { id: "e2", title: "Send the invoice Grok flagged as unpaid", date: null, done: false, notes: "", link: null, from: "Fish Audio", url: "#", created: iso(0) },
     ],
     reminders: [
       { id: "r1", title: "Check the Crate & Barrel refund landed", due: iso(5), done: false, notes: "Returned the chairs — they said 5 business days.", url: "#" },
