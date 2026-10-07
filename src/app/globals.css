@@ -408,6 +408,8 @@ select {
 .board-theme .btn:hover { border-color: var(--muted); }
 .board-theme .btn-accent { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
 .board-theme .btn-accent:hover { border-color: var(--accent); filter: brightness(1.05); }
+.board-theme .btn-ok { background: var(--night-ok-bg); border-color: var(--night-ok-line); color: var(--night-ok-ink); font-weight: 500; }
+.board-theme .btn-ok:hover { border-color: var(--night-ok); }
 .board-theme .btn-bad { background: var(--bad); border-color: var(--bad); color: var(--accent-ink); font-weight: 500; }
 .board-theme .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .board-theme .btn-ghost:hover { color: var(--ink); border-color: transparent; }

@@ -6257,6 +6257,16 @@ function EmailItems({
                 >
                   {e.date ? "+1 day" : "Tomorrow"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    send({ action: "emailDone", id: e.id, done: true }, patch(e.id, { done: true }))
+                  }
+                  title="Mark as done in the Grok database"
+                  className="btn btn-ok"
+                >
+                  ✓ Done
+                </button>
               </div>
               <div className="mt-1.5 flex items-center justify-between pl-[34px] text-[12px]">
                 <label
