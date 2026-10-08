@@ -5,13 +5,16 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import type {
   Action,
   AgentTask,
   Board,
+  Check,
   Deal,
+  EmailItem,
   Every,
   Goal,
   Habit,
@@ -20,6 +23,7 @@ import type {
   Reminder,
   Timing,
   Todo,
+  WeekGoal,
 } from "@/lib/board";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
@@ -27,21 +31,12 @@ const AREAS = ["Business", "Content", "Health", "Life"];
 const CADENCES = ["Daily", "Weekly", "Monthly"];
 
 const NONE = "Uncategorised";
-const PALETTE = [
-  "#3b6cf6",
-  "#8b5cf6",
-  "#10b981",
-  "#f59e0b",
-  "#ec4899",
-  "#0ea5e9",
-  "#84cc16",
-  "#f43f5e",
-];
+const PALETTE = Array.from({ length: 8 }, (_, i) => `var(--cat-${i})`);
 
 /** Categories come from whichever Notion column the to-dos use, so the colours
  *  are derived from the name rather than a fixed list. */
 function catColour(name: string | null): string {
-  if (!name || name === NONE) return "#9ca3af";
+  if (!name || name === NONE) return "var(--cat-none)";
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return PALETTE[hash % PALETTE.length];
@@ -144,6 +139,18 @@ const CHECK_RE = /^check on:\s*/i;
 const isCheck = (t: Todo) => CHECK_RE.test(t.title);
 const checkLabel = (t: Todo) => t.title.replace(CHECK_RE, "");
 const checkDay = (t: Todo) => t.plan ?? t.due;
+/** "5 days" — how long something has been waiting on somebody else. */
+const daysAgo = (day: string) => {
+  const n = Math.max(
+    1,
+    Math.round(
+      (new Date(`${TODAY}T12:00:00`).getTime() -
+        new Date(`${day}T12:00:00`).getTime()) /
+        86400000,
+    ),
+  );
+  return `${n} day${n === 1 ? "" : "s"}`;
+};
 
 const categoriesOf = (board: Board) =>
   board.categories?.length ? board.categories : CATEGORIES;
@@ -278,16 +285,17 @@ function Pills({
   onChange: (id: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="seg">
       {items.map((i) => (
         <button
           key={i.id}
           type="button"
+          aria-pressed={value === i.id}
           onClick={() => onChange(i.id)}
-          className={`rounded-full border px-3 py-1 text-[12px] transition ${
+          className={`!px-3 !py-1 ${
             value === i.id
-              ? "border-ink bg-ink text-brand-cream"
-              : "border-line bg-panel text-muted hover:border-ink/30 hover:text-ink"
+              ? "!bg-ink !text-accent-ink"
+              : ""
           }`}
         >
           {i.label}
@@ -836,14 +844,14 @@ function TraceLine({
   const ghost = said ? "" : onTrack ? line.slice(text.length) : "";
 
   return (
-    <div className="flex items-baseline gap-3 border-b border-line/60 py-3 last:border-none">
+    <div className="flex items-baseline gap-3 border-b border-line/60 py-2.5 last:border-none">
       <span
         className={`shrink-0 text-[13px] ${said ? "text-accent-2" : "text-muted/40"}`}
       >
         {said ? "✓" : "›"}
       </span>
       <div className="relative min-w-0 flex-1">
-        <p className="serif pointer-events-none whitespace-pre-wrap text-[19px] leading-snug">
+        <p className="serif pointer-events-none whitespace-pre-wrap text-[17px] italic leading-snug">
           <span className={onTrack ? "" : "text-bad"}>{typed}</span>
           <span className="text-muted/35">{ghost}</span>
         </p>
@@ -859,7 +867,7 @@ function TraceLine({
             spellCheck={false}
             autoComplete="off"
             aria-label={`Write out: ${line}`}
-            className="serif absolute inset-0 w-full resize-none bg-transparent text-[19px] leading-snug text-transparent caret-ink outline-none"
+            className="serif absolute inset-0 w-full resize-none bg-transparent text-[17px] italic leading-snug text-transparent caret-ink outline-none"
           />
         )}
       </div>
@@ -873,6 +881,7 @@ function Affirmations({ board, send }: { board: Board; send: Send }) {
   const lines = affirmationsOf(board);
   const [goal, setGoal] = useState("");
   const [thanks, setThanks] = useState("");
+  const [writing, setWriting] = useState(false);
   const streak = affirmationStreak(board);
 
   const keep = (name: string) =>
@@ -937,22 +946,42 @@ function Affirmations({ board, send }: { board: Board; send: Send }) {
     );
 
   return (
-    <div className="day-card mb-5 p-6 sm:p-7">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-          {saidAll(board, TODAY) ? "Written today" : "Write them out"}
-        </p>
-        <span className="shrink-0 text-[12px] text-muted">
-          {streak
-            ? `${streak} day${streak === 1 ? "" : "s"} running`
-            : "start it today"}
+    <div className="card card-write px-4 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge badge-bad">♡</span>
+          Write them out
+        </h3>
+        <span className="shrink-0 text-[11px] text-muted">
+          {saidAll(board, TODAY)
+            ? streak > 1
+              ? `Done · ${streak} days`
+              : "Done today"
+            : "Not done today"}
         </span>
       </div>
-      <div className="mt-1">
-        {lines.map((h) => (
-          <TraceLine key={h.id} board={board} send={send} habit={h} />
-        ))}
-      </div>
+      {writing || saidAll(board, TODAY) ? (
+        <div className="mt-1">
+          {lines.map((h) => (
+            <TraceLine key={h.id} board={board} send={send} habit={h} />
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="serif mt-3 space-y-0.5 text-[17px] italic leading-snug">
+            {lines.map((h) => (
+              <p key={h.id}>{h.name}</p>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setWriting(true)}
+            className="btn mt-3"
+          >
+            ✎ Write today&rsquo;s
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -1193,6 +1222,31 @@ function rescheduleLate(late: Todo[], send: Send) {
   }
 }
 
+/** Last week's leftovers, back on the pile in one go: the day they were
+ *  promised to is dropped and a deadline already missed moves to the coming
+ *  Monday. A deadline still ahead is left alone. */
+function sweepWeek(leftover: Todo[], send: Send) {
+  const monday = comingMonday();
+  for (const todo of leftover) {
+    if (isFixed(todo)) continue;
+    const patch: Partial<Todo> = { slot: null, plan: null };
+    if (todo.due && todo.due < TODAY) patch.due = monday;
+    for (const [field, value] of Object.entries(patch) as [
+      "slot" | "plan" | "due",
+      string | null,
+    ][])
+      send(
+        { action: "editTodo", id: todo.id, field, value },
+        (b) => ({
+          ...b,
+          todos: b.todos.map((t) =>
+            t.id === todo.id ? { ...t, [field]: value } : t,
+          ),
+        }),
+      );
+  }
+}
+
 /** Pulling an existing task into today: it gets the slot and the day. */
 function pick(todo: Todo, slot: "deep" | "quick", send: Send, day: string) {
   send(
@@ -1310,68 +1364,73 @@ function Suggested({
   free: number;
 }) {
   const [hidden, setHidden] = useState(false);
-  const picks = suggestFor(board, day).slice(0, room);
-  if (hidden || !picks.length) return null;
-
+  const [skip, setSkip] = useState(0);
+  const all = suggestFor(board, day);
+  if (hidden || !all.length) return null;
+  const p = all[skip % all.length];
   const cost = (t: Todo) => t.minutes ?? estimateFor(board.timings, t.title);
-  let running = 0;
-  const fits = picks.filter((p) => {
-    const m = cost(p.todo) ?? 0;
-    if (free > 0 && running + m > free && running > 0) return false;
-    running += m;
-    return true;
-  });
+  const m = cost(p.todo);
+  const tooLong = free > 0 && m !== null && m > free;
+  const ordinal = ["First", "Second", "Third"][DEEP_CAP - room] ?? "Next";
 
   return (
-    <div className="mt-4 rounded-2xl border border-line bg-panel-2 p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h4 className="text-[12px] font-semibold">
-          Suggested from your Notion
-        </h4>
-        <div className="flex shrink-0 items-center gap-3">
-          {fits.length > 1 ? (
+    <div className="mt-2 rounded-xl border border-dashed border-line-2 bg-panel-2/60 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
+        <span className="shrink-0" title="Mark it done in Notion">
+          <Tick
+            on={false}
+            ring
+            onChange={() =>
+              send({ action: "toggleTodo", id: p.todo.id, done: true }, (b) => ({
+                ...b,
+                todos: b.todos.map((t) =>
+                  t.id === p.todo.id ? { ...t, done: true } : t,
+                ),
+              }))
+            }
+          />
+        </span>
+        <div className="min-w-[10rem] flex-1">
+          <p className="eyebrow text-accent/80">
+            {ordinal} slot · suggested from Notion
+          </p>
+          <p className="flex items-baseline gap-2">
+            <span className="serif truncate text-[18px]">{p.todo.title}</span>
+            <span
+              className={`shrink-0 text-[11px] ${p.why.includes("late") ? "text-bad" : "text-muted"}`}
+            >
+              {p.why}
+              {m ? ` · ~${spell(m)}` : ""}
+              {tooLong ? " · more than you have" : ""}
+            </span>
+          </p>
+        </div>
+        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
+          {all.length > 1 ? (
             <button
               type="button"
-              onClick={() =>
-                fits.forEach((p) => pick(p.todo, "deep", send, day))
-              }
-              className="rounded-full border border-line px-2.5 py-1 text-[11px] text-muted transition hover:text-ink"
+              onClick={() => setSkip(skip + 1)}
+              className="btn btn-ghost"
             >
-              take these {fits.length}
+              Pick another
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => setHidden(true)}
+              className="btn btn-ghost"
+            >
+              Not now
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setHidden(true)}
-            className="text-[11px] text-muted hover:text-ink"
+            onClick={() => pick(p.todo, "deep", send, day)}
+            className="btn btn-accent"
           >
-            not now
+            Add to today
           </button>
         </div>
-      </div>
-      <div className="mt-2">
-        {picks.map((p) => {
-          const m = cost(p.todo);
-          return (
-            <button
-              key={p.todo.id}
-              type="button"
-              onClick={() => pick(p.todo, "deep", send, day)}
-              className="flex w-full items-center gap-3 border-b border-line/60 py-2 text-left last:border-none"
-            >
-              <span className="shrink-0 text-[13px] text-muted">+</span>
-              <span className="min-w-0 flex-1 truncate text-[14px]">
-                {p.todo.title}
-              </span>
-              <span
-                className={`shrink-0 text-[11px] ${p.why.includes("late") ? "text-bad" : "text-muted"}`}
-              >
-                {p.why}
-                {m ? ` · ~${spell(m)}` : ""}
-              </span>
-            </button>
-          );
-        })}
       </div>
     </div>
   );
@@ -1513,12 +1572,12 @@ function EmptySlot({
 
   return (
     <div
-      className={`border-b border-line/70 py-3 last:border-none ${dim ? "opacity-60" : ""}`}
+      className={`group border-b border-line/60 py-3 last:border-none ${dim ? "opacity-70" : ""}`}
     >
       <div className="flex items-center gap-4">
         <span
-          className={`shrink-0 rounded-full border border-line ${
-            slot === "deep" ? "h-6 w-6 rounded-full" : "h-5 w-5 rounded-md"
+          className={`shrink-0 border border-dashed border-line-2 ${
+            slot === "deep" ? "h-6 w-6 rounded-full" : "h-[18px] w-[18px] rounded-[6px]"
           }`}
         />
         <input
@@ -1526,14 +1585,14 @@ function EmptySlot({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
           placeholder={placeholder}
-          className={`min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted/70 ${
+          className={`min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint ${
             slot === "deep" ? "serif text-[20px]" : "text-[15px]"
           }`}
         />
         <button
           type="button"
           onClick={() => setBrowsing(!browsing)}
-          className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
+          className="btn btn-ghost row-actions shrink-0"
         >
           pick one
         </button>
@@ -1586,7 +1645,7 @@ function DeepRow({
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
   return (
-    <div className="border-b border-line/70 py-3 last:border-none">
+    <div className="group border-b border-line/60 py-3 last:border-none">
       <div className="flex items-center gap-4">
         <button
           type="button"
@@ -1604,17 +1663,18 @@ function DeepRow({
           }
           className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[12px] transition ${
             todo.done
-              ? "border-ink bg-ink text-brand-cream"
-              : "border-line hover:border-ink/40"
+              ? "border-accent bg-accent text-accent-ink"
+              : "border-line-2 hover:border-muted"
           }`}
         >
           {todo.done ? "✓" : ""}
         </button>
         <span
-          className={`serif min-w-0 flex-1 truncate text-[20px] ${todo.done ? "text-muted line-through" : ""}`}
+          className={`serif min-w-0 flex-1 truncate text-[22px] ${todo.done ? "text-muted line-through" : ""}`}
         >
           {todo.title}
         </span>
+        <span className="row-actions flex shrink-0 items-center gap-3">
         {estimate !== null ? (
           <span
             title={
@@ -1637,6 +1697,7 @@ function DeepRow({
         >
           park it
         </button>
+        </span>
       </div>
     </div>
   );
@@ -1656,7 +1717,7 @@ function QuickRow({
   day: string;
 }) {
   return (
-    <div className="flex items-center gap-4 border-b border-line/70 py-2.5 last:border-none">
+    <div className="group flex items-center gap-4 border-b border-line/60 py-2.5 last:border-none">
       <Box
         on={todo.done}
         onChange={(done) =>
@@ -1672,21 +1733,25 @@ function QuickRow({
         {todo.title}
       </span>
       {locked ? (
-        <span className="shrink-0 text-[11px] text-muted">every day</span>
+        <span className="shrink-0 rounded-full bg-accent-2/15 px-2 py-0.5 text-[11px] text-accent-2">
+          ↻ Daily
+        </span>
       ) : null}
-      <Timer todo={todo} send={send} />
-      {locked ? null : (
-        <ChaseIt todo={todo} board={board} send={send} day={day} />
-      )}
-      {locked ? null : (
-        <button
-          type="button"
-          onClick={() => park(todo, send, day)}
-          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
-        >
-          park it
-        </button>
-      )}
+      <span className="row-actions flex shrink-0 items-center gap-3">
+        <Timer todo={todo} send={send} />
+        {locked ? null : (
+          <ChaseIt todo={todo} board={board} send={send} day={day} />
+        )}
+        {locked ? null : (
+          <button
+            type="button"
+            onClick={() => park(todo, send, day)}
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            park it
+          </button>
+        )}
+      </span>
     </div>
   );
 }
@@ -1753,7 +1818,7 @@ function Arrow({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="rounded-full border border-line px-2.5 py-0.5 text-[12px] text-muted transition hover:text-ink"
+      className="btn min-w-[30px] text-muted hover:text-ink"
     >
       {children}
     </button>
@@ -1871,7 +1936,7 @@ function CheckPane({
   const row = (t: Todo, late?: boolean) => (
     <div
       key={t.id}
-      className="flex items-center gap-3 border-b border-line/60 py-2 last:border-none"
+      className="group flex items-center gap-3 border-b border-line/60 py-2 last:border-none"
     >
       <Box on={t.done} onChange={(done) => tick(t, done)} />
       <span
@@ -1880,18 +1945,18 @@ function CheckPane({
         }`}
       >
         {checkLabel(t)}
-        {late ? (
-          <span className="ml-1.5 text-[11px] text-bad">
-            {pretty(checkDay(t))}
-          </span>
-        ) : null}
       </span>
+      {late ? (
+        <span className="pill-late shrink-0">
+          {daysAgo(checkDay(t) as string)}
+        </span>
+      ) : null}
       {t.done ? null : (
         <button
           type="button"
           aria-label="Check tomorrow instead"
           onClick={() => push(t)}
-          className="shrink-0 text-[11px] text-muted transition hover:text-ink"
+          className="row-actions shrink-0 text-[11px] text-muted transition hover:text-ink"
         >
           +1d
         </button>
@@ -1900,23 +1965,20 @@ function CheckPane({
   );
 
   return (
-    <aside className="day-card p-6">
-      <h3 className="text-[13px] font-semibold">Check on</h3>
-      <p className="mt-1 text-[12px] leading-snug text-muted">
-        Done on your side, not on theirs — did it land, did they sign, did they
-        reply.
-      </p>
+    <aside className="card px-4 py-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge badge-blue">⧗</span>
+          Waiting on others
+        </h3>
+        <span className="text-[11px] text-muted">Did it land? Did they reply?</span>
+      </div>
 
       {over.length ? (
-        <div className="mt-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-bad">
-            Still waiting
-          </p>
-          <div className="mt-1">{over.map((t) => row(t, true))}</div>
-        </div>
+        <div className="mt-2">{over.map((t) => row(t, true))}</div>
       ) : null}
 
-      <div className="mt-4">
+      <div className="mt-1">
         {due.length ? (
           due.map((t) => row(t))
         ) : over.length ? null : (
@@ -1934,8 +1996,8 @@ function CheckPane({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && add()}
-        placeholder="Something to check on…"
-        className="mt-4 w-full border-b border-line bg-transparent py-1.5 text-[13px] outline-none placeholder:text-muted/70 focus:border-ink/40"
+        placeholder="Add something to check on"
+        className="mt-3 w-full rounded-lg border border-line-2 bg-panel-2 px-3 py-2 text-[13px] outline-none placeholder:text-faint focus:border-muted"
       />
     </aside>
   );
@@ -2025,6 +2087,13 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     );
   });
 
+  const dashes = (n: number, cap: number, blue?: boolean) =>
+    Array.from({ length: cap }, (_, k) => (
+      <span
+        key={k}
+        className={`dash ${k < n ? (blue ? "dash-blue" : "dash-on") : ""}`}
+      />
+    ));
   const addEmails = () =>
     send(
       {
@@ -2041,123 +2110,122 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     );
 
   return (
-    <>
-      {day === TODAY ? <Affirmations board={board} send={send} /> : null}
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="day-card p-7 sm:p-10">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-                {dayStamp(day)}
-              </p>
-              <h2 className="serif mt-2 text-[30px] leading-tight sm:text-[34px]">
-                {dayQuestion(day)}
-              </h2>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <Arrow
-                label="Day before"
-                onClick={() => setDay(shiftDay(day, -1))}
-              >
-                ←
+    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <Arrow label="Day before" onClick={() => setDay(shiftDay(day, -1))}>
+                ‹
               </Arrow>
-              {day === TODAY ? null : (
-                <button
-                  type="button"
-                  onClick={() => setDay(TODAY)}
-                  className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:text-ink"
-                >
-                  today
-                </button>
-              )}
               <Arrow label="Day after" onClick={() => setDay(shiftDay(day, 1))}>
-                →
+                ›
               </Arrow>
+            </div>
+            <div className="min-w-0">
+              <h2 className="serif text-[28px] leading-none">
+                {dayStamp(day)}
+                {day === TODAY ? null : (
+                  <button
+                    type="button"
+                    onClick={() => setDay(TODAY)}
+                    className="btn btn-ghost ml-2 align-middle"
+                  >
+                    back to today
+                  </button>
+                )}
+              </h2>
+              <p className="mt-1 text-[12px] text-muted">{dayQuestion(day)}</p>
             </div>
           </div>
-
-          {nudge ? (
-            <button
-              type="button"
-              onClick={() => setDay(tomorrow)}
-              className="mt-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
-            >
-              <span className="text-[14px]">
-                Tomorrow is still empty. Pick its three while today is fresh.
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="btn flex items-center gap-2 cursor-text">
+              <span className="text-muted">◷</span>
+              <span>Hours free {day === TODAY ? "today" : "that day"}</span>
+              <input
+                value={hours}
+                onChange={(e) =>
+                  setAvailable(e.target.value.replace(/[^\d.]/g, ""))
+                }
+                placeholder="—"
+                inputMode="decimal"
+                className="w-8 border-l border-line-2 bg-transparent pl-2 text-center text-[12px] text-muted outline-none"
+              />
+            </label>
+            {calendar?.connected ? (
+              <span className="btn text-muted" title={calendar.error}>
+                {calendar.busy !== undefined
+                  ? calendar.busy > 0
+                    ? `${spell(calendar.busy)} booked`
+                    : "Calendar is clear"
+                  : "Calendar"}
               </span>
-              <span className="shrink-0 text-[13px] text-muted">choose →</span>
-            </button>
+            ) : (
+              <a className="btn" href={connectCalendarHref()}>
+                ▦ Pull from Google Calendar
+              </a>
+            )}
+          </div>
+        </div>
+
+        <WeekGoals board={board} send={send} day={day} />
+
+        {nudge ? (
+          <button
+            type="button"
+            onClick={() => setDay(tomorrow)}
+            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+          >
+            <span className="text-[14px]">
+              Tomorrow is still empty. Pick its three while today is fresh.
+            </span>
+            <span className="shrink-0 text-[13px] text-muted">choose →</span>
+          </button>
+        ) : null}
+
+        {locked.filter(isFlight).map((t) => (
+          <FlightDay
+            key={t.id}
+            todo={t}
+            checks={board.checks[t.id] ?? []}
+            send={send}
+          />
+        ))}
+
+        {locked.filter((t) => !isFlight(t)).length ? (
+          <MoneyDue
+            rows={locked.filter((t) => !isFlight(t))}
+            send={send}
+            day={day}
+          />
+        ) : null}
+
+        <DueReminders board={board} send={send} day={day} />
+
+        <section className="card card-deep px-5 py-4">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+              <span className="badge badge-accent">◎</span>
+              {day === TODAY ? "Today\u2019s three" : "The three"}
+              <span className="text-[11px] font-normal text-muted">Deep work</span>
+            </h3>
+            <span className="flex items-center gap-1" title={`${deep.filter((t) => !t.done).length}/3 taken`}>
+              {dashes(deep.length, DEEP_CAP)}
+            </span>
+          </div>
+
+          {load > 0 ? (
+            <p className={`mt-2 text-[12px] ${overloaded ? "text-bad" : "text-muted"}`}>
+              {overloaded
+                ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
+                : `Based on how long these took before, that's about ${spell(load)} of work.`}
+            </p>
           ) : null}
 
-          {locked.length ? (
-            <div className="mt-6">
-              <MoneyDue rows={locked} send={send} day={day} />
-            </div>
-          ) : null}
-
-          <DueReminders board={board} send={send} day={day} />
-
-          <section className="mt-9">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-[13px] font-semibold">
-                {day === TODAY ? "Today\u2019s three" : "The three"}
-              </h3>
-              <span className="text-[12px] text-muted">
-                {deep.filter((t) => !t.done).length}/3 taken
-              </span>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between gap-4 pb-1">
-              <span className="text-[15px]">
-                Hours available {day === TODAY ? "today" : "that day"}
-              </span>
-              <span className="flex items-baseline gap-1">
-                <input
-                  value={hours}
-                  onChange={(e) =>
-                    setAvailable(e.target.value.replace(/[^\d.]/g, ""))
-                  }
-                  placeholder="—"
-                  inputMode="decimal"
-                  className="w-14 border-b border-line bg-transparent py-1 text-right text-[15px] outline-none focus:border-ink/40"
-                />
-                <span className="text-[14px] text-muted">h</span>
-              </span>
-            </div>
-
-            {calendar ? (
-              <p className="text-[12px] text-muted">
-                {calendar.connected ? (
-                  calendar.busy !== undefined ? (
-                    calendar.busy > 0 ? (
-                      `Your calendar already has ${spell(calendar.busy)} booked in what's left of today.`
-                    ) : (
-                      "Nothing left in your calendar today."
-                    )
-                  ) : (
-                    calendar.error
-                  )
-                ) : (
-                  <a
-                    className="underline underline-offset-2 hover:text-ink"
-                    href={connectCalendarHref()}
-                  >
-                    {calendar.error ?? "Use my Google Calendar"}
-                  </a>
-                )}
-              </p>
-            ) : null}
-
-            {load > 0 ? (
-              <p
-                className={`mt-3 text-[13px] ${overloaded ? "text-bad" : "text-muted"}`}
-              >
-                {overloaded
-                  ? `Those three have cost about ${spell(load)} before — more than the ${spell(free)} you have. Park one.`
-                  : `Based on how long these took before, that's about ${spell(load)} of work.`}
-              </p>
-            ) : null}
-
+          <div className="mt-2">
+            {deep.map((t) => (
+              <DeepRow key={t.id} todo={t} board={board} send={send} day={day} />
+            ))}
             {cleared ? (
               <NextUp board={board} send={send} day={day} />
             ) : deep.length < DEEP_CAP ? (
@@ -2169,136 +2237,138 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
                 free={Math.max(0, free - load)}
               />
             ) : null}
-
-            <div className="mt-3">
-              {deep.map((t) => (
-                <DeepRow
-                  key={t.id}
-                  todo={t}
+            {Array.from(
+              { length: Math.max(0, DEEP_CAP - deep.length - (!cleared && deep.length < DEEP_CAP && suggestFor(board, day).length ? 1 : 0)) },
+              (_, i) => (
+                <EmptySlot
+                  key={`deep-${i}`}
                   board={board}
                   send={send}
+                  slot="deep"
                   day={day}
+                  dim={deep.length + i > 0}
+                  placeholder={
+                    DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"
+                  }
                 />
-              ))}
-              {Array.from(
-                { length: Math.max(0, DEEP_CAP - deep.length) },
-                (_, i) => (
-                  <EmptySlot
-                    key={`deep-${i}`}
-                    board={board}
-                    send={send}
-                    slot="deep"
-                    day={day}
-                    dim={deep.length + i > 0}
-                    placeholder={
-                      DEEP_PLACEHOLDERS[deep.length + i] ?? "Also matters today"
-                    }
-                  />
-                ),
-              )}
-            </div>
-          </section>
+              ),
+            )}
+          </div>
+        </section>
 
-          <section className="mt-10">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-[13px] font-semibold">Quick batch</h3>
-              <span className="text-[12px] text-muted">
-                three, and one of them is email
+        <section className="card card-quick px-5 py-4">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+              <span className="badge badge-blue">⚡</span>
+              Quick batch
+              <span className="text-[11px] font-normal text-accent-2/80">
+                Knock these out in one sitting
+              </span>
+            </h3>
+            <span className="flex items-center gap-1">
+              {dashes(quick.length, QUICK_CAP, true)}
+            </span>
+          </div>
+          <div className="mt-2">
+            {emails ? (
+              <QuickRow todo={emails} board={board} send={send} locked day={day} />
+            ) : (
+              <button
+                type="button"
+                onClick={addEmails}
+                className="group flex w-full items-center gap-4 border-b border-line/60 py-2.5 text-left"
+              >
+                <span className="h-[18px] w-[18px] shrink-0 rounded-[6px] border border-dashed border-line-2" />
+                <span className="min-w-0 flex-1 text-[15px] text-muted">
+                  Go through emails
+                </span>
+                <span className="row-actions shrink-0 text-[11px] text-muted">
+                  tap to take it on
+                </span>
+              </button>
+            )}
+            {otherQuick.map((t) => (
+              <QuickRow key={t.id} todo={t} board={board} send={send} day={day} />
+            ))}
+            {Array.from(
+              { length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) },
+              (_, i) => (
+                <EmptySlot
+                  key={`quick-${i}`}
+                  board={board}
+                  send={send}
+                  slot="quick"
+                  day={day}
+                  placeholder="Quick thing to clear"
+                />
+              ),
+            )}
+          </div>
+        </section>
+
+        {dailyHabits.length ? (
+          <section className="card card-habits px-5 py-4">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+                <span className="badge badge-ok">⌁</span>
+                Habits
+              </h3>
+              <span className="text-[11px] text-muted">
+                {dailyHabits.filter((h) => doneToday.has(h.id)).length} of{" "}
+                {dailyHabits.length} today
               </span>
             </div>
-            <div className="mt-3">
-              {emails ? (
-                <QuickRow
-                  todo={emails}
-                  board={board}
-                  send={send}
-                  locked
-                  day={day}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={addEmails}
-                  className="flex w-full items-center gap-4 border-b border-line/70 py-2.5 text-left"
-                >
-                  <span className="h-5 w-5 shrink-0 rounded-md border border-line" />
-                  <span className="min-w-0 flex-1 text-[15px] text-muted">
-                    Go through emails
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted">
-                    tap to take it on
-                  </span>
-                </button>
-              )}
-              {otherQuick.map((t) => (
-                <QuickRow
-                  key={t.id}
-                  todo={t}
-                  board={board}
-                  send={send}
-                  day={day}
-                />
-              ))}
-              {Array.from(
-                { length: Math.max(0, QUICK_CAP - 1 - otherQuick.length) },
-                (_, i) => (
-                  <EmptySlot
-                    key={`quick-${i}`}
-                    board={board}
-                    send={send}
-                    slot="quick"
-                    day={day}
-                    placeholder="Quick thing to clear"
-                  />
-                ),
-              )}
-            </div>
-          </section>
-
-          {dailyHabits.length ? (
-            <section className="mt-10">
-              <h3 className="text-[13px] font-semibold">Habits</h3>
-              <div className="mt-4 flex flex-wrap gap-6">
-                {dailyHabits.map((h) => {
-                  const on = doneToday.has(h.id);
-                  const streak = streakOf(board.ticks, h.id, day);
-                  const best = bestStreak(board.ticks, h.id);
-                  return (
-                    <button
-                      key={h.id}
-                      type="button"
-                      onClick={() => tickHabit(board, send, h, day, !on)}
-                      className="w-20"
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {dailyHabits.map((h) => {
+                const on = doneToday.has(h.id);
+                const streak = streakOf(board.ticks, h.id, day);
+                return (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => tickHabit(board, send, h, day, !on)}
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                      on
+                        ? "border-ok/50 bg-ok/10"
+                        : "border-line-2 bg-panel/60 hover:border-muted"
+                    }`}
+                  >
+                    <span
+                      className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[12px] ${
+                        on
+                          ? "border-ok bg-ok text-accent-ink"
+                          : "border-ok/40 text-ok/60"
+                      }`}
                     >
-                      <span
-                        className={`mx-auto grid h-14 w-14 place-items-center rounded-full text-[15px] font-medium transition ${
-                          on
-                            ? "bg-warn text-brand-cream"
-                            : "border border-line bg-panel-2 text-muted"
-                        }`}
-                      >
-                        {streak || ""}
-                      </span>
-                      <span className="mt-2 block truncate text-[12px] text-muted">
+                      ✓
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-medium">
                         {h.name}
                       </span>
-                      <span className="mt-0.5 block text-[10px] text-muted/80">
-                        {streak
-                          ? `🔥 ${streak} day${streak === 1 ? "" : "s"}`
-                          : best
-                            ? `best ${best}`
-                            : "start it"}
+                      <span className="block text-[11px] text-muted">
+                        {on
+                          ? streak > 1
+                            ? `Done · ${streak} days`
+                            : "Done"
+                          : "Not yet today"}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
-        </div>
-        <CheckPane board={board} send={send} day={day} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
       </div>
-    </>
+
+      <div className="min-w-0 space-y-4">
+        <EmailItems board={board} send={send} day={day} />
+        <CheckPane board={board} send={send} day={day} />
+        {day === TODAY ? <Affirmations board={board} send={send} /> : null}
+        <PlanTrash board={board} send={send} />
+      </div>
+    </div>
   );
 }
 
@@ -2776,6 +2846,46 @@ function EditDue({ todo, send }: { todo: Todo; send: Send }) {
   );
 }
 
+/** Sends a parked item straight to a chosen day — any week, not just the
+ *  one on screen — as a quick task, so the pile never has to wait for the
+ *  right week to be visible. */
+function PlanOn({ todo, send }: { todo: Todo; send: Send }) {
+  return (
+    <span
+      className="relative shrink-0"
+      title="Plan it for a day — pick any date"
+    >
+      <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px] text-muted">
+        plan →
+      </span>
+      <input
+        type="date"
+        value=""
+        min={TODAY}
+        aria-label="Plan it for a day"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const day = e.target.value;
+          if (!day) return;
+          pick(todo, "quick", send, day);
+          if (!todo.due)
+            send(
+              { action: "editTodo", id: todo.id, field: "due", value: day },
+              (b) => ({
+                ...b,
+                todos: b.todos.map((t) =>
+                  t.id === todo.id ? { ...t, due: day } : t,
+                ),
+              }),
+            );
+        }}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      />
+    </span>
+  );
+}
+
 /** One picked line inside a day of the week: enough to recognise it, and a
  *  way to put it back down. */
 function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
@@ -2788,7 +2898,7 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className="flex cursor-grab items-center gap-2 py-1 active:cursor-grabbing"
+      className="group flex cursor-grab items-start gap-2.5 py-1.5 active:cursor-grabbing"
     >
       <button
         type="button"
@@ -2804,9 +2914,15 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
             }),
           )
         }
-        className={`grid h-4 w-4 shrink-0 place-items-center text-[9px] transition ${
-          todo.slot === "deep" ? "rounded-full" : "rounded"
-        } border ${todo.done ? "border-ink bg-ink text-brand-cream" : "border-line hover:border-ink/40"}`}
+        className={`mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center text-[10px] transition ${
+          todo.slot === "deep" ? "rounded-full" : "rounded-[5px]"
+        } border ${
+          todo.done
+            ? todo.slot === "deep"
+              ? "border-accent bg-accent text-accent-ink"
+              : "border-accent-2 bg-accent-2 text-accent-ink"
+            : "border-line-2 hover:border-muted"
+        }`}
       >
         {todo.done ? "✓" : ""}
       </button>
@@ -2814,17 +2930,19 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         todo={todo}
         send={send}
         onEditing={setEditing}
-        className={todo.done ? "text-muted line-through" : ""}
+        className={`text-[14px] ${todo.done ? "text-muted line-through" : ""}`}
       />
-      <EditDue todo={todo} send={send} />
-      <button
-        type="button"
-        onClick={() => park(todo, send, day)}
-        title="Put it back on the pile"
-        className="shrink-0 text-[12px] text-muted transition hover:text-ink"
-      >
-        ×
-      </button>
+      <span className="row-actions flex shrink-0 items-center gap-1.5">
+        <EditDue todo={todo} send={send} />
+        <button
+          type="button"
+          onClick={() => park(todo, send, day)}
+          title="Put it back in the backlog"
+          className="text-[12px] text-muted transition hover:text-ink"
+        >
+          ×
+        </button>
+      </span>
     </div>
   );
 }
@@ -2862,20 +2980,26 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
         const todo = board.todos.find((t) => t.id === id);
         if (todo && todo.slot) park(todo, send, todo.plan ?? "");
       }}
-      className={`rounded-xl border p-3 transition ${over ? "border-ink/40 bg-ink/5" : "border-line"}`}
+      className={`card card-quick p-3.5 transition ${over ? "border-accent-2" : ""}`}
     >
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[12px] font-medium">
-          {over ? "Drop it back here" : "Waiting in Notion"}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2.5 text-[15px] font-semibold">
+          <span className="badge badge-blue-fill">≡</span>
+          {over ? "Drop it back here" : "Backlog"}
+        </h3>
+        <span className="text-[12px] text-accent-2">
+          {waiting.length} waiting in Notion
         </span>
-        <span className="text-[11px] text-muted">{waiting.length}</span>
       </div>
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Find something…"
-        className="mb-2 w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
-      />
+      <label className="mb-2 flex items-center gap-2 rounded-lg border border-accent-2-line bg-panel/70 px-3 py-2 text-[13px]">
+        <span className="text-muted">⌕</span>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search tasks"
+          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint"
+        />
+      </label>
       {goals.length ? (
         <div className="mb-2 flex flex-wrap gap-1">
           {[{ id: "", name: "Everything" }, ...goals].map((g) => (
@@ -2883,10 +3007,10 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
               key={g.id || "all"}
               type="button"
               onClick={() => setGoal(g.id)}
-              className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
                 goal === g.id
-                  ? "border-ink bg-ink text-brand-cream"
-                  : "border-line text-muted hover:text-ink"
+                  ? "border-ink bg-ink text-accent-ink"
+                  : "border-accent-2-line text-muted hover:text-ink"
               }`}
             >
               {g.name}
@@ -2894,7 +3018,7 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
           ))}
         </div>
       ) : null}
-      <div className="max-h-[min(520px,45vh)] space-y-1 overflow-auto">
+      <div className="max-h-[min(640px,60vh)] space-y-0.5 overflow-auto">
         {waiting.length ? (
           waiting.map((t) => (
             <PileRow
@@ -2905,14 +3029,14 @@ function PlanPile({ board, send }: { board: Board; send: Send }) {
             />
           ))
         ) : (
-          <p className="text-[13px] text-muted">
-            Nothing waiting — the pile is empty.
+          <p className="px-2 py-3 text-[13px] text-muted">
+            Nothing waiting — the backlog is empty.
           </p>
         )}
       </div>
-      <p className="mt-2 text-[12px] text-muted">
-        Drag one onto a day, or drag one back here to unplan it. On a phone, use
-        + deep / + quick and × instead.
+      <p className="mt-3 text-[11px] text-muted">
+        Drag a task onto a day to plan it, or back here to unplan it. On a
+        phone, use plan → and ×.
       </p>
     </div>
   );
@@ -2953,17 +3077,20 @@ function PileRow({
         e.preventDefault();
         setMenu(true);
       }}
-      className="cursor-grab rounded-lg border border-line/70 px-2 py-1.5 text-[13px] transition hover:border-ink/30 active:cursor-grabbing"
+      className="group cursor-grab border-b border-accent-2-line/60 px-1 py-2 text-[13px] transition last:border-0 hover:bg-panel/40 active:cursor-grabbing"
     >
       <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[11px] text-muted">⠿</span>
+        <span className="shrink-0 text-[11px] text-faint">⠿</span>
         <EditTitle todo={todo} send={send} onEditing={setEditing} />
         {goalName ? (
           <span className="shrink-0 rounded-full bg-panel-2 px-1.5 text-[10px] text-muted">
             {goalName}
           </span>
         ) : null}
-        <EditDue todo={todo} send={send} />
+        <span className="row-actions flex shrink-0 items-center gap-1.5">
+          <EditDue todo={todo} send={send} />
+          <PlanOn todo={todo} send={send} />
+        </span>
       </div>
       {menu ? (
         <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
@@ -3002,11 +3129,11 @@ function PlanTrash({ board, send }: { board: Board; send: Send }) {
           todos: b.todos.filter((t) => t.id !== id),
         }));
       }}
-      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[13px] transition ${
-        over ? "border-bad bg-bad/10 text-bad" : "border-line text-muted"
+      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-3 text-[12px] transition ${
+        over ? "border-bad bg-bad/10 text-bad" : "border-line-2 text-faint"
       }`}
     >
-      <span className="text-[16px]">🗑</span>
+      <span className="text-[14px]">🗑</span>
       {over ? "Drop it and it's gone" : "Drag here to delete"}
     </div>
   );
@@ -3041,17 +3168,20 @@ function PlanHandoff({ board, send }: { board: Board; send: Send }) {
           queueAgent(todo.title, todo.due),
         );
       }}
-      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[13px] transition ${
-        over ? "border-ink/40 bg-ink/5 text-ink" : "border-line text-muted"
+      className={`card card-quick flex items-center gap-3 px-4 py-3 transition ${
+        over ? "border-accent-2" : ""
       }`}
     >
-      <span className="text-[16px]">🤖</span>
-      <span className="min-w-0 truncate">
-        {over
-          ? "Drop it and the assistant takes it"
-          : gone
-            ? `Handed over: ${gone}`
-            : "Drag here to hand to assistant"}
+      <span className="badge badge-blue">✦</span>
+      <span className="min-w-0">
+        <span className="block text-[13px] font-semibold">Hand off to Assistant</span>
+        <span className="block truncate text-[12px] text-accent-2">
+          {over
+            ? "Drop it and the assistant takes it"
+            : gone
+              ? `Handed over: ${gone}`
+              : "Drop a task here"}
+        </span>
       </span>
     </div>
   );
@@ -3135,17 +3265,17 @@ function MoneyDue({
   };
 
   return (
-    <div className="zone-money mb-1.5 rounded-lg border px-2 py-1.5">
-      <div className="mb-0.5 flex items-baseline justify-between">
-        <span className="text-[10px] uppercase tracking-widest">
-          locked · due
+    <div className="zone-money mb-2 rounded-xl border px-3 py-2">
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="eyebrow text-accent-2">locked · due</span>
+        <span className="text-[10px] opacity-70" title="Can't be moved">
+          🔒
         </span>
-        <span className="text-[10px] opacity-70">can&rsquo;t be moved</span>
       </div>
       {rows.map((t) => {
         const paid = t.done || paidFor(t, day);
         return (
-          <div key={t.id} className="flex items-center gap-2 py-0.5">
+          <div key={t.id} className="group flex items-center gap-2 py-0.5">
             <button
               type="button"
               aria-label={paid ? "Mark as not paid" : "Mark paid"}
@@ -3161,18 +3291,20 @@ function MoneyDue({
             <EditTitle
               todo={t}
               send={send}
-              className={paid ? "line-through opacity-60" : ""}
+              className={`text-[15px] font-medium ${paid ? "line-through opacity-60" : ""}`}
             />
-            <EditDue todo={t} send={send} />
-            <button
-              type="button"
-              title="Unlock — make it a movable reminder"
-              aria-label="Unlock"
-              onClick={() => setLocked(t, false, send)}
-              className="shrink-0 text-[11px] opacity-70 transition hover:opacity-100"
-            >
-              🔒
-            </button>
+            <span className="row-actions flex shrink-0 items-center gap-1.5">
+              <EditDue todo={t} send={send} />
+              <button
+                type="button"
+                title="Unlock — make it a movable reminder"
+                aria-label="Unlock"
+                onClick={() => setLocked(t, false, send)}
+                className="text-[11px] opacity-70 transition hover:opacity-100"
+              >
+                unlock
+              </button>
+            </span>
           </div>
         );
       })}
@@ -3186,12 +3318,15 @@ function MoneyDue({
 function PlanDay({
   board,
   send,
-  day,
+  days,
 }: {
   board: Board;
   send: Send;
-  day: string;
+  /** One day, or Saturday and Sunday together as the weekend. */
+  days: string[];
 }) {
+  const day = days[0];
+  const onDays = (t: Todo) => days.some((d) => pickedOn(t, d));
   const [open, setOpen] = useState<null | "deep" | "quick">(null);
   const [draft, setDraft] = useState("");
   const [over, setOver] = useState<null | "deep" | "quick">(null);
@@ -3200,10 +3335,12 @@ function PlanDay({
     into: "deep" | "quick";
   } | null>(null);
   const picked = board.todos.filter(
-    (t) => t.slot && pickedOn(t, day) && !isFixed(t) && !isCheck(t),
+    (t) => t.slot && onDays(t) && !isFixed(t) && !isCheck(t),
   );
   const fixed = board.todos.filter(
-    (t) => isFixed(t) && (moneyDay(t) === day || paidFor(t, day)),
+    (t) =>
+      isFixed(t) &&
+      days.some((d) => moneyDay(t) === d || paidFor(t, d)),
   );
   const deep = picked.filter((t) => t.slot === "deep");
   const quick = picked.filter((t) => t.slot === "quick");
@@ -3215,7 +3352,7 @@ function PlanDay({
       !t.done &&
       !isFixed(t) &&
       !isCheck(t) &&
-      !(t.slot && pickedOn(t, day)) &&
+      !(t.slot && onDays(t)) &&
       !urgent.some((s) => s.todo.id === t.id),
   );
   const ranked = [...urgent.map((s) => s.todo), ...rest];
@@ -3298,18 +3435,27 @@ function PlanDay({
         }}
         onDragLeave={() => setOver(null)}
         onDrop={(e) => drop(e, kind)}
-        className={`rounded-lg border border-dashed px-1.5 py-1 transition ${
-          over === kind ? "border-ink/40 bg-ink/5" : "border-transparent"
+        className={`rounded-xl border border-dashed px-1.5 py-1.5 transition ${
+          over === kind ? "border-accent-2 bg-accent-2/10" : "border-transparent"
         }`}
       >
-        <div className="flex items-baseline justify-between">
-          <span className="text-[10px] uppercase tracking-widest text-muted">
+        <div className="mb-1 flex items-center justify-between">
+          <span className={`eyebrow ${kind === "quick" ? "text-accent-2" : ""}`}>
             {kind}
           </span>
           <span
-            className={`text-[10px] ${rows.length > cap ? "text-bad" : "text-muted"}`}
+            className="flex items-center gap-1"
+            title={`${rows.length}/${cap}`}
           >
-            {rows.length}/{cap}
+            {Array.from({ length: cap }, (_, k) => (
+              <span
+                key={k}
+                className={`dash ${k < rows.length ? (kind === "quick" ? "dash-blue" : "dash-on") : ""}`}
+              />
+            ))}
+            {rows.length > cap ? (
+              <span className="text-[10px] text-bad">+{rows.length - cap}</span>
+            ) : null}
           </span>
         </div>
         {rows.map((t) => (
@@ -3319,40 +3465,48 @@ function PlanDay({
           <button
             type="button"
             onClick={takeEmails}
-            className="flex w-full items-center gap-2 py-1 text-left text-[13px] text-muted/70 transition hover:text-ink"
+            className="mb-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-line-2 px-2 py-1.5 text-left text-[12px] text-faint transition hover:text-ink"
           >
-            <span className="h-3.5 w-3.5 shrink-0 rounded border border-dashed border-line" />
-            <span className="min-w-0 flex-1 truncate">Go through emails</span>
+            <span>↻</span>
+            <span className="min-w-0 flex-1 truncate">Go through emails · daily</span>
           </button>
         ) : null}
-        {!rows.length && kind === "deep" ? (
-          <p className="py-1 text-[12px] text-muted/70">Drop one here.</p>
+        {!rows.length ? (
+          <p className="drop-slot">Drop a {kind} task</p>
         ) : null}
       </div>
     );
   };
 
+  const count = picked.filter((t) => !t.done).length;
+  const label = days.length > 1 ? "Sat – Sun" : weekday(day).slice(0, 3);
+  const numbers = days
+    .map((d) => String(Number(d.slice(8, 10))))
+    .join("–");
+  const past = days.every((d) => d < TODAY);
+  const isToday = days.includes(TODAY);
+
   return (
     <div
-      className={`rounded-xl border p-3 ${day === TODAY ? "border-ink/30 bg-panel" : "border-line"} ${
-        day < TODAY ? "opacity-60" : ""
-      }`}
+      className={`card flex flex-col p-3.5 ${
+        isToday ? "border-t-2 border-t-accent" : ""
+      } ${past ? "opacity-60" : ""}`}
     >
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <span
-          className={`text-[12px] ${day === TODAY ? "font-medium text-ink" : "text-muted"}`}
-        >
-          {weekday(day)}
+      <div className="flex items-start justify-between">
+        <span className="flex items-center gap-2">
+          <span className="eyebrow">{label}</span>
+          {isToday ? <span className="pill-today">Today</span> : null}
         </span>
         <span className="text-[11px] text-muted">
-          {picked.filter((t) => !t.done).length || ""}
+          {count ? `${count} task${count === 1 ? "" : "s"}` : "Open"}
         </span>
       </div>
+      <p className="serif mt-1 text-[30px] leading-none">{numbers}</p>
 
-      {fixed.length ? <MoneyDue rows={fixed} send={send} day={day} /> : null}
-
-      <div className="mb-1 space-y-1">
+      <div className="mt-3 flex-1 space-y-2">
+        {fixed.length ? <MoneyDue rows={fixed} send={send} day={day} /> : null}
         {zone("deep", deep)}
+        <div className="border-t border-line" />
         {zone("quick", quick)}
       </div>
 
@@ -3368,40 +3522,45 @@ function PlanDay({
         />
       ) : null}
 
-      <div className="flex gap-1.5">
-        {(["deep", "quick"] as const).map((s) => {
-          const full =
-            (s === "deep" ? deep.length : quick.length) >=
-            (s === "deep" ? DEEP_CAP : QUICK_CAP);
-          return (
+      {open ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="seg" role="group" aria-label="Deep or quick">
+              {(["deep", "quick"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={open === k}
+                  onClick={() => setOpen(k)}
+                >
+                  {k === "deep" ? "Deep" : "Quick"}
+                </button>
+              ))}
+            </span>
             <button
-              key={s}
               type="button"
-              disabled={full}
-              onClick={() => setOpen(open === s ? null : s)}
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
-                open === s
-                  ? "border-ink/40 text-ink"
-                  : "border-line text-muted hover:text-ink"
-              } disabled:opacity-30`}
+              onClick={() => setOpen(null)}
+              className="btn btn-ghost"
             >
-              {full ? `${s} is full` : `+ ${s}`}
+              close
             </button>
-          );
-        })}
-      </div>
-
-      {open && room ? (
-        <div className="mt-2 space-y-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && add()}
-            placeholder={
-              open === "deep" ? "A real block of work…" : "Something quick…"
-            }
-            className="w-full rounded-lg border border-line bg-transparent px-2 py-1.5 text-[13px] outline-none placeholder:text-muted/70"
-          />
+          </div>
+          {room ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder={
+                open === "deep" ? "A real block of work…" : "Something quick…"
+              }
+              className="w-full rounded-lg border border-line-2 bg-panel-2 px-2.5 py-1.5 text-[13px] outline-none placeholder:text-faint focus:border-muted"
+            />
+          ) : (
+            <p className="text-[12px] text-bad">
+              {open} is full for this day.
+            </p>
+          )}
           <div className="max-h-44 overflow-auto rounded-lg border border-line bg-panel-2 p-1">
             {candidates.length ? (
               candidates.map((t) => (
@@ -3424,14 +3583,12 @@ function PlanDay({
               ))
             ) : (
               <p className="px-2 py-1 text-[13px] text-muted">
-                Nothing waiting in Notion.
+                Nothing waiting in the backlog.
               </p>
             )}
             {elsewhere.length ? (
               <>
-                <p className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-widest text-muted">
-                  Already on another day
-                </p>
+                <p className="eyebrow px-2 pb-0.5 pt-2">Already on another day</p>
                 {elsewhere.map((t) => (
                   <button
                     key={t.id}
@@ -3452,7 +3609,15 @@ function PlanDay({
             ) : null}
           </div>
         </div>
-      ) : null}
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen("deep")}
+          className="mt-3 w-full rounded-lg border border-dashed border-line-2 py-2 text-[12px] text-muted transition hover:border-muted hover:text-ink"
+        >
+          + Add task
+        </button>
+      )}
     </div>
   );
 }
@@ -3513,7 +3678,7 @@ function MonthCal({
                     title={t.title}
                     className="mb-0.5 truncate rounded px-1 text-[10px]"
                     style={{
-                      background: `${catColour(t.category)}1f`,
+                      background: `color-mix(in srgb, ${catColour(t.category)} 12%, transparent)`,
                       color: catColour(t.category),
                     }}
                   >
@@ -3552,6 +3717,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   const [week, setWeek] = useState(0);
   const [month, setMonth] = useState(0);
   const [view, setView] = useState("plan");
+  const [showLate, setShowLate] = useState(false);
   const cats = categoriesOf(board);
   const days = planWeek(week);
   const pickedIn = (list: string[]) =>
@@ -3573,131 +3739,216 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   // Sunday is when the week is decided, so that's when the page offers to.
   const sunday = new Date(`${TODAY}T12:00:00`).getDay() === 0;
   const nextEmpty = pickedIn(planWeek(week + 1)).length === 0;
+  const leftover = pickedIn(planWeek(week - 1)).filter(
+    (t) => !t.done && !isFixed(t) && !isCheck(t),
+  );
+  // Days of this week that have already gone: whatever they still hold is
+  // carried into a tray instead of a greyed-out column.
+  const gone = week === 0 ? days.filter((d) => d < TODAY) : [];
+  const carried = pickedIn(gone).filter(
+    (t) => !t.done && !isFixed(t) && !isCheck(t),
+  );
+  const tray = week === 0 ? [...carried, ...leftover] : [];
+  const trayFrom =
+    carried.length && !leftover.length
+      ? gone.length === 1
+        ? weekday(gone[0])
+        : "earlier this week"
+      : carried.length
+        ? "earlier"
+        : "last week";
+  // Mon–Fri stand alone; Saturday and Sunday share one column.
+  const weekdays = days.slice(0, 5).filter((d) => !gone.includes(d));
+  const weekend = days.slice(5).filter((d) => !gone.includes(d));
+  const columns: string[][] = [
+    ...weekdays.map((d) => [d]),
+    ...(weekend.length ? [weekend] : []),
+  ];
 
   return (
-    <Panel
-      title="Plan the week"
-      right={
-        <Pills
-          items={[
-            { id: "plan", label: "Week" },
-            { id: "calendar", label: "Calendars" },
-          ]}
-          value={view}
-          onChange={setView}
-        />
-      }
-    >
-      {view === "plan" ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-[13px]">
-              <span className="font-medium">
-                {pretty(days[0])} – {pretty(days[6])}
-              </span>
-              <span className="ml-2 text-[12px] text-muted">
-                {planned.filter((t) => !t.done).length} planned
-                {empty
-                  ? ` · ${empty} ${empty === 1 ? "day" : "days"} still empty`
-                  : " · every day has something"}
-              </span>
-            </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-baseline gap-4">
+          <h2 className="serif text-[30px] leading-none">
+            {pretty(days[0])} – {Number(days[6].slice(8, 10))}
+          </h2>
+          <span className="flex items-baseline gap-3 text-[13px] text-muted">
+            <span>
+              <span className="font-medium text-ink">
+                {planned.filter((t) => !t.done).length}
+              </span>{" "}
+              planned
+            </span>
+            {late.length && week === 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowLate(!showLate)}
+                className="hover:text-ink"
+              >
+                <span className="font-medium text-bad">{late.length}</span> late
+              </button>
+            ) : null}
+            <span>
+              <span className="font-medium text-ink">{empty}</span>{" "}
+              {empty === 1 ? "day" : "days"} open
+            </span>
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <Pills
+            items={[
+              { id: "plan", label: "Week" },
+              { id: "calendar", label: "Calendars" },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+          {view === "plan" ? (
             <div className="flex gap-1.5">
               <Arrow label="Previous week" onClick={() => setWeek(week - 1)}>
-                ←
+                ‹
               </Arrow>
               <Arrow label="This week" onClick={() => setWeek(0)}>
-                this week
+                {week === 0 ? "This week" : "Back to this week"}
               </Arrow>
               <Arrow label="Next week" onClick={() => setWeek(week + 1)}>
-                →
+                ›
               </Arrow>
             </div>
-          </div>
+          ) : (
+            <div className="flex gap-1.5">
+              <Arrow label="Previous month" onClick={() => setMonth(month - 1)}>
+                ‹
+              </Arrow>
+              <Arrow label="This month" onClick={() => setMonth(0)}>
+                {monthGrid(month).label}
+              </Arrow>
+              <Arrow label="Next month" onClick={() => setMonth(month + 1)}>
+                ›
+              </Arrow>
+            </div>
+          )}
+        </div>
+      </div>
 
-          {sunday && week === 0 && nextEmpty ? (
-            <button
-              type="button"
-              onClick={() => setWeek(week + 1)}
-              className="w-full rounded-xl border border-accent-2/40 bg-accent-2/5 p-3 text-left"
-            >
-              <span className="text-[13px] font-medium text-accent-2">
-                It&rsquo;s Sunday — set up next week.
-              </span>
-              <span className="ml-2 text-[12px] text-muted">
-                Two or three a day is a week that actually happens.
-              </span>
-            </button>
-          ) : null}
-
-          {late.length && week === 0 ? (
-            <details className="rounded-xl border border-bad/40 bg-bad/5 p-3">
-              <summary className="flex cursor-pointer items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-widest text-bad">
-                <span>Late · {late.length}</span>
+      {view === "plan" ? (
+        <>
+          {showLate && late.length && week === 0 ? (
+            <div className="card card-tray px-4 py-3">
+              <div className="flex items-center justify-between">
+                <span className="eyebrow text-bad">Late · {late.length}</span>
                 <button
                   type="button"
                   title="Clears their day and moves their date to Monday, so you can drag them into the new week"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    rescheduleLate(late, send);
-                  }}
-                  className="rounded-full border border-bad/50 px-2 py-0.5 text-[10px] normal-case tracking-normal text-bad transition hover:bg-bad hover:text-brand-cream"
+                  onClick={() => rescheduleLate(late, send)}
+                  className="btn"
                 >
-                  move them back to the pile
+                  Move them to the backlog
                 </button>
-              </summary>
+              </div>
               <div className="pt-1">
                 {late.map((t) => (
                   <TodoRow key={t.id} todo={t} send={send} cats={cats} />
                 ))}
               </div>
-            </details>
+            </div>
           ) : null}
 
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
-            {/* Seven across, so Sunday is on screen while a task is in the air. */}
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-              {days.map((d) => (
-                <PlanDay key={d} board={board} send={send} day={d} />
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.8fr)]">
+            <WeekGoals board={board} send={send} day={days[0]} wide />
+            {tray.length ? (
+              <div className="card card-tray px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-[14px] font-medium">
+                    <span className="text-bad">◷</span>
+                    {tray.length} carried over from {trayFrom}
+                  </span>
+                  <span className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => sweepWeek(tray, send)}
+                      title="Takes them off their old day and puts them back in the backlog"
+                      className="btn"
+                    >
+                      Back to backlog
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        tray.forEach((t) =>
+                          pick(t, t.slot ?? "quick", send, TODAY),
+                        )
+                      }
+                      className="btn btn-bad"
+                    >
+                      Move all to today
+                    </button>
+                  </span>
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {tray.map((t) => (
+                    <span
+                      key={t.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/todo-id", t.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="flex cursor-grab items-center gap-2 rounded-lg border border-line-2 bg-panel-2 px-2.5 py-1 text-[13px] active:cursor-grabbing"
+                    >
+                      <span
+                        className={`eyebrow ${t.slot === "quick" ? "text-accent-2" : "text-bad"}`}
+                      >
+                        {t.slot ?? "task"}
+                      </span>
+                      <span className="max-w-[260px] truncate">{t.title}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : sunday && week === 0 && nextEmpty ? (
+              <button
+                type="button"
+                onClick={() => setWeek(week + 1)}
+                className="card card-quick px-4 py-3 text-left"
+              >
+                <span className="text-[13px] font-medium text-accent-2">
+                  It&rsquo;s Sunday — set up next week.
+                </span>
+                <span className="ml-2 text-[12px] text-muted">
+                  Two or three a day is a week that actually happens.
+                </span>
+              </button>
+            ) : (
+              <div className="card flex items-center px-4 py-3 text-[13px] text-muted">
+                Nothing carried over — every past day is clear.
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div
+              className="grid gap-2.5 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]"
+              style={{ "--cols": columns.length } as CSSProperties}
+            >
+              {columns.map((c) => (
+                <PlanDay key={c[0]} board={board} send={send} days={c} />
               ))}
             </div>
-            <div className="space-y-2 xl:sticky xl:top-4 xl:self-start">
+            <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
               <PlanTrash board={board} send={send} />
             </div>
           </div>
-
-          <p className="text-[12px] text-muted">
-            Everything else stays in Notion — this is only what you&rsquo;ve
-            promised each day.
-          </p>
-        </div>
+        </>
       ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-medium">
-              {monthGrid(month).label}
-            </span>
-            <div className="flex gap-1.5">
-              <Arrow label="Previous month" onClick={() => setMonth(month - 1)}>
-                ←
-              </Arrow>
-              <Arrow label="This month" onClick={() => setMonth(0)}>
-                this month
-              </Arrow>
-              <Arrow label="Next month" onClick={() => setMonth(month + 1)}>
-                →
-              </Arrow>
-            </div>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            <MonthCal kind="deadline" items={board.todos} offset={month} />
-            <MonthCal kind="want" items={board.todos} offset={month} />
-          </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <MonthCal kind="deadline" items={board.todos} offset={month} />
+          <MonthCal kind="want" items={board.todos} offset={month} />
         </div>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -4654,7 +4905,7 @@ function CutSwitch({
     >
       <span
         className={`relative inline-block h-3 w-[22px] rounded-full transition ${
-          on ? "bg-ink" : "bg-line"
+          on ? "bg-ink" : "bg-muted/50"
         }`}
       >
         <span
@@ -4813,7 +5064,7 @@ function DealCard({
     <div
       draggable={!typing}
       onDragStart={(e) => e.dataTransfer.setData("text/deal", deal.id)}
-      className="rounded-xl border border-line bg-brand-cream/40 p-3 transition hover:border-ink/25"
+      className="rounded-xl border border-line bg-panel-2 p-3 transition hover:border-ink/25"
     >
       <div className="flex items-start gap-2">
         <button
@@ -5401,11 +5652,13 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
             const id = e.dataTransfer.getData("text/deal");
             if (id) bin(id);
           }}
-          className={`mt-3 rounded-xl border border-dashed px-3 py-2 text-center text-[11px] transition ${
-            over === "bin" ? "border-bad text-bad" : "border-line text-muted"
+          className={`mt-4 flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[12px] transition ${
+            over === "bin" ? "border-bad bg-bad/10 text-bad" : "border-line-2 text-faint"
           }`}
         >
-          🗑 drag a deal here to delete it
+          <span className="text-[16px]">🗑</span>
+          <span className="font-semibold">Trash</span>
+          <span>· {over === "bin" ? "drop it and it's gone" : "drag a deal here to delete it"}</span>
         </div>
 
         <div className="mt-3">
@@ -5488,6 +5741,578 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
         </Panel>
       ) : null}
     </div>
+  );
+}
+
+/* --------------------------------------------------------- goals of week */
+
+const mondayOf = (day: string) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  const back = (d.getUTCDay() + 6) % 7;
+  return shiftDay(day, -back);
+};
+
+/** The week's goals, pinned above every day and above the plan. A daily
+ *  count goal shows that day's circles in Today and the whole week in Plan;
+ *  sub-goals cross out one by one; one tick closes the goal for good. */
+function WeekGoals({
+  board,
+  send,
+  day,
+  wide,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+  wide?: boolean;
+}) {
+  const monday = mondayOf(day);
+  const week = Array.from({ length: 7 }, (_, i) => shiftDay(monday, i));
+  const goals = board.weekGoals.filter((g) => g.week === monday);
+  const [text, setText] = useState("");
+  const [perDay, setPerDay] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const patch = (id: string, fields: Partial<WeekGoal>) => (b: Board) => ({
+    ...b,
+    weekGoals: b.weekGoals.map((g) => (g.id === id ? { ...g, ...fields } : g)),
+  });
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    const n = Math.max(0, Math.min(20, Number(perDay) || 0));
+    setText("");
+    setPerDay("");
+    setAdding(false);
+    send({ action: "addWeekGoal", title: t, week: monday, perDay: n }, (b) => ({
+      ...b,
+      weekGoals: [
+        ...b.weekGoals,
+        {
+          id: `tmp-${Date.now()}`,
+          title: t,
+          week: monday,
+          perDay: n,
+          done: false,
+          progress: {},
+          url: "#",
+        },
+      ],
+    }));
+  };
+  const setCount = (g: WeekGoal, on: string, n: number) => {
+    const progress = { ...g.progress, [on]: n };
+    send({ action: "weekGoalProgress", id: g.id, progress }, patch(g.id, { progress }));
+  };
+  const weekTotal = (g: WeekGoal) =>
+    week.reduce((s, d) => s + Math.min(g.progress[d] ?? 0, g.perDay), 0);
+
+  if (!goals.length && !adding)
+    return (
+      <button
+        type="button"
+        onClick={() => setAdding(true)}
+        className={`card flex w-full items-center gap-3 border-dashed px-4 py-3 text-left transition hover:border-muted ${wide ? "h-full" : ""}`}
+      >
+        <span className="badge badge-fill">⚐</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium">No goal for this week yet</span>
+          {wide ? (
+            <span className="block text-[12px] text-muted">
+              One clear goal makes it easier to say no.
+            </span>
+          ) : null}
+        </span>
+        <span className="btn">Set a goal</span>
+      </button>
+    );
+
+  return (
+    <section
+      className="card px-4 py-3"
+    >
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge badge-fill">⚐</span>
+          Goals of the week
+        </h3>
+        <span className="text-[12px] text-muted">
+          {pretty(week[0])} – {pretty(week[6])}
+        </span>
+      </div>
+      <ul className="mt-2 space-y-2">
+        {goals.map((g) => {
+          const subs = board.checks[g.id] ?? [];
+          const todayN = Math.min(g.progress[day] ?? 0, g.perDay);
+          const complete =
+            g.done ||
+            (g.perDay > 0
+              ? weekTotal(g) >= g.perDay * 7
+              : subs.length > 0 && subs.every((c) => c.done));
+          return (
+            <li key={g.id} className="rounded-xl bg-panel px-3 py-2">
+              <div className="flex items-center gap-3">
+                <Tick
+                  on={complete}
+                  onChange={(v) =>
+                    send({ action: "weekGoalDone", id: g.id, done: v }, patch(g.id, { done: v }))
+                  }
+                />
+                <span
+                  className={`min-w-0 flex-1 text-[14px] ${complete ? "line-through opacity-50" : ""}`}
+                >
+                  {g.title}
+                </span>
+                {g.perDay > 0 ? (
+                  <span className="shrink-0 text-[11px] text-muted">
+                    {weekTotal(g)}/{g.perDay * 7} this week
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() =>
+                    send({ action: "deleteWeekGoal", id: g.id }, (b) => ({
+                      ...b,
+                      weekGoals: b.weekGoals.filter((x) => x.id !== g.id),
+                    }))
+                  }
+                  title="Remove this goal"
+                  className="shrink-0 text-[12px] text-muted/50 transition hover:text-bad"
+                >
+                  ×
+                </button>
+              </div>
+              {g.perDay > 0 && !wide ? (
+                <div className="mt-1.5 flex items-center gap-1.5 pl-[34px]">
+                  {Array.from({ length: g.perDay }, (_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      aria-label={`${g.title} ${i + 1} of ${g.perDay} on ${pretty(day)}`}
+                      onClick={() => setCount(g, day, i < todayN ? i : i + 1)}
+                      className={`flex h-[22px] min-w-[22px] items-center justify-center rounded-full border px-1.5 text-[11px] transition ${
+                        i < todayN
+                          ? "border-ok bg-ok text-brand-cream line-through"
+                          : "border-line text-muted hover:border-ink/40"
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                  <span className="ml-1 text-[11px] text-muted">
+                    {todayN}/{g.perDay} today
+                  </span>
+                </div>
+              ) : null}
+              {g.perDay > 0 && wide ? (
+                <div className="mt-1.5 grid grid-cols-7 gap-1 pl-[34px]">
+                  {week.map((d) => {
+                    const n = Math.min(g.progress[d] ?? 0, g.perDay);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setCount(g, d, n >= g.perDay ? 0 : n + 1)}
+                        title={`${pretty(d)} — tap to count one more`}
+                        className={`rounded-md border px-1 py-0.5 text-center text-[10px] transition ${
+                          n >= g.perDay
+                            ? "border-ok bg-ok text-brand-cream"
+                            : n > 0
+                              ? "border-ok/50 text-ink"
+                              : "border-line text-muted hover:border-ink/40"
+                        } ${d === TODAY ? "font-semibold" : ""}`}
+                      >
+                        {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"][week.indexOf(d)]}{" "}
+                        {n}/{g.perDay}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <SubGoals goal={g} subs={subs} send={send} />
+            </li>
+          );
+        })}
+      </ul>
+      {adding ? (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder="goal for the week, e.g. post 3 videos a day"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[13px] outline-none focus:border-ink/40"
+          />
+          <input
+            value={perDay}
+            onChange={(e) => setPerDay(e.target.value.replace(/\D/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            inputMode="numeric"
+            placeholder="× a day"
+            title="How many times a day, if it's a daily count (leave blank for a one-off)"
+            className="w-[64px] rounded-lg border border-line bg-panel px-2 py-1.5 text-[13px] outline-none focus:border-ink/40"
+          />
+          <button
+            type="button"
+            onClick={add}
+            className="btn btn-accent"
+          >
+            add
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="mt-2 text-[12px] text-muted transition hover:text-ink"
+        >
+          + another goal
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** The crossing-out part: sub-goals under a week goal, kept as to-do blocks
+ *  on the goal's Notion page. */
+function SubGoals({
+  goal,
+  subs,
+  send,
+}: {
+  goal: WeekGoal;
+  subs: Check[];
+  send: Send;
+}) {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    setText("");
+    send({ action: "addCheck", page: goal.id, text: t }, (b) => ({
+      ...b,
+      checks: {
+        ...b.checks,
+        [goal.id]: [
+          ...(b.checks[goal.id] ?? []),
+          { id: `tmp-${Date.now()}`, text: t, done: false },
+        ],
+      },
+    }));
+  };
+  if (!subs.length && !open)
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 pl-[34px] text-[11px] text-muted/70 transition hover:text-ink"
+      >
+        + sub-goals
+      </button>
+    );
+  return (
+    <ul className="mt-1.5 space-y-1 pl-[34px]">
+      {subs.map((c) => (
+        <li key={c.id} className="flex items-center gap-2">
+          <Box
+            on={c.done}
+            onChange={(v) =>
+              send({ action: "tickCheck", id: c.id, done: v }, (b) => ({
+                ...b,
+                checks: {
+                  ...b.checks,
+                  [goal.id]: (b.checks[goal.id] ?? []).map((x) =>
+                    x.id === c.id ? { ...x, done: v } : x,
+                  ),
+                },
+              }))
+            }
+          />
+          <span className={`text-[13px] ${c.done ? "line-through opacity-50" : ""}`}>
+            {c.text}
+          </span>
+        </li>
+      ))}
+      <li className="flex items-center gap-2">
+        <span className="h-[18px] w-[18px] shrink-0 rounded-[6px] border border-dashed border-line" />
+        <input
+          value={text}
+          autoFocus={open && !subs.length}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="add a sub-goal"
+          className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted/50"
+        />
+      </li>
+    </ul>
+  );
+}
+
+/* ------------------------------------------------------------- flight day */
+
+const isFlight = (t: Todo) => /✈|flight\s*day/i.test(t.title);
+
+/** The day you fly: one card at the top of Today with everything that has to
+ *  happen before you leave. The list lives as to-do blocks on the task's own
+ *  Notion page, so it can be edited there too. */
+function FlightDay({
+  todo,
+  checks,
+  send,
+}: {
+  todo: Todo;
+  checks: Check[];
+  send: Send;
+}) {
+  const [text, setText] = useState("");
+  const done = checks.filter((c) => c.done).length;
+  const allDone = checks.length > 0 && done === checks.length;
+
+  const tick = (c: Check, on: boolean) =>
+    send({ action: "tickCheck", id: c.id, done: on }, (b) => ({
+      ...b,
+      checks: {
+        ...b.checks,
+        [todo.id]: (b.checks[todo.id] ?? []).map((x) =>
+          x.id === c.id ? { ...x, done: on } : x,
+        ),
+      },
+    }));
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    setText("");
+    send({ action: "addCheck", page: todo.id, text: t }, (b) => ({
+      ...b,
+      checks: {
+        ...b.checks,
+        [todo.id]: [
+          ...(b.checks[todo.id] ?? []),
+          { id: `tmp-${Date.now()}`, text: t, done: false },
+        ],
+      },
+    }));
+  };
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-2xl bg-accent-2 text-brand-cream">
+      <div className="flex items-center justify-between px-4 pt-3">
+        <h3 className="flex items-center gap-2 text-[15px] font-semibold">
+          <span aria-hidden className="text-[18px]">
+            ✈️
+          </span>
+          {todo.title.replace(/✈️?\s*/, "").trim() || "Flight day"}
+        </h3>
+        <span className="text-[12px] text-brand-cream/80">
+          {allDone ? "ready to fly" : `${done}/${checks.length} done`}
+        </span>
+      </div>
+      <p className="px-4 pt-0.5 text-[12px] text-brand-cream/70">
+        Before you leave — tick as you go. Add your own below; it saves to the
+        task&rsquo;s page in Notion.
+      </p>
+      <div className="mt-2 h-1 w-full bg-black/10">
+        <div
+          className="h-1 bg-brand-cream transition-all"
+          style={{ width: `${checks.length ? (done / checks.length) * 100 : 0}%` }}
+        />
+      </div>
+      <ul className="px-4 py-2">
+        {checks.map((c) => (
+          <li key={c.id} className="flex items-center gap-3 py-1.5">
+            <button
+              type="button"
+              aria-pressed={c.done}
+              onClick={() => tick(c, !c.done)}
+              className={`flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full border text-[11px] transition ${
+                c.done
+                  ? "border-brand-cream bg-brand-cream text-accent-2"
+                  : "border-brand-cream/60 text-transparent hover:border-brand-cream"
+              }`}
+            >
+              ✓
+            </button>
+            <span
+              className={`text-[14px] ${c.done ? "line-through opacity-50" : ""}`}
+            >
+              {c.text}
+            </span>
+          </li>
+        ))}
+        <li className="flex items-center gap-3 py-1.5">
+          <span className="h-[20px] w-[20px] shrink-0 rounded-full border border-dashed border-brand-cream/40" />
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder="add something to do before you fly"
+            className="w-full bg-transparent text-[14px] text-brand-cream placeholder:text-brand-cream/40 outline-none"
+          />
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------ email items */
+
+/** What the inbox bot found for the day. Each line can be ticked off on the
+ *  spot, given the day it really has to happen, or promoted into a quick or
+ *  deep task — at which point it leaves this list and becomes a real to-do. */
+function EmailItems({
+  board,
+  send,
+  day,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+}) {
+  const [slotFor, setSlotFor] = useState<Record<string, "deep" | "quick">>({});
+  if (!board.dbs.emails && board.dbs.task !== "demo") return null;
+  const items = board.emails.filter((e) => {
+    if (e.done) return false;
+    const on = e.date ?? e.created;
+    return day >= TODAY ? on <= day : on === day;
+  });
+  if (!items.length) return null;
+
+  const patch = (id: string, fields: Partial<EmailItem>) => (b: Board) => ({
+    ...b,
+    emails: b.emails.map((x) => (x.id === id ? { ...x, ...fields } : x)),
+  });
+  const setDate = (e: EmailItem, date: string | null) => {
+    send({ action: "emailDate", id: e.id, date }, patch(e.id, { date }));
+  };
+  const promote = (e: EmailItem, slot: "deep" | "quick") => {
+    const due = e.date ?? day;
+    send(
+      { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
+      (b) => ({
+        ...patch(e.id, { done: true })(b),
+        todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
+      }),
+    );
+  };
+
+  return (
+    <section className="card card-inbox px-4 py-4">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge badge-bad">✉</span>
+          From your inbox
+        </h3>
+        <span className="pill-late">
+          {items.length === 1 ? "1 new" : `${items.length} new`}
+        </span>
+      </div>
+      <div className="mt-1">
+        {items.map((e) => {
+          const slot = slotFor[e.id] ?? "quick";
+          return (
+            <div
+              key={e.id}
+              className="group border-b border-line/60 py-3 last:border-0"
+            >
+              <div className="flex items-start gap-3">
+                <div className="pt-1">
+                  <Tick
+                    on={false}
+                    onChange={(done) =>
+                      send({ action: "emailDone", id: e.id, done }, patch(e.id, { done }))
+                    }
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-bad/90">
+                    {[e.from, e.date ? dueLabel(e.date) : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  <p className="mt-0.5 text-[14px] font-medium leading-snug">
+                    {e.title}
+                  </p>
+                  {e.notes ? (
+                    <p className="mt-0.5 text-[12px] leading-snug text-muted">
+                      {e.notes}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-[34px]">
+                <span className="seg" role="group" aria-label="Deep or quick">
+                  <button
+                    type="button"
+                    aria-pressed={slot === "deep"}
+                    onClick={() => setSlotFor({ ...slotFor, [e.id]: "deep" })}
+                  >
+                    Deep
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={slot === "quick"}
+                    onClick={() => setSlotFor({ ...slotFor, [e.id]: "quick" })}
+                  >
+                    Quick
+                  </button>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => promote(e, slot)}
+                  title={`Make it one of the day's ${slot} tasks`}
+                  className="btn btn-accent"
+                >
+                  Add to today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDate(e, shiftDay(e.date ?? day, 1))}
+                  className="btn"
+                >
+                  {e.date ? "+1 day" : "Tomorrow"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    send({ action: "emailDone", id: e.id, done: true }, patch(e.id, { done: true }))
+                  }
+                  title="Mark as done in the Grok database"
+                  className="btn btn-ok"
+                >
+                  ✓ Done
+                </button>
+              </div>
+              <div className="mt-1.5 flex items-center justify-between pl-[34px] text-[12px]">
+                <label
+                  className={`flex cursor-pointer items-center gap-1.5 ${e.date && e.date < TODAY ? "text-bad" : "text-muted hover:text-ink"}`}
+                >
+                  <span>{e.date ? `Due ${dueLabel(e.date)}` : "Pick date"}</span>
+                  <input
+                    type="date"
+                    value={e.date ?? ""}
+                    aria-label="Day this has to be done by"
+                    onChange={(ev) => setDate(e, ev.target.value || null)}
+                    className="w-[18px] cursor-pointer rounded border border-line-2 bg-transparent px-0.5 py-0.5 text-[12px] text-transparent outline-none sm:w-auto sm:text-muted"
+                  />
+                </label>
+                {e.link ? (
+                  <a
+                    href={e.link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-muted transition hover:text-ink"
+                  >
+                    Open email ↗
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -6057,6 +6882,19 @@ export default function BoardApp({
     () => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]),
     [],
   );
+  // When the board last came back from Notion, worded for the header pill.
+  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const [sinceSync, setSinceSync] = useState("just now");
+  useEffect(() => {
+    const word = () => {
+      if (!syncedAt) return setSinceSync("just now");
+      const m = Math.round((Date.now() - syncedAt) / 60000);
+      setSinceSync(m < 1 ? "just now" : m === 1 ? "1 min ago" : `${m} min ago`);
+    };
+    word();
+    const t = setInterval(word, 30000);
+    return () => clearInterval(t);
+  }, [syncedAt]);
 
   // The dashboard is opened from a phone as often as a laptop, so the key is
   // remembered rather than needing the long link every time.
@@ -6122,6 +6960,7 @@ export default function BoardApp({
       }
       setError("");
       setBoard(json);
+      setSyncedAt(Date.now());
     } catch {
       setError(
         "Couldn't reach the server. Check your connection and try again.",
@@ -6135,11 +6974,15 @@ export default function BoardApp({
     void load();
   }, [load]);
 
+  // Writes go to Notion one at a time, and the re-read waits until the
+  // burst is over, so a sweep of twenty items is twenty saves and one load.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const reload = useRef<ReturnType<typeof setTimeout> | null>(null);
   const send: Send = (action, optimistic) => {
     setBoard((b) => (b ? optimistic(b) : b));
     // The demo board has nothing to write to, so a re-read would undo the click.
     if (captureKey === "demo") return;
-    void (async () => {
+    queue.current = queue.current.then(async () => {
       const res = await fetch(boardUrl(), {
         method: "POST",
         headers: {
@@ -6154,8 +6997,13 @@ export default function BoardApp({
       } | null;
       if (!json?.ok)
         setError(json?.error ?? "That didn't save to Notion — reloading.");
-      void load();
-    })();
+      if (reload.current) clearTimeout(reload.current);
+      reload.current = setTimeout(() => void load(), 800);
+    }).catch(() => {
+      setError("That didn't save to Notion — reloading.");
+      if (reload.current) clearTimeout(reload.current);
+      reload.current = setTimeout(() => void load(), 800);
+    });
   };
 
   if (!captureKey && !todoDb) {
@@ -6191,11 +7039,11 @@ export default function BoardApp({
           better narrow. */}
       <div
         className={`mx-auto px-5 pb-20 pt-10 ${
-          tab === "todos" || tab === "deals" ? "max-w-[1900px]" : "max-w-4xl"
+          tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-5xl"
         }`}
       >
         <header className="mb-7">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <h1 className="serif text-[34px] leading-none sm:text-[38px]">
                 {greeting().replace(".", ", Sophie.")}
@@ -6204,28 +7052,32 @@ export default function BoardApp({
                 {quote}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-4 pt-1.5">
-              {board ? <StreakDots board={board} /> : null}
+            <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4 sm:pt-1.5">
+              {board ? (
+                <span className="hidden sm:inline-flex">
+                  <StreakDots board={board} />
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void load()}
                 aria-label="Sync with Notion"
-                className="text-[13px] text-muted transition hover:text-ink"
+                className={`sync-pill transition hover:text-ink ${loading ? "is-busy" : ""}`}
               >
-                {loading ? "syncing…" : "sync"}
+                {loading ? "Syncing with Notion…" : `Synced with Notion ${sinceSync}`}
               </button>
             </div>
           </div>
 
-          <nav className="mt-6 flex gap-5 overflow-x-auto border-b border-line">
+          <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line">
             {TABS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
-                className={`-mb-px shrink-0 border-b-2 pb-2.5 text-[13px] tracking-wide transition ${
+                className={`-mb-px shrink-0 border-b-2 px-3 pb-2.5 text-[13px] transition ${
                   tab === t.id
-                    ? "border-ink text-ink"
+                    ? "border-accent font-medium text-ink"
                     : "border-transparent text-muted hover:text-ink"
                 }`}
               >

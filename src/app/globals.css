@@ -20,6 +20,48 @@
   --ok: #5c7f45;
   --warn: #b07d0a;
   --bad: #b3311b;
+
+  /* Espresso night — the dashboard's palette (espresso-night.css). Every
+     colour the board uses lives here; components only reference tokens. */
+  --night-bg: #1f1714;
+  --night-panel: #2b211d;
+  --night-panel-2: #342823;
+  --night-panel-3: #3a2c26;
+  --night-line: #3d2f29;
+  --night-line-2: #4a3a32;
+  --night-ink: #f2e7da;
+  --night-muted: #b9a594;
+  --night-faint: #8a766a;
+  --night-accent: #ffc73c;
+  --night-accent-ink: #1f1714;
+  --night-accent-2: #a9bbf5;
+  --night-accent-2-bg: #272b45;
+  --night-accent-2-bg-2: #2f3454;
+  --night-accent-2-line: #3a4170;
+  --night-ok: #8fb872;
+  --night-ok-bg: #25301f;
+  --night-ok-line: #4d6a3f;
+  --night-ok-ink: #b9d9a3;
+  --night-warn: #f0b84a;
+  --night-bad: #e8826a;
+  --night-bad-bg: #3a2420;
+  --night-tint-a: #869eed2e;
+  --night-tint-b: #ffc73c26;
+  /* Grok Bot's own look, for the inbox panel. */
+  --grok-bg: #141414;
+  --grok-ink: #f4efe6;
+  --grok-accent: #f2a93b;
+  --grok-late: #ff8a5b;
+  /* Category dots: derived from the Notion column name, so a fixed wheel. */
+  --cat-0: #3b6cf6;
+  --cat-1: #8b5cf6;
+  --cat-2: #10b981;
+  --cat-3: #f59e0b;
+  --cat-4: #ec4899;
+  --cat-5: #0ea5e9;
+  --cat-6: #84cc16;
+  --cat-7: #f43f5e;
+  --cat-none: #9ca3af;
 }
 
 @theme inline {
@@ -34,6 +76,22 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
+  --color-faint: var(--faint);
+  --color-panel-3: var(--panel-3);
+  --color-line-2: var(--line-2);
+  --color-accent-2-bg: var(--accent-2-bg);
+  --color-accent-2-bg-2: var(--accent-2-bg-2);
+  --color-accent-2-line: var(--accent-2-line);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-line: var(--ok-line);
+  --color-ok-ink: var(--ok-ink);
+  --color-bad-bg: var(--bad-bg);
+  --color-grok-bg: var(--grok-bg);
+  --color-grok-ink: var(--grok-ink);
+  --color-grok-accent: var(--grok-accent);
+  --color-grok-late: var(--grok-late);
+  --font-serif: var(--font-serif), ui-serif, Georgia, serif;
+  --color-accent-ink: var(--accent-ink);
   --color-brand-yellow: var(--brand-yellow);
   --color-brand-periwinkle: var(--brand-periwinkle);
   --color-brand-tan: var(--brand-tan);
@@ -163,47 +221,67 @@ select {
    warm off-white, soft rules, one periwinkle accent. Scoped, so the wizard keeps
    its own look. */
 .board-theme {
-  --bg: #faf8f4;
-  --panel: #fff8f0;
-  --panel-2: #f3efe6;
-  --line: #e0d9cc;
-  --ink: #2d2a24;
-  --muted: #a09880;
-  --accent: #2d2a24;
-  --accent-2: #7f77dd;
-  --ok: #1d9e75;
-  --warn: #c07a26;
-  --bad: #d85a30;
-  --brand-cream: #faf8f4;
-  --brand-cocoa: #2d2a24;
+  --bg: var(--night-bg);
+  --panel: var(--night-panel);
+  --panel-2: var(--night-panel-2);
+  --panel-3: var(--night-panel-3);
+  --line: var(--night-line);
+  --line-2: var(--night-line-2);
+  --ink: var(--night-ink);
+  --muted: var(--night-muted);
+  --faint: var(--night-faint);
+  --accent: var(--night-accent);
+  --accent-ink: var(--night-accent-ink);
+  --accent-2: var(--night-accent-2);
+  --accent-2-bg: var(--night-accent-2-bg);
+  --accent-2-bg-2: var(--night-accent-2-bg-2);
+  --accent-2-line: var(--night-accent-2-line);
+  --ok: var(--night-ok);
+  --ok-bg: var(--night-ok-bg);
+  --ok-line: var(--night-ok-line);
+  --ok-ink: var(--night-ok-ink);
+  --warn: var(--night-warn);
+  --bad: var(--night-bad);
+  --bad-bg: var(--night-bad-bg);
+  --tint-a: var(--night-tint-a);
+  --tint-b: var(--night-tint-b);
+  /* Filled chips use text-brand-cream for "text on a fill"; on this theme the
+     fills are light, so that reads as the page colour. */
+  --brand-cream: var(--night-bg);
+  --brand-cocoa: var(--night-ink);
+  color-scheme: dark;
 
   position: relative;
   z-index: 0;
   min-height: 100dvh;
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-feature-settings: "cv01", "ss01";
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   letter-spacing: -0.014em;
 }
 
 /* The day sheet reads like a page in a notebook, so its headings are set in a
    serif against the cream card. */
 .board-theme .serif {
-  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  letter-spacing: -0.02em;
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
 }
 
 .board-theme .day-card {
   border-radius: 28px;
   border: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: 0 1px 2px rgba(45, 42, 36, 0.04);
+  box-shadow: none;
+}
+
+.board-theme ::placeholder {
+  color: var(--faint);
 }
 
 /* Nothing in here should be handwritten. */
 .board-theme .font-hand {
-  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   letter-spacing: -0.03em;
 }
@@ -212,46 +290,46 @@ select {
    deadlines in dark chocolate, the optional pile in periwinkle. Red is kept
    for things that are actually late. */
 .board-theme .panel-deadline {
-  border-color: #cbb9a6;
-  background: #f6efe6;
+  border-color: var(--line-2);
+  background: var(--panel);
 }
 
 .board-theme .panel-deadline > header {
-  border-color: #cbb9a6;
-  background: #e6d9c8;
-  color: #3b2a1c;
+  border-color: var(--line-2);
+  background: var(--panel-3);
+  color: var(--ink);
 }
 
 .board-theme .panel-want {
-  border-color: #cdcaf0;
-  background: #f4f3fd;
+  border-color: var(--accent-2-line);
+  background: var(--accent-2-bg);
 }
 
 .board-theme .panel-want > header {
-  border-color: #cdcaf0;
-  background: #e7e5f9;
-  color: #4b45a8;
+  border-color: var(--accent-2-line);
+  background: var(--accent-2-bg-2);
+  color: var(--accent-2);
 }
 
 /* Money leaves on a date somebody else chose, so it reads as a different
    kind of thing entirely: green, fixed, not part of the planning game. */
 .board-theme .zone-money {
-  border-color: #b9cfae;
-  background: #f1f7ed;
-  color: #33612f;
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+  color: var(--ok-ink);
 }
 
 .board-theme .panel-dropping {
   border-style: dashed;
-  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 
 .board-theme .group-deadline > div:first-child {
-  color: #3b2a1c;
+  color: var(--muted);
 }
 
 .board-theme .group-want > div:first-child {
-  color: #4b45a8;
+  color: var(--accent-2);
 }
 
 .board-theme .panel-deadline > header h2,
@@ -260,6 +338,99 @@ select {
 }
 
 .board-theme ::selection {
-  background: #2d2a24;
-  color: #faf8f4;
+  background: var(--night-tint-b);
+  color: var(--ink);
 }
+
+/* Tinted cards: each section of the day has its own wash, mixed from the
+   tokens above so the palette stays the single source of colour. */
+.board-theme .card {
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.board-theme .card-deep {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+.board-theme .card-quick {
+  border-color: var(--accent-2-line);
+  background: var(--accent-2-bg);
+}
+.board-theme .card-habits {
+  border-color: color-mix(in srgb, var(--ok) 25%, var(--line));
+  background: color-mix(in srgb, var(--ok) 6%, var(--panel));
+}
+.board-theme .card-inbox {
+  border-color: color-mix(in srgb, var(--bad) 28%, var(--line));
+  background: color-mix(in srgb, var(--bad) 6%, var(--panel));
+}
+.board-theme .card-write {
+  border-color: color-mix(in srgb, var(--accent-2) 18%, var(--bad) 10%, var(--line));
+  background: color-mix(in srgb, var(--accent-2) 4%, var(--bad) 4%, var(--panel));
+}
+.board-theme .card-tray {
+  border-color: color-mix(in srgb, var(--bad) 30%, var(--line));
+  background: color-mix(in srgb, var(--bad) 7%, var(--panel));
+}
+.board-theme .badge {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.board-theme .badge-accent { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.board-theme .badge-blue { background: color-mix(in srgb, var(--accent-2) 18%, transparent); color: var(--accent-2); }
+.board-theme .badge-ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.board-theme .badge-bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.board-theme .badge-fill { background: var(--accent); color: var(--accent-ink); }
+.board-theme .badge-blue-fill { background: var(--accent-2); color: var(--accent-ink); }
+/* Three little bars: how much of a slot group is taken. */
+.board-theme .dash { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--line-2); }
+.board-theme .dash-on { background: var(--accent); }
+.board-theme .dash-blue { background: var(--accent-2); }
+/* Row actions stay out of the way until the row is hovered (always shown on touch). */
+.board-theme .row-actions { opacity: 0; transition: opacity 120ms; }
+.board-theme .group:hover .row-actions,
+.board-theme .row-actions:focus-within { opacity: 1; }
+@media (hover: none) { .board-theme .row-actions { opacity: 1; } }
+.board-theme .btn {
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  transition: border-color 120ms, background 120ms;
+}
+.board-theme .btn:hover { border-color: var(--muted); }
+.board-theme .btn-accent { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.board-theme .btn-accent:hover { border-color: var(--accent); filter: brightness(1.05); }
+.board-theme .btn-ok { background: var(--night-ok-bg); border-color: var(--night-ok-line); color: var(--night-ok-ink); font-weight: 500; }
+.board-theme .btn-ok:hover { border-color: var(--night-ok); }
+.board-theme .btn-bad { background: var(--bad); border-color: var(--bad); color: var(--accent-ink); font-weight: 500; }
+.board-theme .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.board-theme .btn-ghost:hover { color: var(--ink); border-color: transparent; }
+.board-theme .seg { display: inline-flex; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-2); padding: 2px; }
+.board-theme .seg > button { border-radius: 6px; padding: 3px 9px; font-size: 12px; color: var(--muted); }
+.board-theme .seg > button[aria-pressed="true"] { background: var(--panel-3); color: var(--ink); font-weight: 500; }
+.board-theme .pill-late { border-radius: 999px; background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); padding: 2px 8px; font-size: 11px; font-weight: 500; }
+.board-theme .pill-today { border-radius: 999px; background: var(--accent); color: var(--accent-ink); padding: 1px 8px; font-size: 10px; font-weight: 600; }
+.board-theme .eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.board-theme .drop-slot {
+  border-radius: 10px;
+  border: 1px dashed var(--line-2);
+  padding: 9px 10px;
+  font-size: 12px;
+  color: var(--faint);
+  text-align: center;
+}
+.board-theme .sync-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel);
+  padding: 5px 11px; font-size: 12px; color: var(--muted);
+}
+.board-theme .sync-pill::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--ok); }
+.board-theme .sync-pill.is-busy::before { background: var(--warn); }
