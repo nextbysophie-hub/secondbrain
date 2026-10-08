@@ -2353,6 +2353,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         <EmailItems board={board} send={send} day={day} />
         <CheckPane board={board} send={send} day={day} />
         {day === TODAY ? <Affirmations board={board} send={send} /> : null}
+        <PlanTrash board={board} send={send} />
       </div>
     </div>
   );
