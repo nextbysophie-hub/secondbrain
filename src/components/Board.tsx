@@ -1376,7 +1376,20 @@ function Suggested({
   return (
     <div className="mt-2 rounded-xl border border-dashed border-line-2 bg-panel-2/60 px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
-        <span className="h-6 w-6 shrink-0 rounded-full border border-dashed border-line-2" />
+        <span className="shrink-0" title="Mark it done in Notion">
+          <Tick
+            on={false}
+            ring
+            onChange={() =>
+              send({ action: "toggleTodo", id: p.todo.id, done: true }, (b) => ({
+                ...b,
+                todos: b.todos.map((t) =>
+                  t.id === p.todo.id ? { ...t, done: true } : t,
+                ),
+              }))
+            }
+          />
+        </span>
         <div className="min-w-[10rem] flex-1">
           <p className="eyebrow text-accent/80">
             {ordinal} slot · suggested from Notion
