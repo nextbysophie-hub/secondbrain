@@ -5652,11 +5652,13 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
             const id = e.dataTransfer.getData("text/deal");
             if (id) bin(id);
           }}
-          className={`mt-3 rounded-xl border border-dashed px-3 py-2 text-center text-[11px] transition ${
-            over === "bin" ? "border-bad text-bad" : "border-line text-muted"
+          className={`mt-4 flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[12px] transition ${
+            over === "bin" ? "border-bad bg-bad/10 text-bad" : "border-line-2 text-faint"
           }`}
         >
-          🗑 drag a deal here to delete it
+          <span className="text-[16px]">🗑</span>
+          <span className="font-semibold">Trash</span>
+          <span>· {over === "bin" ? "drop it and it's gone" : "drag a deal here to delete it"}</span>
         </div>
 
         <div className="mt-3">
