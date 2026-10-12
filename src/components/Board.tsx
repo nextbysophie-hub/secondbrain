@@ -2364,11 +2364,132 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
       <div className="min-w-0 space-y-4">
         <EmailItems board={board} send={send} day={day} />
+        {day === TODAY ? <QuestionsToAnswer /> : null}
         <CheckPane board={board} send={send} day={day} />
         {day === TODAY ? <Affirmations board={board} send={send} /> : null}
         <PlanTrash board={board} send={send} />
       </div>
     </div>
+  );
+}
+
+
+type AskedDraft = {
+  id: string;
+  at: string;
+  email: string;
+  name: string;
+  question: string;
+  subject: string;
+  draft: string;
+  source: "ai" | "template";
+  role: string;
+  sells: string;
+  experience: string;
+  task: string;
+  hours: string;
+  help: string;
+  budget: string;
+};
+
+/** Questions people left on nextbysophie.com/answers, each with a reply in
+ *  Sophie's voice she can tweak, open in her mail app, and tick off. */
+function QuestionsToAnswer() {
+  const [items, setItems] = useState<AskedDraft[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/questions")
+      .then((r) => r.json())
+      .then((j: { ok: boolean; questions?: AskedDraft[]; error?: string }) => {
+        if (!j.ok) throw new Error(j.error);
+        setItems(j.questions ?? []);
+      })
+      .catch((e: Error) => {
+        setError(e.message || "Couldn't load questions");
+        setItems([]);
+      });
+  }, []);
+
+  if (!items?.length) return null;
+
+  const text = (q: AskedDraft) => drafts[q.id] ?? q.draft;
+  const mailto = (q: AskedDraft) =>
+    `mailto:${encodeURIComponent(q.email)}?subject=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(text(q))}`;
+  const done = (q: AskedDraft) => {
+    setItems((xs) => (xs ?? []).filter((x) => x.id !== q.id));
+    fetch("/api/questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: q.id, answered: true }),
+    }).catch(() => setError("Couldn't mark it answered in Notion"));
+  };
+  const who = (q: AskedDraft) =>
+    [q.role, q.sells, q.experience, q.task ? `wants AI to handle: ${q.task}` : "", q.hours ? `${q.hours} hrs/wk` : "", q.help, q.budget]
+      .filter(Boolean)
+      .join(" · ");
+
+  return (
+    <section className="card px-4 py-4">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge badge-accent">?</span>
+          Questions to answer
+        </h3>
+        <span className="pill-late">{items.length === 1 ? "1 waiting" : `${items.length} waiting`}</span>
+      </div>
+      {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
+      <div className="mt-1">
+        {items.map((q) => {
+          const isOpen = open === q.id;
+          return (
+            <div key={q.id} className="border-b border-line/60 py-3 last:border-0">
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? null : q.id)}
+                className="block w-full text-left"
+              >
+                <span className="block text-[13.5px] font-medium leading-snug">{q.question}</span>
+                <span className="mt-1 block text-[11.5px] text-muted">
+                  {q.name || q.email.split("@")[0]} · {q.email}
+                  {who(q) ? <span className="block truncate">{who(q)}</span> : null}
+                </span>
+              </button>
+              {isOpen ? (
+                <div className="mt-3 space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.14em] text-muted">
+                    Reply in your voice {q.source === "template" ? "(template — add an OpenAI key for a tailored one)" : ""}
+                  </p>
+                  <textarea
+                    value={text(q)}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+                    rows={12}
+                    className="w-full rounded-xl border border-line bg-transparent p-3 text-[13px] leading-relaxed outline-none focus:border-accent"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <a href={mailto(q)} className="btn btn-accent" title="Opens your mail app with everything filled in">
+                      ✉ Open email to {q.name ? q.name.split(/[\s·]/)[0] : "them"}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(text(q))}
+                      className="btn"
+                    >
+                      Copy reply
+                    </button>
+                    <button type="button" onClick={() => done(q)} className="btn btn-ok" title="Tick it off in Notion">
+                      ✓ Sent it
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
