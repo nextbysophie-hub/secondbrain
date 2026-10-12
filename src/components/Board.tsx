@@ -2432,13 +2432,13 @@ function QuestionsToAnswer() {
       .join(" · ");
 
   return (
-    <section className="card px-4 py-4">
+    <section className="card card-blue px-4 py-4">
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
-          <span className="badge badge-accent">?</span>
+          <span className="badge badge-blue">?</span>
           Questions to answer
         </h3>
-        <span className="pill-late">{items.length === 1 ? "1 waiting" : `${items.length} waiting`}</span>
+        <span className="pill-blue">{items.length === 1 ? "1 waiting" : `${items.length} waiting`}</span>
       </div>
       {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
       <div className="mt-1">
@@ -2466,10 +2466,10 @@ function QuestionsToAnswer() {
                     value={text(q)}
                     onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
                     rows={12}
-                    className="w-full rounded-xl border border-line bg-transparent p-3 text-[13px] leading-relaxed outline-none focus:border-accent"
+                    className="w-full rounded-xl border border-line bg-transparent p-3 text-[13px] leading-relaxed outline-none focus:border-[var(--brand-periwinkle)]"
                   />
                   <div className="flex flex-wrap gap-2">
-                    <a href={mailto(q)} className="btn btn-accent" title="Opens your mail app with everything filled in">
+                    <a href={mailto(q)} className="btn btn-blue" title="Opens your mail app with everything filled in">
                       ✉ Open email to {q.name ? q.name.split(/[\s·]/)[0] : "them"}
                     </a>
                     <button
