@@ -2418,6 +2418,8 @@ function QuestionsToAnswer() {
   const text = (q: AskedDraft) => drafts[q.id] ?? q.draft;
   const mailto = (q: AskedDraft) =>
     `mailto:${encodeURIComponent(q.email)}?subject=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(text(q))}`;
+  const gmail = (q: AskedDraft) =>
+    `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(q.email)}&su=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(text(q))}`;
   const done = (q: AskedDraft) => {
     setItems((xs) => (xs ?? []).filter((x) => x.id !== q.id));
     fetch("/api/questions", {
@@ -2469,8 +2471,17 @@ function QuestionsToAnswer() {
                     className="w-full rounded-xl border border-line bg-transparent p-3 text-[13px] leading-relaxed outline-none focus:border-[var(--brand-periwinkle)]"
                   />
                   <div className="flex flex-wrap gap-2">
-                    <a href={mailto(q)} className="btn btn-blue" title="Opens your mail app with everything filled in">
-                      ✉ Open email to {q.name ? q.name.split(/[\s·]/)[0] : "them"}
+                    <a
+                      href={gmail(q)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-blue"
+                      title="Opens Gmail with the email filled in"
+                    >
+                      ✉ Open in Gmail
+                    </a>
+                    <a href={mailto(q)} className="btn" title="Opens your phone's mail app instead">
+                      Mail app
                     </a>
                     <button
                       type="button"
