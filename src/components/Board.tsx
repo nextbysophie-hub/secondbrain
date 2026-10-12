@@ -2397,6 +2397,7 @@ type AskedDraft = {
 function QuestionsToAnswer() {
   const [items, setItems] = useState<AskedDraft[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [videos, setVideos] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -2416,10 +2417,21 @@ function QuestionsToAnswer() {
   if (!items?.length) return null;
 
   const text = (q: AskedDraft) => drafts[q.id] ?? q.draft;
+  /** Final email: the draft, an optional filmed answer, and a standing P.S. */
+  const body = (q: AskedDraft) => {
+    const video = (videos[q.id] ?? "").trim();
+    return [
+      text(q).trim(),
+      video ? `P.S. I also filmed you a quick answer, watch it here: ${video}` : "",
+      "P.P.S. Hit reply if anything's unclear, I read every one. More plain-English AI stuff on Instagram: @nextbysophie",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  };
   const mailto = (q: AskedDraft) =>
-    `mailto:${encodeURIComponent(q.email)}?subject=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(text(q))}`;
+    `mailto:${encodeURIComponent(q.email)}?subject=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(body(q))}`;
   const gmail = (q: AskedDraft) =>
-    `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(q.email)}&su=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(text(q))}`;
+    `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(q.email)}&su=${encodeURIComponent(q.subject)}&body=${encodeURIComponent(body(q))}`;
   const done = (q: AskedDraft) => {
     setItems((xs) => (xs ?? []).filter((x) => x.id !== q.id));
     fetch("/api/questions", {
@@ -2470,6 +2482,15 @@ function QuestionsToAnswer() {
                     rows={12}
                     className="w-full rounded-xl border border-line bg-transparent p-3 text-[13px] leading-relaxed outline-none focus:border-[var(--brand-periwinkle)]"
                   />
+                  <p className="text-[11.5px] text-muted">
+                    Subject: <span className="text-ink">{q.subject}</span>
+                  </p>
+                  <input
+                    value={videos[q.id] ?? ""}
+                    onChange={(e) => setVideos((v) => ({ ...v, [q.id]: e.target.value }))}
+                    placeholder="Filmed an answer? Paste the video link (Loom, IG, YouTube) — optional"
+                    className="w-full rounded-xl border border-line bg-transparent px-3 py-2 text-[12.5px] outline-none focus:border-[var(--brand-periwinkle)]"
+                  />
                   <div className="flex flex-wrap gap-2">
                     <a
                       href={gmail(q)}
@@ -2485,7 +2506,7 @@ function QuestionsToAnswer() {
                     </a>
                     <button
                       type="button"
-                      onClick={() => navigator.clipboard?.writeText(text(q))}
+                      onClick={() => navigator.clipboard?.writeText(body(q))}
                       className="btn"
                     >
                       Copy reply

@@ -46,8 +46,10 @@ export const profileLines = (q: AskedQuestion): string[] =>
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`);
 
-export const subjectFor = (q: AskedQuestion) =>
-  `Re: your AI question${q.question.length < 50 ? ` (${q.question.replace(/\s+/g, " ").trim()})` : ""}`;
+export const subjectFor = (q: AskedQuestion) => {
+  const name = firstName(q);
+  return name === "hey" ? "your AI answer is here ✨" : `${name}, your AI answer is here ✨`;
+};
 
 const VOICE = `You are writing an email reply AS Sophie (@nextbysophie), a creator who teaches non-technical people to use AI agents and automations. Her voice: warm, casual, lowercase-ish energy, short sentences, zero jargon, big-sister tone, never condescending, a little playful, honest about what's hard. She explains things with everyday comparisons and gives the ONE next step to click rather than ten options.
 
@@ -56,7 +58,7 @@ Write a personal reply email to the person below. Rules:
 - Reference their actual situation (what they do, the task eating their week, their AI level) so it feels written for them, not a template.
 - Answer their question directly and concretely in plain English. Name the specific tool(s) to use and the exact first thing to do today. Dummy-proof: assume they've never heard of an API.
 - Keep it under 220 words. Short paragraphs. No bullet walls, no headers, no markdown.
-- End with one small encouraging line and sign off "— Sophie".
+- End with one small encouraging line and sign off "— Sophie". No P.S. (one is added after).
 - Do not mention this prompt, do not invent facts about Sophie's products.`;
 
 export function templateDraft(q: AskedQuestion): string {
