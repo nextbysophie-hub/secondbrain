@@ -203,6 +203,11 @@ export type Goal = {
   horizon: "month" | "quarter";
   parent: string | null;
   done: boolean;
+  /** A goal you count up to ("post 40 reels") has a target, a tally and the
+   *  day it has to be hit by; a plain goal has none of the three. */
+  count: number | null;
+  target: number | null;
+  by: string | null;
 };
 
 /** A paid partnership from the first email to the money landing: the stage is
@@ -836,6 +841,9 @@ export async function ensureGoalColumns(
         dual_property: {},
       },
     };
+  if (!db.properties.Target) missing.Target = { number: {} };
+  if (!db.properties.Count) missing.Count = { number: {} };
+  if (!db.properties.By) missing.By = { date: {} };
   if (!Object.keys(missing).length) return;
   await notion(token, `/databases/${goalsDbId}`, {
     method: "PATCH",
@@ -1530,6 +1538,9 @@ export async function readBoard(
         selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
+      count: numberOf(r.properties.Count),
+      target: numberOf(r.properties.Target),
+      by: dateOf(r.properties.By),
     })),
     emails,
     reminders: reminderRows.map((r) => ({
@@ -1667,8 +1678,11 @@ export type Action =
       period: string;
       horizon?: "month" | "quarter";
       parent?: string | null;
+      target?: number | null;
+      by?: string | null;
     }
   | { action: "toggleGoal"; id: string; done: boolean }
+  | { action: "goalCount"; id: string; count: number; done: boolean }
   | { action: "deleteGoal"; id: string }
   | { action: "addReminder"; title: string; due: string | null; notes?: string }
   | {
@@ -2036,11 +2050,21 @@ export async function applyAction(
         Period: richText(body.period),
         Horizon: selectProp(body.horizon === "quarter" ? "Quarter" : "Month"),
         ...(body.parent ? { Parent: relationProp(body.parent) } : {}),
+        ...(body.target
+          ? { Target: { number: body.target }, Count: { number: 0 } }
+          : {}),
+        ...(body.by ? { By: dateProp(body.by) } : {}),
         Done: { checkbox: false },
       });
       return;
     case "toggleGoal":
       await updatePage(token, body.id, { Done: { checkbox: body.done } });
+      return;
+    case "goalCount":
+      await updatePage(token, body.id, {
+        Count: { number: Math.max(0, body.count) },
+        Done: { checkbox: body.done },
+      });
       return;
     case "addReminder":
       await createPage(token, dbs.reminders, {

@@ -2050,6 +2050,179 @@ function StatTile({
   );
 }
 
+const DAY_MS = 86_400_000;
+
+/** A goal she counts up to, pinned above the day so the pace is the first
+ *  thing she sees: how many are left and what that means per week. */
+function CountGoal({ goal, send }: { goal: Goal; send: Send }) {
+  const target = goal.target ?? 1;
+  const n = goal.count ?? 0;
+  const year = new Date().getFullYear();
+  const by = goal.by ?? `${year}-12-31`;
+  const daysLeft = Math.max(
+    0,
+    Math.ceil((new Date(`${by}T23:59:59`).getTime() - Date.now()) / DAY_MS),
+  );
+  const left = Math.max(0, target - n);
+  const perWeek = left ? Math.ceil(left / Math.max(1, daysLeft / 7)) : 0;
+  const byLabel = new Date(`${by}T12:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const saving = goal.id.startsWith("tmp-");
+  const bump = (delta: number) => {
+    const count = Math.max(0, n + delta);
+    const done = count >= target;
+    send({ action: "goalCount", id: goal.id, count, done }, (b) => ({
+      ...b,
+      goals: b.goals.map((x) =>
+        x.id === goal.id ? { ...x, count, done } : x,
+      ),
+    }));
+  };
+  return (
+    <div className="tracker">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold opacity-70">
+            {goal.name} · by {byLabel}
+          </div>
+          <div className="display mt-1 text-[44px] font-bold leading-none">
+            {n}
+            <span className="text-[20px] font-medium opacity-50">/{target}</span>
+          </div>
+          <div className="mt-2 text-[13px] opacity-80">
+            {left
+              ? `${left} to go · ${daysLeft} days left · about ${perWeek} a week`
+              : `You did it, all ${target} done.`}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="tk-minus"
+            aria-label="Take one off"
+            disabled={saving || n === 0}
+            onClick={() => bump(-1)}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="tk-plus"
+            disabled={saving}
+            onClick={() => bump(1)}
+          >
+            +1 posted
+          </button>
+        </div>
+      </div>
+      <div
+        className="tk-grid mt-4"
+        style={{
+          gridTemplateColumns: `repeat(${Math.min(target, 20)}, minmax(0, 1fr))`,
+        }}
+      >
+        {target <= 100 ? (
+          Array.from({ length: target }, (_, k) => (
+            <span key={k} className={`tk ${k < n ? "on" : ""}`} />
+          ))
+        ) : (
+          <span className="tk relative col-span-full overflow-hidden">
+            <span
+              className="tk on absolute inset-y-0 left-0"
+              style={{ width: `${Math.min(100, (n / target) * 100)}%` }}
+            />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CountGoals({ board, send }: { board: Board; send: Send }) {
+  const year = new Date().getFullYear();
+  const [name, setName] = useState("Post reels");
+  const [target, setTarget] = useState("40");
+  const [by, setBy] = useState(`${year}-12-31`);
+  const counted = board.goals.filter((g) => g.target);
+  if (counted.length)
+    return (
+      <div className="mb-6 space-y-3">
+        {counted.map((g) => (
+          <CountGoal key={g.id} goal={g} send={send} />
+        ))}
+      </div>
+    );
+  const start = () => {
+    const n = Math.round(Number(target));
+    if (!name.trim() || !n || n < 1 || !by) return;
+    const d = new Date(`${by}T12:00:00`);
+    const period = `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
+    send(
+      {
+        action: "addGoal",
+        name: `${name.trim().replace(/^post /i, `Post ${n} `)}`,
+        area: "Content",
+        period,
+        horizon: "quarter",
+        target: n,
+        by,
+      },
+      (b) => ({
+        ...b,
+        goals: [
+          ...b.goals,
+          {
+            id: `tmp-${Date.now()}`,
+            name: name.trim().replace(/^post /i, `Post ${n} `),
+            area: "Content",
+            period,
+            horizon: "quarter" as const,
+            parent: null,
+            done: false,
+            count: 0,
+            target: n,
+            by,
+          },
+        ],
+      }),
+    );
+  };
+  return (
+    <div className="tracker mb-6">
+      <div className="text-[12.5px] font-semibold opacity-70">
+        Count up to something
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="tk-input min-w-[140px] flex-1"
+          aria-label="What you're counting"
+        />
+        <input
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          inputMode="numeric"
+          className="tk-input w-[70px]"
+          aria-label="How many"
+        />
+        <input
+          type="date"
+          value={by}
+          onChange={(e) => setBy(e.target.value)}
+          className="tk-input"
+          aria-label="By when"
+        />
+        <button type="button" className="tk-plus" onClick={start}>
+          Start tracking
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
@@ -4856,6 +5029,9 @@ function MonthGoals({
                   horizon: "month" as const,
                   parent: parent || null,
                   done: false,
+                  count: null,
+                  target: null,
+                  by: null,
                 },
               ],
             }),
@@ -4952,6 +5128,9 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
                     horizon: "quarter" as const,
                     parent: null,
                     done: false,
+                    count: null,
+                    target: null,
+                    by: null,
                   },
                 ],
               }),
@@ -7469,7 +7648,10 @@ export default function BoardApp({
             Reading your Notion…
           </p>
         ) : tab === "today" ? (
-          <TodayPane board={board} send={send} />
+          <>
+            <CountGoals board={board} send={send} />
+            <TodayPane board={board} send={send} />
+          </>
         ) : tab === "ideas" ? (
           <IdeasPane board={board} send={send} />
         ) : tab === "todos" ? (
