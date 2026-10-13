@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -329,7 +330,7 @@ function Panel({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`overflow-hidden rounded-2xl border border-line bg-panel-2 transition ${
+      className={`overflow-hidden rounded-[22px] border border-transparent bg-panel-2 transition ${
         tone ? `panel-${tone}` : ""
       } ${dropping ? "panel-dropping" : ""}`}
     >
@@ -2003,6 +2004,52 @@ function CheckPane({
   );
 }
 
+/** One of the four solid tiles at the top of Today: a count and, when it has
+ *  a ceiling, how far along it is. */
+function StatTile({
+  label,
+  n,
+  of,
+  tone,
+}: {
+  label: string;
+  n: number;
+  of?: number;
+  tone: "yellow" | "peri" | "tan" | "dark";
+}) {
+  return (
+    <div className={`stat stat-${tone}`}>
+      <div className="text-[12.5px] font-semibold">{label}</div>
+      <div className="display mt-1.5 text-[30px] font-bold leading-none">
+        {n}
+        {of !== undefined ? (
+          <span className="text-[15px] font-medium opacity-60">/{of}</span>
+        ) : null}
+      </div>
+      {of ? (
+        <div className="mt-2.5 flex gap-1">
+          {of <= 6 ? (
+            Array.from({ length: of }, (_, k) => (
+              <span key={k} className={`bar ${k < n ? "on" : ""}`} />
+            ))
+          ) : (
+            <span className="bar relative overflow-hidden">
+              <span
+                className="bar on absolute inset-y-0 left-0"
+                style={{ width: `${Math.min(100, (n / of) * 100)}%` }}
+              />
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2.5 text-[11px] opacity-60">
+          {n ? "waiting on you" : "all clear"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
@@ -2174,7 +2221,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           <button
             type="button"
             onClick={() => setDay(tomorrow)}
-            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-[var(--paper-yellow)] px-4 py-3 text-left transition hover:brightness-[.98]"
           >
             <span className="text-[14px]">
               Tomorrow is still empty. Pick its three while today is fresh.
@@ -2363,6 +2410,35 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
       </div>
 
       <div className="min-w-0 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <StatTile
+            label="Today's three"
+            n={deep.filter((t) => t.done).length}
+            of={DEEP_CAP}
+            tone="yellow"
+          />
+          <StatTile
+            label="Quick wins"
+            n={quick.filter((t) => t.done).length}
+            of={Math.max(QUICK_CAP, quick.length)}
+            tone="peri"
+          />
+          <StatTile
+            label="Habits"
+            n={dailyHabits.filter((h) => doneToday.has(h.id)).length}
+            of={dailyHabits.length}
+            tone="tan"
+          />
+          <StatTile
+            label="Reminders due"
+            n={
+              board.reminders.filter(
+                (r) => !r.done && r.due !== null && r.due <= day,
+              ).length
+            }
+            tone="dark"
+          />
+        </div>
         <EmailItems board={board} send={send} day={day} />
         {day === TODAY ? <QuestionsToAnswer /> : null}
         <CheckPane board={board} send={send} day={day} />
@@ -6730,7 +6806,7 @@ function DueReminders({
     );
 
   return (
-    <section className="mt-7 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3">
+    <section className="mt-7 rounded-[22px] bg-[var(--paper-tan)] px-4 py-3">
       <div className="flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold">Check on this</h3>
         <span className="text-[12px] text-muted">
@@ -6992,6 +7068,46 @@ const TABS = [
   { id: "goals", label: "Goals" },
 ];
 
+const NAV_GROUPS = [
+  { label: "Plan", ids: ["today", "todos", "reminders"] },
+  { label: "Create", ids: ["ideas", "agent"] },
+  { label: "Grow", ids: ["habits", "goals"] },
+  { label: "Money", ids: ["deals"] },
+];
+
+const ICON_PATHS: Record<string, string> = {
+  today: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z",
+  todos: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  reminders: "M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0",
+  ideas:
+    "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2v.1h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z",
+  agent:
+    "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
+  habits:
+    "M12 21c-3.9 0-7-2.7-7-6.5 0-3.6 3-5.8 4-9.5 2.2 1.4 3.4 3.5 3.5 5.5 1-.8 1.6-2 1.8-3.3C16.7 9 19 11.6 19 14.5 19 18.3 15.9 21 12 21z",
+  goals:
+    "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01",
+  deals:
+    "M12 3v18M16.5 7.5c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3S9.5 10.5 12 11s4.5 1.5 4.5 3.5-2 3-4.5 3-4.5-1.3-4.5-3",
+  notion: "M7 17 17 7M9 7h8v8",
+};
+
+function NavIcon({ id }: { id: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={ICON_PATHS[id]} />
+    </svg>
+  );
+}
+
 const QUOTES = [
   "You do not rise to the level of your goals, you fall to the level of your systems.",
   "A year from now you'll wish you had started today.",
@@ -7025,16 +7141,41 @@ export default function BoardApp({
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("today");
+  const [tab, setTabState] = useState("today");
+  // The tab lives in the address (#ideas, #habits…) so a refresh or a saved
+  // link opens the same page.
+  const setTab = (id: string) => {
+    setTabState(id);
+    window.history.replaceState(null, "", `#${id}`);
+  };
+  useEffect(() => {
+    const fromHash = () => {
+      const id = window.location.hash.slice(1);
+      if (TABS.some((t) => t.id === id)) setTabState(id);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
   // The deals passcode: held here, sent with every read so the server decides.
   const [dealsCode, setDealsCode] = useState("");
   // Picked after mount so the server and the browser can't disagree on it.
   const [quote, setQuote] = useState("");
 
-  useEffect(
-    () => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]),
-    [],
-  );
+  // Her clock, not the server's, decides the greeting and the date.
+  const [hello, setHello] = useState({ greet: "Hello", date: "" });
+
+  useEffect(() => {
+    setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    setHello({
+      greet: greeting().replace(".", ","),
+      date: new Date().toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "long",
+        day: "numeric",
+      }),
+    });
+  }, []);
   // When the board last came back from Notion, worded for the header pill.
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
   const [sinceSync, setSinceSync] = useState("just now");
@@ -7186,71 +7327,136 @@ export default function BoardApp({
     );
   }
 
+  const dueNow = board
+    ? board.reminders.filter((r) => !r.done && r.due !== null && r.due <= TODAY)
+        .length
+    : 0;
+  // The week and the deal wall need every pixel, so the menu shrinks to icons.
+  const slim = tab === "todos" || tab === "deals";
+  const tabLabel = TABS.find((t) => t.id === tab)?.label ?? "";
+  const syncLabel = loading
+    ? "Syncing with Notion…"
+    : `Synced with Notion ${sinceSync}`;
+  const logo = (
+    <>
+      second<i>·</i>brain
+    </>
+  );
+
   return (
     <div className="board-theme">
-      {/* A week and the deal wall need the whole desk; everything else reads
-          better narrow. */}
-      <div
-        className={`mx-auto px-5 pb-20 pt-10 ${
-          tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-5xl"
-        }`}
-      >
-        <header className="mb-7">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-            <div className="min-w-0">
-              <h1 className="serif text-[34px] leading-none sm:text-[38px]">
-                {greeting().replace(".", ", Sophie.")}
-              </h1>
-              <p className="mt-2.5 min-h-[18px] text-[13px] italic text-muted">
-                {quote}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4 sm:pt-1.5">
-              {board ? (
-                <span className="hidden sm:inline-flex">
-                  <StreakDots board={board} />
-                </span>
-              ) : null}
+      <div className="shell">
+        <nav className={`sb ${slim ? "slim" : ""}`} aria-label="Dashboard">
+          <div className="sb-logo display">
+            {slim ? (
+              <>
+                s<i>·</i>b
+              </>
+            ) : (
+              logo
+            )}
+          </div>
+          {NAV_GROUPS.map((g) => (
+            <Fragment key={g.label}>
+              <div className="sb-sec">{g.label}</div>
+              {g.ids.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  title={TABS.find((t) => t.id === id)?.label}
+                  className={`sb-btn ${tab === id ? "on" : ""}`}
+                >
+                  <NavIcon id={id} />
+                  <span className="sb-label">
+                    {TABS.find((t) => t.id === id)?.label}
+                  </span>
+                  {id === "reminders" && dueNow ? (
+                    <span className="sb-count">{dueNow}</span>
+                  ) : null}
+                </button>
+              ))}
+            </Fragment>
+          ))}
+          <div className="sb-foot">
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="sb-btn"
+              aria-label="Sync with Notion"
+            >
+              <span className={`sb-dot ${loading ? "is-busy" : ""}`} />
+              <span className="sb-label">
+                {loading ? "Syncing…" : `Synced ${sinceSync}`}
+              </span>
+            </button>
+            <a
+              className="sb-btn"
+              href="https://www.notion.so"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <NavIcon id="notion" />
+              <span className="sb-label">Notion</span>
+            </a>
+          </div>
+        </nav>
+
+        {/* A week and the deal wall need the whole desk; everything else reads
+            better narrower. */}
+        <main className="min-w-0 flex-1 pb-28 lg:pb-8">
+          <div
+            className={`mx-auto px-1 pt-2 lg:px-3 lg:pt-5 ${
+              tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-[1180px]"
+            }`}
+          >
+            <div className="mtop">
+              <span className="mtop-logo display">{logo}</span>
               <button
                 type="button"
                 onClick={() => void load()}
                 aria-label="Sync with Notion"
-                className={`sync-pill transition hover:text-ink ${loading ? "is-busy" : ""}`}
+                className={`sync-pill ${loading ? "is-busy" : ""}`}
               >
-                {loading ? "Syncing with Notion…" : `Synced with Notion ${sinceSync}`}
+                {loading ? "Syncing…" : sinceSync}
               </button>
             </div>
-          </div>
 
-          <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`-mb-px shrink-0 border-b-2 px-3 pb-2.5 text-[13px] transition ${
-                  tab === t.id
-                    ? "border-accent font-medium text-ink"
-                    : "border-transparent text-muted hover:text-ink"
-                }`}
-              >
-                {t.label}
-                {t.id === "reminders" && board
-                  ? (() => {
-                      const dueNow = board.reminders.filter(
-                        (r) => !r.done && r.due !== null && r.due <= TODAY,
-                      ).length;
-                      return dueNow ? (
-                        <span className="ml-1.5 rounded-full bg-bad px-1.5 py-0.5 text-[10px] text-brand-cream">
-                          {dueNow}
-                        </span>
-                      ) : null;
-                    })()
-                  : null}
-              </button>
-            ))}
-          </nav>
-        </header>
+            <header className="mb-7 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                {tab === "today" ? (
+                  <>
+                    <p className="display min-h-[30px] text-[20px] font-semibold sm:text-[24px]">
+                      {hello.date}
+                    </p>
+                    <h1 className="display mt-0.5 text-[36px] font-bold leading-[1.05] sm:text-[50px]">
+                      {hello.greet}{" "}
+                      <span className="serif font-normal italic tracking-normal">
+                        Sophie
+                      </span>
+                    </h1>
+                  </>
+                ) : (
+                  <h1 className="display text-[32px] font-bold leading-tight sm:text-[40px]">
+                    {tabLabel}
+                  </h1>
+                )}
+                <p className="mt-2 min-h-[18px] text-[13px] italic text-muted">
+                  {quote}
+                </p>
+              </div>
+              <div className="hidden shrink-0 items-center gap-4 pt-2 lg:flex">
+                {board ? <StreakDots board={board} /> : null}
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  aria-label="Sync with Notion"
+                  className={`sync-pill transition hover:text-ink ${loading ? "is-busy" : ""}`}
+                >
+                  {syncLabel}
+                </button>
+              </div>
+            </header>
 
         {error ? (
           <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">
@@ -7289,6 +7495,24 @@ export default function BoardApp({
         ) : (
           <GoalsPane board={board} send={send} />
         )}
+          </div>
+        </main>
+
+        <nav className="bnav" aria-label="Dashboard">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              aria-label={t.label}
+              title={t.label}
+              onClick={() => setTab(t.id)}
+              className={tab === t.id ? "on" : ""}
+            >
+              <NavIcon id={t.id} />
+              {t.id === "reminders" && dueNow ? <span className="dot" /> : null}
+            </button>
+          ))}
+        </nav>
       </div>
     </div>
   );
