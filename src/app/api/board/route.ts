@@ -15,6 +15,7 @@ import {
   findDatabaseLike,
   memo,
   readBoard,
+  readContentIdeas,
   readDealMap,
   readTaskMap,
   TaskMap,
@@ -113,10 +114,13 @@ export async function GET(req: Request) {
 
   try {
     const { dbs, map, dealMap } = await setup(creds.token, ideaDbId, taskDbId);
-    const board = await readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10));
+    const [board, contentIdeas] = await Promise.all([
+      readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10)),
+      readContentIdeas(creds.token).catch(() => null),
+    ]);
     if (!dealsUnlocked(req))
-      return NextResponse.json({ ok: true, ...board, deals: [], dealsLocked: true, dbs });
-    return NextResponse.json({ ok: true, ...board, dbs });
+      return NextResponse.json({ ok: true, ...board, contentIdeas, deals: [], dealsLocked: true, dbs });
+    return NextResponse.json({ ok: true, ...board, contentIdeas, dbs });
   } catch (e) {
     return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400 });
   }

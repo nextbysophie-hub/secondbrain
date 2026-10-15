@@ -158,6 +158,20 @@ export type Idea = {
   url: string;
 };
 
+/** A row of the separate Content Ideas pipeline (hook, pillar, platform,
+ *  Inbox → Posted), shown beside the quick captures rather than mixed in. */
+export type ContentIdea = {
+  id: string;
+  title: string;
+  hook: string;
+  status: string | null;
+  pillars: string[];
+  platforms: string[];
+  due: string | null;
+  captured: string | null;
+  url: string;
+};
+
 /** A thing to come back to on a date — "check the refund landed" — rather
  *  than a task with work in it. Its whole value is the date, so it carries
  *  nothing else but the note and whether it's been dealt with. */
@@ -317,6 +331,8 @@ export type Board = {
   timings: Timing[];
   categories: string[];
   dbs: BoardDbs;
+  /** Null when there's no Content Ideas database the integration can read. */
+  contentIdeas?: ContentIdea[] | null;
 };
 
 export type BoardDbs = {
@@ -1283,6 +1299,36 @@ function emailDoneProps(map: EmailMap, done: boolean): object {
   return map.done.kind === "checkbox"
     ? { [map.done.prop]: { checkbox: done } }
     : { [map.done.prop]: { status: done ? { name: map.done.doneName } : null } };
+}
+
+const multiOf = (p?: Prop) => (p?.multi_select ?? []).map((o) => o.name ?? "").filter(Boolean);
+
+/** The Content Ideas database is pinned by CONTENT_IDEAS_DB, else found by
+ *  its name; null means none is shared with this integration. */
+export async function readContentIdeas(
+  token: string,
+): Promise<ContentIdea[] | null> {
+  const dbId =
+    process.env.CONTENT_IDEAS_DB ||
+    (await findDatabaseLike(token, "content ideas", /^\s*content ideas\s*$/i));
+  if (!dbId) return null;
+  const rows = await query(
+    token,
+    dbId,
+    { page_size: 100, sorts: [{ timestamp: "created_time", direction: "descending" }] },
+    3,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    title: titleOf(r),
+    hook: textOf(r.properties.Hook),
+    status: tagOf(r.properties.Status),
+    pillars: multiOf(r.properties.Pillar),
+    platforms: multiOf(r.properties.Platform),
+    due: dateOf(r.properties["Due date"]),
+    captured: r.created_time?.slice(0, 10) ?? null,
+    url: r.url,
+  }));
 }
 
 async function readEmails(

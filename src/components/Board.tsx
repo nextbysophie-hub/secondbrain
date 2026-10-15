@@ -17,6 +17,7 @@ import type {
   Deal,
   EmailItem,
   Every,
+  ContentIdea,
   Goal,
   Habit,
   HabitTick,
@@ -3060,11 +3061,44 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const opened = board.ideas.find((i) => i.id === open) ?? null;
 
+  const [view, setView] = useState<"saved" | "content">("saved");
+
   if (opened)
     return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
 
+  const switcher = (
+    <div className="seg seg-lg" role="group" aria-label="Which ideas">
+      <button
+        type="button"
+        aria-pressed={view === "saved"}
+        onClick={() => setView("saved")}
+      >
+        Saved ideas
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "content"}
+        onClick={() => setView("content")}
+      >
+        Content ideas
+        {board.contentIdeas?.length ? (
+          <span className="ml-1.5 opacity-60">{board.contentIdeas.length}</span>
+        ) : null}
+      </button>
+    </div>
+  );
+
+  if (view === "content")
+    return (
+      <div className="space-y-5">
+        {switcher}
+        <ContentIdeas ideas={board.contentIdeas ?? null} />
+      </div>
+    );
+
   return (
     <div className="space-y-5">
+      {switcher}
       <Panel
         title="Ideas"
         right={
@@ -3091,6 +3125,129 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
         )}
       </Panel>
       <Trends board={board} send={send} />
+    </div>
+  );
+}
+
+const CONTENT_STATUSES = [
+  "Inbox",
+  "Backlog",
+  "Drafting",
+  "Filming",
+  "Editing",
+  "Posted",
+  "Repurposed",
+];
+
+/** The Content Ideas pipeline, read-only here: filter by stage, tap a card
+ *  to open it in Notion. */
+function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
+  const [stage, setStage] = useState<string | null>(null);
+  if (!ideas)
+    return (
+      <Panel title="Content ideas">
+        <div className="space-y-2 py-1 text-[14px] text-muted">
+          <p>I can&rsquo;t see your Content Ideas database yet. To share it:</p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Open the Content Ideas database in Notion.</li>
+            <li>Click ••• at the top right, then Connections.</li>
+            <li>Add the integration you connected when you set up your second brain.</li>
+          </ol>
+          <p>Then refresh this page.</p>
+        </div>
+      </Panel>
+    );
+  const stages = [
+    ...CONTENT_STATUSES.filter((s) => ideas.some((i) => i.status === s)),
+    ...[...new Set(ideas.map((i) => i.status ?? "No status"))].filter(
+      (s) => !CONTENT_STATUSES.includes(s),
+    ),
+  ];
+  const shown = stage
+    ? ideas.filter((i) => (i.status ?? "No status") === stage)
+    : ideas;
+  const day = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={`ci-chip ${stage === null ? "on" : ""}`}
+          onClick={() => setStage(null)}
+        >
+          All <span className="opacity-60">{ideas.length}</span>
+        </button>
+        {stages.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`ci-chip ${stage === s ? "on" : ""}`}
+            onClick={() => setStage(stage === s ? null : s)}
+          >
+            {s}{" "}
+            <span className="opacity-60">
+              {ideas.filter((i) => (i.status ?? "No status") === s).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      {shown.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {shown.map((i) => (
+            <a
+              key={i.id}
+              href={i.url}
+              target="_blank"
+              rel="noreferrer"
+              className="ci-card"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-[15px] font-semibold leading-snug">
+                  {i.title || "Untitled"}
+                </span>
+                {i.status ? (
+                  <span
+                    className={`ci-st ci-st-${i.status.toLowerCase().replace(/[^a-z]/g, "")}`}
+                  >
+                    {i.status}
+                  </span>
+                ) : null}
+              </div>
+              {i.hook ? (
+                <p className="mt-1.5 text-[13px] italic text-muted">
+                  &ldquo;{i.hook}&rdquo;
+                </p>
+              ) : null}
+              {i.pillars.length || i.platforms.length ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {i.pillars.map((p) => (
+                    <span key={p} className="ci-tag ci-tag-pillar">
+                      {p}
+                    </span>
+                  ))}
+                  {i.platforms.map((p) => (
+                    <span key={p} className="ci-tag">
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-3 text-[11.5px] text-faint">
+                {i.due ? `Due ${day(i.due)} · ` : ""}
+                {i.captured ? `Captured ${day(i.captured)}` : ""}
+              </div>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <p className="py-6 text-center text-[14px] text-muted">
+          Nothing in this stage.
+        </p>
+      )}
     </div>
   );
 }

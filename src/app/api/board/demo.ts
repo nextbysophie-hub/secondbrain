@@ -49,6 +49,14 @@ export function demoBoard() {
       { id: "a2", title: "Find a dentist that takes my insurance", details: "", due: null, status: "Queued", result: "", url: "#" },
       { id: "a3", title: "Renew the domain", details: "", due: iso(-2), status: "Done", result: "Renewed for 2 years, receipt in your email.", url: "#" },
     ],
+    contentIdeas: [
+      { id: "c1", title: "Ways I automated work while on vacation", hook: "I was on a beach and my business ran itself.", status: "Drafting", pillars: ["AI for business"], platforms: ["Instagram Reels", "TikTok"], due: iso(4), captured: iso(-2), url: "#" },
+      { id: "c2", title: "How I price a brand deal", hook: "Stop guessing your rate.", status: "Filming", pillars: ["Brand deals"], platforms: ["Instagram Reels"], due: iso(1), captured: iso(-6), url: "#" },
+      { id: "c3", title: "My Notion second brain tour", hook: "", status: "Inbox", pillars: ["Notion systems"], platforms: ["YouTube (long)"], due: null, captured: iso(-1), url: "#" },
+      { id: "c4", title: "Roastroom", hook: "", status: "Inbox", pillars: [], platforms: [], due: null, captured: iso(0), url: "#" },
+      { id: "c5", title: "The 3 apps I deleted this year", hook: "These were costing me 2 hours a day.", status: "Posted", pillars: ["Creator ops"], platforms: ["TikTok", "YouTube Shorts"], due: null, captured: iso(-14), url: "#" },
+      { id: "c6", title: "Mindset before a launch", hook: "", status: "Backlog", pillars: ["Mindset"], platforms: ["Newsletter"], due: null, captured: iso(-9), url: "#" },
+    ],
     ideas: [
       { id: "i1", title: "Video: the 3 apps I deleted this year", notes: "", status: "Inbox", link: null, captured: iso(0), url: "#" },
       { id: "i2", title: "Hook — my best ideas die in the shower", notes: "", status: "Inbox", link: null, captured: iso(0), url: "#" },
