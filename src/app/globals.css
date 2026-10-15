@@ -564,7 +564,7 @@ select {
 }
 
 /* Content ideas view inside Ideas */
-.board-theme .seg-lg > button { padding: 7px 16px; font-size: 13.5px; }
+.board-theme .seg-lg > button { white-space: nowrap; padding: 7px 16px; font-size: 13.5px; }
 .board-theme .ci-chip { border-radius: 999px; padding: 6px 13px; font-size: 13px; background: var(--paper-panel); color: var(--paper-ink); }
 .board-theme .ci-chip.on { background: var(--paper-sidebar); color: var(--paper-sidebar-ink); }
 .board-theme .ci-card { display: block; position: relative; background: var(--paper-panel); border-radius: 20px; padding: 16px 18px; transition: background .15s; }
@@ -581,4 +581,6 @@ select {
 .board-theme .ci-st-filming { background: var(--paper-yellow); }
 .board-theme .ci-st-editing { background: var(--paper-rust); color: var(--paper-bad); }
 .board-theme .ci-st-posted, .board-theme .ci-st-repurposed { background: var(--paper-ok-bg); color: var(--paper-ok-ink); }
+.board-theme .ci-st-exploring { background: var(--paper-yellow); }
+.board-theme .ci-st-archived { background: var(--paper-panel-3); color: var(--paper-faint); }
 .board-theme .ci-st-backlog { background: var(--paper-panel-3); color: var(--paper-muted); }

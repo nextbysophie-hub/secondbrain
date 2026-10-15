@@ -49,6 +49,12 @@ export function demoBoard() {
       { id: "a2", title: "Find a dentist that takes my insurance", details: "", due: null, status: "Queued", result: "", url: "#" },
       { id: "a3", title: "Renew the domain", details: "", due: iso(-2), status: "Done", result: "Renewed for 2 years, receipt in your email.", url: "#" },
     ],
+    businessIdeas: [
+      { id: "b-1", title: "Notion template shop", hook: "", next: "List the 3 templates people ask me for most", status: "Exploring", pillars: ["Product"], platforms: ["High impact", "Medium effort"], due: null, captured: iso(-3), link: "https://www.instagram.com/reel/DdeJXdku0m6/", url: "#" },
+      { id: "b-2", title: "AI automation setup calls", hook: "", next: "", status: "Inbox", pillars: ["Service"], platforms: ["Medium impact"], due: null, captured: iso(-1), link: null, url: "#" },
+      { id: "b-3", title: "Crypto AI", hook: "", next: "", status: "Inbox", pillars: [], platforms: [], due: null, captured: iso(0), link: null, url: "#" },
+      { id: "b-4", title: "Merch drop", hook: "", next: "", status: "Archived", pillars: ["Other"], platforms: ["Low impact", "High effort"], due: null, captured: iso(-20), link: null, url: "#" },
+    ],
     contentIdeas: [
       { id: "c1", title: "Ways I automated work while on vacation", hook: "I was on a beach and my business ran itself.", status: "Drafting", pillars: ["AI for business"], platforms: ["Instagram Reels", "TikTok"], due: iso(4), captured: iso(-2), link: "https://www.instagram.com/reel/DeAOKXloOjC/", url: "#" },
       { id: "c2", title: "How I price a brand deal", hook: "Stop guessing your rate.", status: "Filming", pillars: ["Brand deals"], platforms: ["Instagram Reels"], due: iso(1), captured: iso(-6), link: "https://vt.tiktok.com/ZS000000/", url: "#" },

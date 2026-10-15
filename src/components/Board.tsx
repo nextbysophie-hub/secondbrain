@@ -3061,7 +3061,7 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const opened = board.ideas.find((i) => i.id === open) ?? null;
 
-  const [view, setView] = useState<"saved" | "content">("saved");
+  const [view, setView] = useState<"saved" | "content" | "business">("saved");
 
   if (opened)
     return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
@@ -3073,16 +3073,29 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
         aria-pressed={view === "saved"}
         onClick={() => setView("saved")}
       >
-        Saved ideas
+        Saved
+        <span className="hidden sm:inline"> ideas</span>
       </button>
       <button
         type="button"
         aria-pressed={view === "content"}
         onClick={() => setView("content")}
       >
-        Content ideas
+        Content
+        <span className="hidden sm:inline"> ideas</span>
         {board.contentIdeas?.length ? (
           <span className="ml-1.5 opacity-60">{board.contentIdeas.length}</span>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "business"}
+        onClick={() => setView("business")}
+      >
+        Business
+        <span className="hidden sm:inline"> ideas</span>
+        {board.businessIdeas?.length ? (
+          <span className="ml-1.5 opacity-60">{board.businessIdeas.length}</span>
         ) : null}
       </button>
     </div>
@@ -3092,7 +3105,23 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
     return (
       <div className="space-y-5">
         {switcher}
-        <ContentIdeas ideas={board.contentIdeas ?? null} />
+        <ContentIdeas
+          key="content"
+          name="Content Ideas"
+          ideas={board.contentIdeas ?? null}
+        />
+      </div>
+    );
+
+  if (view === "business")
+    return (
+      <div className="space-y-5">
+        {switcher}
+        <ContentIdeas
+          key="business"
+          name="Business Ideas"
+          ideas={board.businessIdeas ?? null}
+        />
       </div>
     );
 
@@ -3155,15 +3184,21 @@ function sourceName(link: string) {
   return host || "link";
 }
 
-function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
+function ContentIdeas({
+  ideas,
+  name,
+}: {
+  ideas: ContentIdea[] | null;
+  name: string;
+}) {
   const [stage, setStage] = useState<string | null>(null);
   if (!ideas)
     return (
-      <Panel title="Content ideas">
+      <Panel title={name}>
         <div className="space-y-2 py-1 text-[14px] text-muted">
-          <p>I can&rsquo;t see your Content Ideas database yet. To share it:</p>
+          <p>I can&rsquo;t see your {name} database yet. To share it:</p>
           <ol className="list-decimal space-y-1 pl-5">
-            <li>Open the Content Ideas database in Notion.</li>
+            <li>Open the {name} database in Notion.</li>
             <li>Click ••• at the top right, then Connections.</li>
             <li>Add the integration you connected when you set up your second brain.</li>
           </ol>
@@ -3239,6 +3274,11 @@ function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
               {i.hook ? (
                 <p className="mt-1.5 text-[13px] italic text-muted">
                   &ldquo;{i.hook}&rdquo;
+                </p>
+              ) : null}
+              {i.next ? (
+                <p className="mt-1.5 text-[13px] text-muted">
+                  <span className="font-semibold text-ink">Next:</span> {i.next}
                 </p>
               ) : null}
               {i.pillars.length || i.platforms.length ? (

@@ -171,6 +171,8 @@ export type ContentIdea = {
   captured: string | null;
   /** The reel/post the idea came from ("Source link"). */
   link: string | null;
+  /** Business ideas only: the "Next step" column. */
+  next?: string;
   url: string;
 };
 
@@ -335,6 +337,7 @@ export type Board = {
   dbs: BoardDbs;
   /** Null when there's no Content Ideas database the integration can read. */
   contentIdeas?: ContentIdea[] | null;
+  businessIdeas?: ContentIdea[] | null;
 };
 
 export type BoardDbs = {
@@ -1332,6 +1335,46 @@ export async function readContentIdeas(
     link: r.properties["Source link"]?.url || null,
     url: r.url,
   }));
+}
+
+/** The "Business Ideas" list, shown in the same card layout as Content Ideas:
+ * Category stands in for pillars, Impact/Effort for platforms. */
+export async function readBusinessIdeas(
+  token: string,
+): Promise<ContentIdea[] | null> {
+  const dbId =
+    process.env.BUSINESS_IDEAS_DB ||
+    (await findDatabaseLike(token, "business ideas", /^\s*business ideas\s*$/i));
+  if (!dbId) return null;
+  const rows = await query(
+    token,
+    dbId,
+    { page_size: 100, sorts: [{ timestamp: "created_time", direction: "descending" }] },
+    3,
+  );
+  const level = (p: Prop | undefined, what: string) => {
+    const v = selectOf(p);
+    return v ? `${v} ${what}` : null;
+  };
+  return rows.map((r) => {
+    const category = selectOf(r.properties.Category);
+    return {
+      id: r.id,
+      title: titleOf(r),
+      hook: "",
+      next: textOf(r.properties["Next step"]),
+      status: tagOf(r.properties.Status),
+      pillars: category ? [category] : [],
+      platforms: [
+        level(r.properties.Impact, "impact"),
+        level(r.properties.Effort, "effort"),
+      ].filter((x): x is string => !!x),
+      due: null,
+      captured: r.created_time?.slice(0, 10) ?? null,
+      link: r.properties["Reference link"]?.url || null,
+      url: r.url,
+    };
+  });
 }
 
 async function readEmails(
