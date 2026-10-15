@@ -169,6 +169,8 @@ export type ContentIdea = {
   platforms: string[];
   due: string | null;
   captured: string | null;
+  /** The reel/post the idea came from ("Source link"). */
+  link: string | null;
   url: string;
 };
 
@@ -1327,6 +1329,7 @@ export async function readContentIdeas(
     platforms: multiOf(r.properties.Platform),
     due: dateOf(r.properties["Due date"]),
     captured: r.created_time?.slice(0, 10) ?? null,
+    link: r.properties["Source link"]?.url || null,
     url: r.url,
   }));
 }

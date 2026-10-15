@@ -3141,6 +3141,20 @@ const CONTENT_STATUSES = [
 
 /** The Content Ideas pipeline, read-only here: filter by stage, tap a card
  *  to open it in Notion. */
+function sourceName(link: string) {
+  const host = (() => {
+    try {
+      return new URL(link).hostname.replace(/^(www|m|vt|vm)\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  if (host.includes("instagram")) return "Instagram";
+  if (host.includes("tiktok")) return "TikTok";
+  if (host.includes("youtu")) return "YouTube";
+  return host || "link";
+}
+
 function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
   const [stage, setStage] = useState<string | null>(null);
   if (!ideas)
@@ -3198,17 +3212,22 @@ function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
       {shown.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {shown.map((i) => (
-            <a
-              key={i.id}
-              href={i.url}
-              target="_blank"
-              rel="noreferrer"
-              className="ci-card"
-            >
+            <div key={i.id} className="ci-card">
               <div className="flex items-start justify-between gap-3">
-                <span className="text-[15px] font-semibold leading-snug">
-                  {i.title || "Untitled"}
-                </span>
+                {i.link ? (
+                  <a
+                    href={i.link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ci-cover text-[15px] font-semibold leading-snug"
+                  >
+                    {i.title || "Untitled"}
+                  </a>
+                ) : (
+                  <span className="text-[15px] font-semibold leading-snug">
+                    {i.title || "Untitled"}
+                  </span>
+                )}
                 {i.status ? (
                   <span
                     className={`ci-st ci-st-${i.status.toLowerCase().replace(/[^a-z]/g, "")}`}
@@ -3236,11 +3255,32 @@ function ContentIdeas({ ideas }: { ideas: ContentIdea[] | null }) {
                   ))}
                 </div>
               ) : null}
-              <div className="mt-3 text-[11.5px] text-faint">
+              <div className="mt-3 flex items-center justify-between gap-2">
+                {i.link ? (
+                  <span className="ci-go">
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M5 3.5v9l7-4.5z" fill="currentColor" />
+                    </svg>
+                    Watch on {sourceName(i.link)}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <a
+                  href={i.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ci-notion"
+                  title="Open in Notion"
+                >
+                  Notion ↗
+                </a>
+              </div>
+              <div className="mt-2 text-[11.5px] text-faint">
                 {i.due ? `Due ${day(i.due)} · ` : ""}
                 {i.captured ? `Captured ${day(i.captured)}` : ""}
               </div>
-            </a>
+            </div>
           ))}
         </div>
       ) : (
