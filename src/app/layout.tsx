@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, Caveat, Inter, Instrument_Serif } from "next/font/google";
+import { Archivo, Caveat, Inter, Instrument_Serif, Poppins } from "next/font/google";
 import "./globals.css";
 
 const grotesk = Archivo({
@@ -19,6 +19,13 @@ const serif = Instrument_Serif({
   weight: "400",
   style: ["normal", "italic"],
   variable: "--font-serif",
+  display: "swap",
+});
+
+const display = Poppins({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -42,7 +49,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${grotesk.variable} ${hand.variable} ${ui.variable} ${serif.variable}`}>
+    <html lang="en" className={`${grotesk.variable} ${hand.variable} ${ui.variable} ${serif.variable} ${display.variable}`}>
       <body>{children}</body>
     </html>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -16,6 +17,7 @@ import type {
   Deal,
   EmailItem,
   Every,
+  ContentIdea,
   Goal,
   Habit,
   HabitTick,
@@ -329,7 +331,7 @@ function Panel({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`overflow-hidden rounded-2xl border border-line bg-panel-2 transition ${
+      className={`overflow-hidden rounded-[22px] border border-transparent bg-panel-2 transition ${
         tone ? `panel-${tone}` : ""
       } ${dropping ? "panel-dropping" : ""}`}
     >
@@ -2003,6 +2005,225 @@ function CheckPane({
   );
 }
 
+/** One of the four solid tiles at the top of Today: a count and, when it has
+ *  a ceiling, how far along it is. */
+function StatTile({
+  label,
+  n,
+  of,
+  tone,
+}: {
+  label: string;
+  n: number;
+  of?: number;
+  tone: "yellow" | "peri" | "tan" | "dark";
+}) {
+  return (
+    <div className={`stat stat-${tone}`}>
+      <div className="text-[12.5px] font-semibold">{label}</div>
+      <div className="display mt-1.5 text-[30px] font-bold leading-none">
+        {n}
+        {of !== undefined ? (
+          <span className="text-[15px] font-medium opacity-60">/{of}</span>
+        ) : null}
+      </div>
+      {of ? (
+        <div className="mt-2.5 flex gap-1">
+          {of <= 6 ? (
+            Array.from({ length: of }, (_, k) => (
+              <span key={k} className={`bar ${k < n ? "on" : ""}`} />
+            ))
+          ) : (
+            <span className="bar relative overflow-hidden">
+              <span
+                className="bar on absolute inset-y-0 left-0"
+                style={{ width: `${Math.min(100, (n / of) * 100)}%` }}
+              />
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2.5 text-[11px] opacity-60">
+          {n ? "waiting on you" : "all clear"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const DAY_MS = 86_400_000;
+
+/** A goal she counts up to, pinned above the day so the pace is the first
+ *  thing she sees: how many are left and what that means per week. */
+function CountGoal({ goal, send }: { goal: Goal; send: Send }) {
+  const target = goal.target ?? 1;
+  const n = goal.count ?? 0;
+  const year = new Date().getFullYear();
+  const by = goal.by ?? `${year}-12-31`;
+  const daysLeft = Math.max(
+    0,
+    Math.ceil((new Date(`${by}T23:59:59`).getTime() - Date.now()) / DAY_MS),
+  );
+  const left = Math.max(0, target - n);
+  const perWeek = left ? Math.ceil(left / Math.max(1, daysLeft / 7)) : 0;
+  const byLabel = new Date(`${by}T12:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const saving = goal.id.startsWith("tmp-");
+  const bump = (delta: number) => {
+    const count = Math.max(0, n + delta);
+    const done = count >= target;
+    send({ action: "goalCount", id: goal.id, count, done }, (b) => ({
+      ...b,
+      goals: b.goals.map((x) =>
+        x.id === goal.id ? { ...x, count, done } : x,
+      ),
+    }));
+  };
+  return (
+    <div className="tracker">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold opacity-70">
+            {goal.name} · by {byLabel}
+          </div>
+          <div className="display mt-1 text-[44px] font-bold leading-none">
+            {n}
+            <span className="text-[20px] font-medium opacity-50">/{target}</span>
+          </div>
+          <div className="mt-2 text-[13px] opacity-80">
+            {left
+              ? `${left} to go · ${daysLeft} days left · about ${perWeek} a week`
+              : `You did it, all ${target} done.`}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="tk-minus"
+            aria-label="Take one off"
+            disabled={saving || n === 0}
+            onClick={() => bump(-1)}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="tk-plus"
+            disabled={saving}
+            onClick={() => bump(1)}
+          >
+            +1 posted
+          </button>
+        </div>
+      </div>
+      <div
+        className="tk-grid mt-4"
+        style={{
+          gridTemplateColumns: `repeat(${Math.min(target, 20)}, minmax(0, 1fr))`,
+        }}
+      >
+        {target <= 100 ? (
+          Array.from({ length: target }, (_, k) => (
+            <span key={k} className={`tk ${k < n ? "on" : ""}`} />
+          ))
+        ) : (
+          <span className="tk relative col-span-full overflow-hidden">
+            <span
+              className="tk on absolute inset-y-0 left-0"
+              style={{ width: `${Math.min(100, (n / target) * 100)}%` }}
+            />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CountGoals({ board, send }: { board: Board; send: Send }) {
+  const year = new Date().getFullYear();
+  const [name, setName] = useState("Post reels");
+  const [target, setTarget] = useState("40");
+  const [by, setBy] = useState(`${year}-12-31`);
+  const counted = board.goals.filter((g) => g.target);
+  if (counted.length)
+    return (
+      <div className="mb-6 space-y-3">
+        {counted.map((g) => (
+          <CountGoal key={g.id} goal={g} send={send} />
+        ))}
+      </div>
+    );
+  const start = () => {
+    const n = Math.round(Number(target));
+    if (!name.trim() || !n || n < 1 || !by) return;
+    const d = new Date(`${by}T12:00:00`);
+    const period = `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
+    send(
+      {
+        action: "addGoal",
+        name: `${name.trim().replace(/^post /i, `Post ${n} `)}`,
+        area: "Content",
+        period,
+        horizon: "quarter",
+        target: n,
+        by,
+      },
+      (b) => ({
+        ...b,
+        goals: [
+          ...b.goals,
+          {
+            id: `tmp-${Date.now()}`,
+            name: name.trim().replace(/^post /i, `Post ${n} `),
+            area: "Content",
+            period,
+            horizon: "quarter" as const,
+            parent: null,
+            done: false,
+            count: 0,
+            target: n,
+            by,
+          },
+        ],
+      }),
+    );
+  };
+  return (
+    <div className="tracker mb-6">
+      <div className="text-[12.5px] font-semibold opacity-70">
+        Count up to something
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="tk-input min-w-[140px] flex-1"
+          aria-label="What you're counting"
+        />
+        <input
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          inputMode="numeric"
+          className="tk-input w-[70px]"
+          aria-label="How many"
+        />
+        <input
+          type="date"
+          value={by}
+          onChange={(e) => setBy(e.target.value)}
+          className="tk-input"
+          aria-label="By when"
+        />
+        <button type="button" className="tk-plus" onClick={start}>
+          Start tracking
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
@@ -2174,7 +2395,7 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           <button
             type="button"
             onClick={() => setDay(tomorrow)}
-            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-left transition hover:border-warn"
+            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-[var(--paper-yellow)] px-4 py-3 text-left transition hover:brightness-[.98]"
           >
             <span className="text-[14px]">
               Tomorrow is still empty. Pick its three while today is fresh.
@@ -2363,6 +2584,35 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
       </div>
 
       <div className="min-w-0 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <StatTile
+            label="Today's three"
+            n={deep.filter((t) => t.done).length}
+            of={DEEP_CAP}
+            tone="yellow"
+          />
+          <StatTile
+            label="Quick wins"
+            n={quick.filter((t) => t.done).length}
+            of={Math.max(QUICK_CAP, quick.length)}
+            tone="peri"
+          />
+          <StatTile
+            label="Habits"
+            n={dailyHabits.filter((h) => doneToday.has(h.id)).length}
+            of={dailyHabits.length}
+            tone="tan"
+          />
+          <StatTile
+            label="Reminders due"
+            n={
+              board.reminders.filter(
+                (r) => !r.done && r.due !== null && r.due <= day,
+              ).length
+            }
+            tone="dark"
+          />
+        </div>
         <EmailItems board={board} send={send} day={day} />
         {day === TODAY ? <QuestionsToAnswer /> : null}
         <CheckPane board={board} send={send} day={day} />
@@ -2811,11 +3061,73 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const opened = board.ideas.find((i) => i.id === open) ?? null;
 
+  const [view, setView] = useState<"saved" | "content" | "business">("saved");
+
   if (opened)
     return <IdeaPage idea={opened} send={send} close={() => setOpen(null)} />;
 
+  const switcher = (
+    <div className="seg seg-lg" role="group" aria-label="Which ideas">
+      <button
+        type="button"
+        aria-pressed={view === "saved"}
+        onClick={() => setView("saved")}
+      >
+        Saved
+        <span className="hidden sm:inline"> ideas</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "content"}
+        onClick={() => setView("content")}
+      >
+        Content
+        <span className="hidden sm:inline"> ideas</span>
+        {board.contentIdeas?.length ? (
+          <span className="ml-1.5 opacity-60">{board.contentIdeas.length}</span>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "business"}
+        onClick={() => setView("business")}
+      >
+        Business
+        <span className="hidden sm:inline"> ideas</span>
+        {board.businessIdeas?.length ? (
+          <span className="ml-1.5 opacity-60">{board.businessIdeas.length}</span>
+        ) : null}
+      </button>
+    </div>
+  );
+
+  if (view === "content")
+    return (
+      <div className="space-y-5">
+        {switcher}
+        <ContentIdeas
+          key="content"
+          name="Content Ideas"
+          ideas={board.contentIdeas ?? null}
+        />
+      </div>
+    );
+
+  if (view === "business")
+    return (
+      <div className="space-y-5">
+        {switcher}
+        <ContentIdeas
+          key="business"
+          name="Business Ideas"
+          ideas={board.businessIdeas ?? null}
+        />
+      </div>
+    );
+
   return (
     <div className="space-y-5">
+      {switcher}
       <Panel
         title="Ideas"
         right={
@@ -2842,6 +3154,180 @@ function IdeasPane({ board, send }: { board: Board; send: Send }) {
         )}
       </Panel>
       <Trends board={board} send={send} />
+    </div>
+  );
+}
+
+const CONTENT_STATUSES = [
+  "Inbox",
+  "Backlog",
+  "Drafting",
+  "Filming",
+  "Editing",
+  "Posted",
+  "Repurposed",
+];
+
+/** The Content Ideas pipeline, read-only here: filter by stage, tap a card
+ *  to open it in Notion. */
+function sourceName(link: string) {
+  const host = (() => {
+    try {
+      return new URL(link).hostname.replace(/^(www|m|vt|vm)\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  if (host.includes("instagram")) return "Instagram";
+  if (host.includes("tiktok")) return "TikTok";
+  if (host.includes("youtu")) return "YouTube";
+  return host || "link";
+}
+
+function ContentIdeas({
+  ideas,
+  name,
+}: {
+  ideas: ContentIdea[] | null;
+  name: string;
+}) {
+  const [stage, setStage] = useState<string | null>(null);
+  if (!ideas)
+    return (
+      <Panel title={name}>
+        <div className="space-y-2 py-1 text-[14px] text-muted">
+          <p>I can&rsquo;t see your {name} database yet. To share it:</p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Open the {name} database in Notion.</li>
+            <li>Click ••• at the top right, then Connections.</li>
+            <li>Add the integration you connected when you set up your second brain.</li>
+          </ol>
+          <p>Then refresh this page.</p>
+        </div>
+      </Panel>
+    );
+  const stages = [
+    ...CONTENT_STATUSES.filter((s) => ideas.some((i) => i.status === s)),
+    ...[...new Set(ideas.map((i) => i.status ?? "No status"))].filter(
+      (s) => !CONTENT_STATUSES.includes(s),
+    ),
+  ];
+  const shown = stage
+    ? ideas.filter((i) => (i.status ?? "No status") === stage)
+    : ideas;
+  const day = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={`ci-chip ${stage === null ? "on" : ""}`}
+          onClick={() => setStage(null)}
+        >
+          All <span className="opacity-60">{ideas.length}</span>
+        </button>
+        {stages.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`ci-chip ${stage === s ? "on" : ""}`}
+            onClick={() => setStage(stage === s ? null : s)}
+          >
+            {s}{" "}
+            <span className="opacity-60">
+              {ideas.filter((i) => (i.status ?? "No status") === s).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      {shown.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {shown.map((i) => (
+            <div key={i.id} className="ci-card">
+              <div className="flex items-start justify-between gap-3">
+                {i.link ? (
+                  <a
+                    href={i.link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ci-cover text-[15px] font-semibold leading-snug"
+                  >
+                    {i.title || "Untitled"}
+                  </a>
+                ) : (
+                  <span className="text-[15px] font-semibold leading-snug">
+                    {i.title || "Untitled"}
+                  </span>
+                )}
+                {i.status ? (
+                  <span
+                    className={`ci-st ci-st-${i.status.toLowerCase().replace(/[^a-z]/g, "")}`}
+                  >
+                    {i.status}
+                  </span>
+                ) : null}
+              </div>
+              {i.hook ? (
+                <p className="mt-1.5 text-[13px] italic text-muted">
+                  &ldquo;{i.hook}&rdquo;
+                </p>
+              ) : null}
+              {i.next ? (
+                <p className="mt-1.5 text-[13px] text-muted">
+                  <span className="font-semibold text-ink">Next:</span> {i.next}
+                </p>
+              ) : null}
+              {i.pillars.length || i.platforms.length ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {i.pillars.map((p) => (
+                    <span key={p} className="ci-tag ci-tag-pillar">
+                      {p}
+                    </span>
+                  ))}
+                  {i.platforms.map((p) => (
+                    <span key={p} className="ci-tag">
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-3 flex items-center justify-between gap-2">
+                {i.link ? (
+                  <span className="ci-go">
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M5 3.5v9l7-4.5z" fill="currentColor" />
+                    </svg>
+                    Watch on {sourceName(i.link)}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <a
+                  href={i.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ci-notion"
+                  title="Open in Notion"
+                >
+                  Notion ↗
+                </a>
+              </div>
+              <div className="mt-2 text-[11.5px] text-faint">
+                {i.due ? `Due ${day(i.due)} · ` : ""}
+                {i.captured ? `Captured ${day(i.captured)}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="py-6 text-center text-[14px] text-muted">
+          Nothing in this stage.
+        </p>
+      )}
     </div>
   );
 }
@@ -4780,6 +5266,9 @@ function MonthGoals({
                   horizon: "month" as const,
                   parent: parent || null,
                   done: false,
+                  count: null,
+                  target: null,
+                  by: null,
                 },
               ],
             }),
@@ -4876,6 +5365,9 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
                     horizon: "quarter" as const,
                     parent: null,
                     done: false,
+                    count: null,
+                    target: null,
+                    by: null,
                   },
                 ],
               }),
@@ -6730,7 +7222,7 @@ function DueReminders({
     );
 
   return (
-    <section className="mt-7 rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3">
+    <section className="mt-7 rounded-[22px] bg-[var(--paper-tan)] px-4 py-3">
       <div className="flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold">Check on this</h3>
         <span className="text-[12px] text-muted">
@@ -6992,6 +7484,46 @@ const TABS = [
   { id: "goals", label: "Goals" },
 ];
 
+const NAV_GROUPS = [
+  { label: "Plan", ids: ["today", "todos", "reminders"] },
+  { label: "Create", ids: ["ideas", "agent"] },
+  { label: "Grow", ids: ["habits", "goals"] },
+  { label: "Money", ids: ["deals"] },
+];
+
+const ICON_PATHS: Record<string, string> = {
+  today: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z",
+  todos: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  reminders: "M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0",
+  ideas:
+    "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2v.1h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z",
+  agent:
+    "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
+  habits:
+    "M12 21c-3.9 0-7-2.7-7-6.5 0-3.6 3-5.8 4-9.5 2.2 1.4 3.4 3.5 3.5 5.5 1-.8 1.6-2 1.8-3.3C16.7 9 19 11.6 19 14.5 19 18.3 15.9 21 12 21z",
+  goals:
+    "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01",
+  deals:
+    "M12 3v18M16.5 7.5c0-1.7-2-3-4.5-3s-4.5 1.3-4.5 3S9.5 10.5 12 11s4.5 1.5 4.5 3.5-2 3-4.5 3-4.5-1.3-4.5-3",
+  notion: "M7 17 17 7M9 7h8v8",
+};
+
+function NavIcon({ id }: { id: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={ICON_PATHS[id]} />
+    </svg>
+  );
+}
+
 const QUOTES = [
   "You do not rise to the level of your goals, you fall to the level of your systems.",
   "A year from now you'll wish you had started today.",
@@ -7025,16 +7557,41 @@ export default function BoardApp({
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("today");
+  const [tab, setTabState] = useState("today");
+  // The tab lives in the address (#ideas, #habits…) so a refresh or a saved
+  // link opens the same page.
+  const setTab = (id: string) => {
+    setTabState(id);
+    window.history.replaceState(null, "", `#${id}`);
+  };
+  useEffect(() => {
+    const fromHash = () => {
+      const id = window.location.hash.slice(1);
+      if (TABS.some((t) => t.id === id)) setTabState(id);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
   // The deals passcode: held here, sent with every read so the server decides.
   const [dealsCode, setDealsCode] = useState("");
   // Picked after mount so the server and the browser can't disagree on it.
   const [quote, setQuote] = useState("");
 
-  useEffect(
-    () => setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]),
-    [],
-  );
+  // Her clock, not the server's, decides the greeting and the date.
+  const [hello, setHello] = useState({ greet: "Hello", date: "" });
+
+  useEffect(() => {
+    setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    setHello({
+      greet: greeting().replace(".", ","),
+      date: new Date().toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "long",
+        day: "numeric",
+      }),
+    });
+  }, []);
   // When the board last came back from Notion, worded for the header pill.
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
   const [sinceSync, setSinceSync] = useState("just now");
@@ -7186,71 +7743,136 @@ export default function BoardApp({
     );
   }
 
+  const dueNow = board
+    ? board.reminders.filter((r) => !r.done && r.due !== null && r.due <= TODAY)
+        .length
+    : 0;
+  // The week and the deal wall need every pixel, so the menu shrinks to icons.
+  const slim = tab === "todos" || tab === "deals";
+  const tabLabel = TABS.find((t) => t.id === tab)?.label ?? "";
+  const syncLabel = loading
+    ? "Syncing with Notion…"
+    : `Synced with Notion ${sinceSync}`;
+  const logo = (
+    <>
+      second<i>·</i>brain
+    </>
+  );
+
   return (
     <div className="board-theme">
-      {/* A week and the deal wall need the whole desk; everything else reads
-          better narrow. */}
-      <div
-        className={`mx-auto px-5 pb-20 pt-10 ${
-          tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-5xl"
-        }`}
-      >
-        <header className="mb-7">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-            <div className="min-w-0">
-              <h1 className="serif text-[34px] leading-none sm:text-[38px]">
-                {greeting().replace(".", ", Sophie.")}
-              </h1>
-              <p className="mt-2.5 min-h-[18px] text-[13px] italic text-muted">
-                {quote}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 sm:shrink-0 sm:gap-4 sm:pt-1.5">
-              {board ? (
-                <span className="hidden sm:inline-flex">
-                  <StreakDots board={board} />
-                </span>
-              ) : null}
+      <div className="shell">
+        <nav className={`sb ${slim ? "slim" : ""}`} aria-label="Dashboard">
+          <div className="sb-logo display">
+            {slim ? (
+              <>
+                s<i>·</i>b
+              </>
+            ) : (
+              logo
+            )}
+          </div>
+          {NAV_GROUPS.map((g) => (
+            <Fragment key={g.label}>
+              <div className="sb-sec">{g.label}</div>
+              {g.ids.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  title={TABS.find((t) => t.id === id)?.label}
+                  className={`sb-btn ${tab === id ? "on" : ""}`}
+                >
+                  <NavIcon id={id} />
+                  <span className="sb-label">
+                    {TABS.find((t) => t.id === id)?.label}
+                  </span>
+                  {id === "reminders" && dueNow ? (
+                    <span className="sb-count">{dueNow}</span>
+                  ) : null}
+                </button>
+              ))}
+            </Fragment>
+          ))}
+          <div className="sb-foot">
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="sb-btn"
+              aria-label="Sync with Notion"
+            >
+              <span className={`sb-dot ${loading ? "is-busy" : ""}`} />
+              <span className="sb-label">
+                {loading ? "Syncing…" : `Synced ${sinceSync}`}
+              </span>
+            </button>
+            <a
+              className="sb-btn"
+              href="https://www.notion.so"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <NavIcon id="notion" />
+              <span className="sb-label">Notion</span>
+            </a>
+          </div>
+        </nav>
+
+        {/* A week and the deal wall need the whole desk; everything else reads
+            better narrower. */}
+        <main className="min-w-0 flex-1 pb-28 lg:pb-8">
+          <div
+            className={`mx-auto px-1 pt-2 lg:px-3 lg:pt-5 ${
+              tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-[1180px]"
+            }`}
+          >
+            <div className="mtop">
+              <span className="mtop-logo display">{logo}</span>
               <button
                 type="button"
                 onClick={() => void load()}
                 aria-label="Sync with Notion"
-                className={`sync-pill transition hover:text-ink ${loading ? "is-busy" : ""}`}
+                className={`sync-pill ${loading ? "is-busy" : ""}`}
               >
-                {loading ? "Syncing with Notion…" : `Synced with Notion ${sinceSync}`}
+                {loading ? "Syncing…" : sinceSync}
               </button>
             </div>
-          </div>
 
-          <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`-mb-px shrink-0 border-b-2 px-3 pb-2.5 text-[13px] transition ${
-                  tab === t.id
-                    ? "border-accent font-medium text-ink"
-                    : "border-transparent text-muted hover:text-ink"
-                }`}
-              >
-                {t.label}
-                {t.id === "reminders" && board
-                  ? (() => {
-                      const dueNow = board.reminders.filter(
-                        (r) => !r.done && r.due !== null && r.due <= TODAY,
-                      ).length;
-                      return dueNow ? (
-                        <span className="ml-1.5 rounded-full bg-bad px-1.5 py-0.5 text-[10px] text-brand-cream">
-                          {dueNow}
-                        </span>
-                      ) : null;
-                    })()
-                  : null}
-              </button>
-            ))}
-          </nav>
-        </header>
+            <header className="mb-7 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                {tab === "today" ? (
+                  <>
+                    <p className="display min-h-[30px] text-[20px] font-semibold sm:text-[24px]">
+                      {hello.date}
+                    </p>
+                    <h1 className="display mt-0.5 text-[36px] font-bold leading-[1.05] sm:text-[50px]">
+                      {hello.greet}{" "}
+                      <span className="serif font-normal italic tracking-normal">
+                        Sophie
+                      </span>
+                    </h1>
+                  </>
+                ) : (
+                  <h1 className="display text-[32px] font-bold leading-tight sm:text-[40px]">
+                    {tabLabel}
+                  </h1>
+                )}
+                <p className="mt-2 min-h-[18px] text-[13px] italic text-muted">
+                  {quote}
+                </p>
+              </div>
+              <div className="hidden shrink-0 items-center gap-4 pt-2 lg:flex">
+                {board ? <StreakDots board={board} /> : null}
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  aria-label="Sync with Notion"
+                  className={`sync-pill transition hover:text-ink ${loading ? "is-busy" : ""}`}
+                >
+                  {syncLabel}
+                </button>
+              </div>
+            </header>
 
         {error ? (
           <div className="mb-4 rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-[14px]">
@@ -7263,7 +7885,10 @@ export default function BoardApp({
             Reading your Notion…
           </p>
         ) : tab === "today" ? (
-          <TodayPane board={board} send={send} />
+          <>
+            <CountGoals board={board} send={send} />
+            <TodayPane board={board} send={send} />
+          </>
         ) : tab === "ideas" ? (
           <IdeasPane board={board} send={send} />
         ) : tab === "todos" ? (
@@ -7289,6 +7914,24 @@ export default function BoardApp({
         ) : (
           <GoalsPane board={board} send={send} />
         )}
+          </div>
+        </main>
+
+        <nav className="bnav" aria-label="Dashboard">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              aria-label={t.label}
+              title={t.label}
+              onClick={() => setTab(t.id)}
+              className={tab === t.id ? "on" : ""}
+            >
+              <NavIcon id={t.id} />
+              {t.id === "reminders" && dueNow ? <span className="dot" /> : null}
+            </button>
+          ))}
+        </nav>
       </div>
     </div>
   );

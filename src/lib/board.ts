@@ -158,6 +158,24 @@ export type Idea = {
   url: string;
 };
 
+/** A row of the separate Content Ideas pipeline (hook, pillar, platform,
+ *  Inbox → Posted), shown beside the quick captures rather than mixed in. */
+export type ContentIdea = {
+  id: string;
+  title: string;
+  hook: string;
+  status: string | null;
+  pillars: string[];
+  platforms: string[];
+  due: string | null;
+  captured: string | null;
+  /** The reel/post the idea came from ("Source link"). */
+  link: string | null;
+  /** Business ideas only: the "Next step" column. */
+  next?: string;
+  url: string;
+};
+
 /** A thing to come back to on a date — "check the refund landed" — rather
  *  than a task with work in it. Its whole value is the date, so it carries
  *  nothing else but the note and whether it's been dealt with. */
@@ -203,6 +221,11 @@ export type Goal = {
   horizon: "month" | "quarter";
   parent: string | null;
   done: boolean;
+  /** A goal you count up to ("post 40 reels") has a target, a tally and the
+   *  day it has to be hit by; a plain goal has none of the three. */
+  count: number | null;
+  target: number | null;
+  by: string | null;
 };
 
 /** A paid partnership from the first email to the money landing: the stage is
@@ -312,6 +335,9 @@ export type Board = {
   timings: Timing[];
   categories: string[];
   dbs: BoardDbs;
+  /** Null when there's no Content Ideas database the integration can read. */
+  contentIdeas?: ContentIdea[] | null;
+  businessIdeas?: ContentIdea[] | null;
 };
 
 export type BoardDbs = {
@@ -836,6 +862,9 @@ export async function ensureGoalColumns(
         dual_property: {},
       },
     };
+  if (!db.properties.Target) missing.Target = { number: {} };
+  if (!db.properties.Count) missing.Count = { number: {} };
+  if (!db.properties.By) missing.By = { date: {} };
   if (!Object.keys(missing).length) return;
   await notion(token, `/databases/${goalsDbId}`, {
     method: "PATCH",
@@ -1277,6 +1306,77 @@ function emailDoneProps(map: EmailMap, done: boolean): object {
     : { [map.done.prop]: { status: done ? { name: map.done.doneName } : null } };
 }
 
+const multiOf = (p?: Prop) => (p?.multi_select ?? []).map((o) => o.name ?? "").filter(Boolean);
+
+/** The Content Ideas database is pinned by CONTENT_IDEAS_DB, else found by
+ *  its name; null means none is shared with this integration. */
+export async function readContentIdeas(
+  token: string,
+): Promise<ContentIdea[] | null> {
+  const dbId =
+    process.env.CONTENT_IDEAS_DB ||
+    (await findDatabaseLike(token, "content ideas", /^\s*content ideas\s*$/i));
+  if (!dbId) return null;
+  const rows = await query(
+    token,
+    dbId,
+    { page_size: 100, sorts: [{ timestamp: "created_time", direction: "descending" }] },
+    3,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    title: titleOf(r),
+    hook: textOf(r.properties.Hook),
+    status: tagOf(r.properties.Status),
+    pillars: multiOf(r.properties.Pillar),
+    platforms: multiOf(r.properties.Platform),
+    due: dateOf(r.properties["Due date"]),
+    captured: r.created_time?.slice(0, 10) ?? null,
+    link: r.properties["Source link"]?.url || null,
+    url: r.url,
+  }));
+}
+
+/** The "Business Ideas" list, shown in the same card layout as Content Ideas:
+ * Category stands in for pillars, Impact/Effort for platforms. */
+export async function readBusinessIdeas(
+  token: string,
+): Promise<ContentIdea[] | null> {
+  const dbId =
+    process.env.BUSINESS_IDEAS_DB ||
+    (await findDatabaseLike(token, "business ideas", /^\s*business ideas\s*$/i));
+  if (!dbId) return null;
+  const rows = await query(
+    token,
+    dbId,
+    { page_size: 100, sorts: [{ timestamp: "created_time", direction: "descending" }] },
+    3,
+  );
+  const level = (p: Prop | undefined, what: string) => {
+    const v = selectOf(p);
+    return v ? `${v} ${what}` : null;
+  };
+  return rows.map((r) => {
+    const category = selectOf(r.properties.Category);
+    return {
+      id: r.id,
+      title: titleOf(r),
+      hook: "",
+      next: textOf(r.properties["Next step"]),
+      status: tagOf(r.properties.Status),
+      pillars: category ? [category] : [],
+      platforms: [
+        level(r.properties.Impact, "impact"),
+        level(r.properties.Effort, "effort"),
+      ].filter((x): x is string => !!x),
+      due: null,
+      captured: r.created_time?.slice(0, 10) ?? null,
+      link: r.properties["Reference link"]?.url || null,
+      url: r.url,
+    };
+  });
+}
+
 async function readEmails(
   token: string,
   dbId: string | null,
@@ -1530,6 +1630,9 @@ export async function readBoard(
         selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
+      count: numberOf(r.properties.Count),
+      target: numberOf(r.properties.Target),
+      by: dateOf(r.properties.By),
     })),
     emails,
     reminders: reminderRows.map((r) => ({
@@ -1667,8 +1770,11 @@ export type Action =
       period: string;
       horizon?: "month" | "quarter";
       parent?: string | null;
+      target?: number | null;
+      by?: string | null;
     }
   | { action: "toggleGoal"; id: string; done: boolean }
+  | { action: "goalCount"; id: string; count: number; done: boolean }
   | { action: "deleteGoal"; id: string }
   | { action: "addReminder"; title: string; due: string | null; notes?: string }
   | {
@@ -2036,11 +2142,21 @@ export async function applyAction(
         Period: richText(body.period),
         Horizon: selectProp(body.horizon === "quarter" ? "Quarter" : "Month"),
         ...(body.parent ? { Parent: relationProp(body.parent) } : {}),
+        ...(body.target
+          ? { Target: { number: body.target }, Count: { number: 0 } }
+          : {}),
+        ...(body.by ? { By: dateProp(body.by) } : {}),
         Done: { checkbox: false },
       });
       return;
     case "toggleGoal":
       await updatePage(token, body.id, { Done: { checkbox: body.done } });
+      return;
+    case "goalCount":
+      await updatePage(token, body.id, {
+        Count: { number: Math.max(0, body.count) },
+        Done: { checkbox: body.done },
+      });
       return;
     case "addReminder":
       await createPage(token, dbs.reminders, {
