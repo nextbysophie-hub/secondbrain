@@ -2617,7 +2617,6 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         {day === TODAY ? <QuestionsToAnswer /> : null}
         <CheckPane board={board} send={send} day={day} />
         {day === TODAY ? <Affirmations board={board} send={send} /> : null}
-        <PlanTrash board={board} send={send} />
       </div>
     </div>
   );
@@ -3747,37 +3746,6 @@ function PileRow({
   );
 }
 
-/** Some things don't need a day, they need to be gone. */
-function PlanTrash({ board, send }: { board: Board; send: Send }) {
-  const [over, setOver] = useState(false);
-
-  return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        const id = e.dataTransfer.getData("text/todo-id");
-        if (!board.todos.some((t) => t.id === id)) return;
-        send({ action: "deleteTodo", id }, (b) => ({
-          ...b,
-          todos: b.todos.filter((t) => t.id !== id),
-        }));
-      }}
-      className={`flex items-center justify-center gap-2 rounded-xl border border-dashed py-3 text-[12px] transition ${
-        over ? "border-bad bg-bad/10 text-bad" : "border-line-2 text-faint"
-      }`}
-    >
-      <span className="text-[14px]">🗑</span>
-      {over ? "Drop it and it's gone" : "Drag here to delete"}
-    </div>
-  );
-}
-
 /** Some things shouldn't be on your week at all — hand them over. */
 function PlanHandoff({ board, send }: { board: Board; send: Send }) {
   const [over, setOver] = useState(false);
@@ -4577,7 +4545,6 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
-              <PlanTrash board={board} send={send} />
             </div>
           </div>
         </>
@@ -6195,17 +6162,6 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
       moveToLane(deal, lane, stages, send);
   };
 
-  const bin = (id: string) => {
-    setOver(null);
-    const deal = board.deals.find((d) => d.id === id);
-    if (!deal) return;
-    if (!confirm(`Delete "${deal.brand}" from the tracker?`)) return;
-    send({ action: "deleteDeal", id }, (b) => ({
-      ...b,
-      deals: b.deals.filter((d) => d.id !== id),
-    }));
-  };
-
   return (
     <div className="space-y-4">
       <Panel
@@ -6286,26 +6242,6 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
             );
           })}
         </div>
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setOver("bin");
-          }}
-          onDragLeave={() => setOver((o) => (o === "bin" ? null : o))}
-          onDrop={(e) => {
-            e.preventDefault();
-            const id = e.dataTransfer.getData("text/deal");
-            if (id) bin(id);
-          }}
-          className={`mt-4 flex items-center justify-center gap-2 rounded-xl border border-dashed py-4 text-[12px] transition ${
-            over === "bin" ? "border-bad bg-bad/10 text-bad" : "border-line-2 text-faint"
-          }`}
-        >
-          <span className="text-[16px]">🗑</span>
-          <span className="font-semibold">Trash</span>
-          <span>· {over === "bin" ? "drop it and it's gone" : "drag a deal here to delete it"}</span>
-        </div>
-
         <div className="mt-3">
           <AddRow
             placeholder="New signed deal — the brand's name…"
@@ -7542,6 +7478,165 @@ const QUOTES = [
   "The days are long but the decades are short.",
 ];
 
+/** One bin for everything you can drag. It floats up from the bottom the
+ *  moment a to-do or deal is picked up, so it's always within reach. */
+function FloatingTrash({ board, send }: { board: Board; send: Send }) {
+  const [dragging, setDragging] = useState(false);
+  const [over, setOver] = useState(false);
+  const [toss, setToss] = useState<{
+    key: number;
+    label: string;
+    x: number;
+    y: number;
+    dx: number;
+    dy: number;
+  } | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  const can = useRef<HTMLDivElement>(null);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    const start = (e: DragEvent) => {
+      const types = Array.from(e.dataTransfer?.types ?? []);
+      if (types.includes("text/todo-id") || types.includes("text/deal"))
+        // Wait a tick: changing the page inside dragstart can cancel the drag.
+        setTimeout(() => setDragging(true), 0);
+    };
+    const end = () => {
+      setDragging(false);
+      setOver(false);
+    };
+    const pending = timers.current;
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+      pending.forEach(clearTimeout);
+    };
+  }, []);
+
+  const later = (fn: () => void, ms: number) =>
+    timers.current.push(setTimeout(fn, ms));
+
+  const drop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setOver(false);
+    setDragging(false);
+    const todo = board.todos.find(
+      (t) => t.id === e.dataTransfer.getData("text/todo-id"),
+    );
+    const deal = board.deals.find(
+      (d) => d.id === e.dataTransfer.getData("text/deal"),
+    );
+    if (!todo && !deal) return;
+    if (deal && !confirm(`Delete "${deal.brand}" from the tracker?`)) return;
+    const label = todo ? todo.title : (deal?.brand ?? "");
+    const r = can.current?.getBoundingClientRect();
+    const tx = r ? r.left + r.width / 2 : e.clientX;
+    const ty = r ? r.top + r.height * 0.3 : e.clientY;
+    setToss({
+      key: Date.now(),
+      label,
+      x: e.clientX,
+      y: e.clientY,
+      dx: tx - e.clientX,
+      dy: ty - e.clientY,
+    });
+    later(() => setToss(null), 1100);
+    setSaid(label);
+    later(() => setSaid((l) => (l === label ? null : l)), 2600);
+    if (todo)
+      send({ action: "deleteTodo", id: todo.id }, (b) => ({
+        ...b,
+        todos: b.todos.filter((t) => t.id !== todo.id),
+      }));
+    else if (deal)
+      send({ action: "deleteDeal", id: deal.id }, (b) => ({
+        ...b,
+        deals: b.deals.filter((d) => d.id !== deal.id),
+      }));
+  };
+
+  const shown = dragging || toss !== null;
+
+  return (
+    <>
+      <div
+        className={`trash-dock ${shown ? "is-shown" : ""}`}
+        aria-hidden={!shown}
+      >
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (!over) setOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setOver(false);
+          }}
+          onDrop={drop}
+          className="trash-zone"
+        >
+          <div
+            ref={can}
+            key={toss?.key ?? "idle"}
+            className={`trash-can ${over ? "is-over" : ""} ${toss ? "is-tossing" : ""}`}
+          >
+            <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden>
+              <g className="trash-lid">
+                <rect x="10" y="11" width="28" height="4" rx="2" fill="currentColor" />
+                <path d="M20 11V9.5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 28 9.5V11" fill="none" stroke="currentColor" strokeWidth="2.4" />
+              </g>
+              <path d="M13 18h22l-1.8 20.4a3 3 0 0 1-3 2.6H17.8a3 3 0 0 1-3-2.6Z" fill="currentColor" />
+              <path d="M20 23v13M24 23v13M28 23v13" stroke="var(--trash-disc)" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            {toss ? (
+              <span className="trash-puffs" aria-hidden>
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <i key={i} style={{ "--a": `${i * 60 - 150}deg` } as CSSProperties} />
+                ))}
+              </span>
+            ) : null}
+          </div>
+          <span className="trash-label">
+            {over ? "Let go to toss it" : "Drop here to delete"}
+          </span>
+        </div>
+      </div>
+      {toss ? (
+        <div
+          key={toss.key}
+          className="trash-throw"
+          style={
+            {
+              left: toss.x,
+              top: toss.y,
+              "--dx": `${toss.dx}px`,
+              "--dy": `${toss.dy}px`,
+            } as CSSProperties
+          }
+          aria-hidden
+        >
+          <span className="trash-chip">{toss.label}</span>
+          <svg className="trash-ball" viewBox="0 0 24 24" width="22" height="22">
+            <circle cx="12" cy="12" r="10" fill="var(--paper-panel)" stroke="var(--paper-ink)" strokeWidth="1.4" />
+            <path d="M6 9l4 2-2 4 5-1 2 4M14 5l-1 4 5 1M9 18l1-3" fill="none" stroke="var(--paper-faint)" strokeWidth="1.1" strokeLinejoin="round" />
+          </svg>
+        </div>
+      ) : null}
+      {said ? (
+        <div key={said} className="trash-toast" role="status">
+          Tossed · <span className="truncate">{said}</span>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export default function BoardApp({
   initialKey,
   initialTodoDb,
@@ -7932,6 +8027,7 @@ export default function BoardApp({
             </button>
           ))}
         </nav>
+        {board ? <FloatingTrash board={board} send={send} /> : null}
       </div>
     </div>
   );
