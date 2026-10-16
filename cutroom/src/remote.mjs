@@ -43,6 +43,6 @@ export const transcribeChunk = (file, prompt = "") =>
     body: fs.readFileSync(file),
   });
 export const matchClips = (scripts, clips) => call("/api/cutroom/plan", json({ mode: "match", scripts, clips }));
-export const planCut = (script, phrases) => call("/api/cutroom/plan", json({ mode: "cut", script, phrases }));
+export const planCut = (script, phrases, revision = null) => call("/api/cutroom/plan", json({ mode: "cut", script, phrases, revision }));
 export const driveToken = () => call("/api/cutroom/drive", json({ sealed: state.config.sealed }), 2);
 export const handOff = (body) => call("/api/cutroom/approve", json(body));

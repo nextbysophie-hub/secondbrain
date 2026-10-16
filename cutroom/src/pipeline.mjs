@@ -227,6 +227,13 @@ function cutFor(scriptId) {
   return cut;
 }
 
+/** Her notes on the cut she watched; the next version applies them. */
+export function revise(cutId, notes) {
+  const cut = state.cuts[cutId];
+  cut.pendingRevision = notes.trim();
+  markDirty(cutId);
+}
+
 export function markDirty(scriptId) {
   if (!scriptId) return;
   const cut = cutFor(scriptId);
@@ -355,7 +362,12 @@ async function makeCut(cut) {
     });
   });
   const clipsById = Object.fromEntries(clips.map((c) => [c.id, c]));
-  const plan = await planCut({ title: cut.title, text: cut.script || "" }, phrases);
+  const rev = cut.pendingRevision || null;
+  const sameClips = JSON.stringify(cut.plan?.clipIds) === JSON.stringify(cut.clipIds);
+  const revision = rev
+    ? { notes: rev, current: sameClips ? cut.plan?.picks ?? null : null, currentText: (cut.picks || []).map((p) => p.text) }
+    : null;
+  const plan = await planCut({ title: cut.title, text: cut.script || "" }, phrases, revision);
   const ranges = rangesFrom(plan.picks, byId, clipsById);
   if (!ranges.length) throw new Error("Couldn't find any lines of the script in these clips.");
 
@@ -376,6 +388,7 @@ async function makeCut(cut) {
   ].join("\n");
   fs.writeFileSync(path.join(dir, `cut list v${version}.csv`), csv);
 
+  const earlier = cut.versions || (cut.file ? [{ version: cut.version, file: cut.file, revision: null, notes: cut.notes, length: cut.length, madeAt: cut.madeAt }] : []);
   Object.assign(cut, {
     version,
     file: out,
@@ -387,8 +400,11 @@ async function makeCut(cut) {
     status: "review",
     progress: 1,
     madeAt: Date.now(),
+    plan: { clipIds: cut.clipIds, picks: (plan.picks || []).map(({ line, from, to }) => ({ line, from, to })) },
+    pendingRevision: null,
   });
-  log(`Rough cut v${version} ready: “${cut.title}”`);
+  cut.versions = [...earlier, { version, file: out, revision: rev, notes: cut.notes, length: cut.length, madeAt: cut.madeAt }];
+  log(`Rough cut v${version} ready: “${cut.title}”${rev ? ` (revised: ${rev.slice(0, 60)})` : ""}`);
   save();
 }
 

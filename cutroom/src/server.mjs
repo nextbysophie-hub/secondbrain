@@ -4,7 +4,7 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { HOME, INBOX, PORT } from "./config.mjs";
-import { approve, importOlder, markDirty, refreshScripts, start, transcriptOf, volumes } from "./pipeline.mjs";
+import { approve, importOlder, markDirty, refreshScripts, start, transcriptOf, volumes, revise } from "./pipeline.mjs";
 import { getScripts, parseLink } from "./remote.mjs";
 import { log, save, state } from "./store.mjs";
 
@@ -84,7 +84,11 @@ const server = http.createServer(async (req, res) => {
       return res.end(fs.readFileSync(PAGE));
     }
     if (p === "/api/state") return send(res, 200, view());
-    if (parts[0] === "media" && parts[1] === "cut") return stream(req, res, state.cuts[decodeURIComponent(parts[2])]?.file);
+    if (parts[0] === "media" && parts[1] === "cut") {
+      const cut = state.cuts[decodeURIComponent(parts[2])];
+      const old = (cut?.versions || []).find((v) => String(v.version) === url.searchParams.get("v"));
+      return stream(req, res, old?.file || cut?.file);
+    }
     if (parts[0] === "media" && parts[1] === "clip") return stream(req, res, state.clips[parts[2]]?.path);
 
     if (p === "/connect-drive") {
@@ -163,6 +167,11 @@ const server = http.createServer(async (req, res) => {
     if (parts[1] === "cuts" && state.cuts[decodeURIComponent(parts[2])]) {
       const id = decodeURIComponent(parts[2]);
       if (parts[3] === "recut") markDirty(id);
+      if (parts[3] === "revise") {
+        if (!String(body.notes || "").trim()) return send(res, 400, { ok: false, error: "Type what should change first." });
+        if (!state.cuts[id].file) return send(res, 400, { ok: false, error: "Wait for the first cut before revising." });
+        revise(id, String(body.notes));
+      }
       if (parts[3] === "editor") {
         state.cuts[id].editor = state.people.find((x) => x.id === body.editorId) || (body.email ? { id: null, name: body.email, email: body.email } : null);
         save();

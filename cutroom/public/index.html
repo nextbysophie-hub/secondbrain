@@ -42,6 +42,7 @@
   label { font-size:13px; font-weight:500; display:block; margin:12px 0 4px; }
   select, input[type=text], input[type=password], input[type=email] { width:100%; padding:10px 12px; border-radius:12px; border:1.5px solid var(--line); background:#fff; font:inherit; color:inherit; }
   .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+  textarea { width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:14px Poppins, sans-serif; background:#fff; color:var(--cocoa); resize:vertical; }
   .btn { border:0; border-radius:99px; padding:11px 20px; font:500 14px Poppins, sans-serif; cursor:pointer; background:var(--line); color:var(--cocoa); }
   .btn.go { background:var(--cocoa); color:var(--paper); } .btn.go:hover { background:var(--cocoa-2); }
   .btn.small { padding:7px 14px; font-size:13px; }
@@ -174,6 +175,12 @@ function drawCut(cut) {
       ${cut.error ? `<div class="err">${esc(cut.error)}</div>` : ""}
       ${picks ? `<details><summary>What made the cut (${(cut.picks || []).length} pieces) — tap to jump</summary><div class="picks">${picks}</div></details>` : ""}
       <details><summary>Script</summary><pre class="script">${esc(cut.script || "")}</pre></details>
+      ${versions(cut)}
+      ${cut.pendingRevision && busy ? `<div class="note">Revising: “${esc(cut.pendingRevision)}”</div>` : ""}
+      ${!sending && cut.file && !busy ? `
+        <label>Revisions <span class="small">(tell it what to change)</span></label>
+        <textarea id="rev-${cut.id}" rows="2" placeholder="e.g. use the second take of the hook, cut the part about my dog, make it tighter" oninput="(drafts['${cut.id}'] ??= {}).rev=this.value">${esc((drafts[cut.id] || {}).rev || "")}</textarea>
+        <div class="row"><button class="btn" onclick="revise('${cut.id}', this)">Revise → v${(cut.version || 0) + 1}</button></div>` : ""}
       ${sending ? `<div class="note">${esc(cut.sendStep || "Sending…")}<div class="bar"><i style="width:${Math.round((cut.sendProgress || 0) * 100)}%"></i></div></div>` : `
         ${editorPicker(cut)}
         <label class="check"><input type="checkbox" id="raw-${cut.id}" checked /> Send the raw clips too</label>
@@ -183,6 +190,28 @@ function drawCut(cut) {
           <button class="btn" ${busy ? "disabled" : ""} onclick="post('/api/cuts/${encodeURIComponent(cut.id)}/recut').then(load)">Re-cut</button>
         </div>`}
     </div></div></div>`;
+}
+
+function versions(cut) {
+  const v = cut.versions || [];
+  if (v.length < 2) return "";
+  const rows = [...v].reverse().map((x) => `<div class="pick" onclick="watch('${cut.id}',${x.version})"><b>v${x.version}</b><div>${x.revision ? `“${esc(x.revision)}”` : "First cut"}<span class="src">${mins(x.length)}${x.version === cut.version ? " · latest" : ""} · tap to watch</span></div></div>`).join("");
+  return `<details><summary>Versions (${v.length})</summary><div class="picks">${rows}</div></details>`;
+}
+
+function watch(id, n) {
+  const card = [...document.querySelectorAll("#review .card")].find((c) => c.dataset.key === id);
+  const vid = card?.querySelector("video"); if (!vid) return;
+  vid.src = `/media/cut/${encodeURIComponent(id)}?v=${n}`; vid.play();
+}
+
+async function revise(id, btn) {
+  const notes = ($(`#rev-${id}`)?.value || "").trim();
+  if (!notes) return alert("Type what should change first.");
+  btn.disabled = true;
+  try { await post(`/api/cuts/${encodeURIComponent(id)}/revise`, { notes }); (drafts[id] ??= {}).rev = ""; }
+  catch (e) { alert(e.message); btn.disabled = false; }
+  load();
 }
 
 function seek(el, i) {
@@ -213,7 +242,7 @@ function render() {
   chips(); setup(); older();
   const review = S.cuts.filter((c) => ["waiting", "cutting", "review", "approving", "error"].includes(c.status));
   $("#nReview").textContent = review.length;
-  patch("#review", review, (c) => c.id, (c) => JSON.stringify([c.status, c.version, c.error, c.sendStep, Math.round((c.sendProgress || 0) * 50), Math.round((c.progress || 0) * 20), c.title, c.notes, S.people.length]), drawCut,
+  patch("#review", review, (c) => c.id, (c) => JSON.stringify([c.status, c.version, c.error, c.sendStep, Math.round((c.sendProgress || 0) * 50), Math.round((c.progress || 0) * 20), c.title, c.notes, c.pendingRevision, (c.versions || []).length, S.people.length]), drawCut,
     S.config.linked ? "Nothing to review yet. Drop clips in the Cut Room Inbox on your Desktop, or plug in your SD card." : "Connect your dashboard above to start.");
 
   const unmatched = S.clips.filter((c) => c.status === "unmatched" || c.status === "nospeech");
