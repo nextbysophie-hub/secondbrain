@@ -614,7 +614,7 @@ select {
 .trash-can.is-tossing { --trash-disc: var(--brand-rust); background: var(--brand-rust); animation: trash-gulp .9s ease both; }
 .trash-can.is-tossing .trash-lid { animation: trash-lid-snap .9s ease both; }
 .trash-label {
-  border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600;
   background: var(--paper-panel); color: var(--paper-ink); border: 1px solid var(--paper-line-2);
 }
 .trash-puffs { position: absolute; left: 50%; top: 22%; pointer-events: none; }

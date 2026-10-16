@@ -1647,7 +1647,14 @@ function DeepRow({
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
   return (
-    <div className="group border-b border-line/60 py-3 last:border-none">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/todo-id", todo.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="group cursor-grab border-b border-line/60 py-3 last:border-none active:cursor-grabbing"
+    >
       <div className="flex items-center gap-4">
         <button
           type="button"
@@ -1719,7 +1726,14 @@ function QuickRow({
   day: string;
 }) {
   return (
-    <div className="group flex items-center gap-4 border-b border-line/60 py-2.5 last:border-none">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/todo-id", todo.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="group flex cursor-grab items-center gap-4 border-b border-line/60 py-2.5 last:border-none active:cursor-grabbing"
+    >
       <Box
         on={todo.done}
         onChange={(done) =>
