@@ -92,11 +92,12 @@ async function findDb(token: string, query: string, match: RegExp): Promise<stri
 }
 
 export async function scriptDbs(token: string) {
-  const [content, deals] = await Promise.all([
+  const [calendar, content, deals] = await Promise.all([
+    process.env.CONTENT_CALENDAR_DB || findDb(token, "content calendar", /^\s*content calendar\s*$/i),
     process.env.CONTENT_IDEAS_DB || findDb(token, "content ideas", /^\s*content ideas\s*$/i),
     findDb(token, "brand deals", /brand\s*deals?/i),
   ]);
-  return { content, deals };
+  return { calendar, content, deals };
 }
 
 /** An editor is a person, and Notion only pings people from a people column. */
@@ -159,6 +160,26 @@ const personOf = (p?: Prop): Person | null => {
 export async function readScripts(token: string, withDeals: boolean): Promise<Script[]> {
   const dbs = await scriptDbs(token);
   const scripts: Script[] = [];
+
+  // Her real scripts: the Content Calendar, one page body per video. Its
+  // editors are a name select, so it doesn't get an extra people column.
+  if (dbs.calendar) {
+    const rows = (await queryAll(token, dbs.calendar)).filter((r) => LIVE_CONTENT.test(choice(r.properties.Status) ?? ""));
+    const bodies = await Promise.all(rows.map((r) => pageText(token, r.id).catch(() => "")));
+    rows.forEach((r, i) => {
+      const p = r.properties;
+      const titleProp = Object.values(p).find((x) => x.type === "title");
+      scripts.push({
+        id: r.id,
+        source: "content",
+        title: plain(titleProp) || "Untitled",
+        stage: choice(p.Status),
+        url: r.url,
+        editor: personOf(p[EDITOR_PROP]),
+        text: bodies[i],
+      });
+    });
+  }
 
   if (dbs.content) {
     await ensureEditorColumn(token, dbs.content);
