@@ -9,17 +9,24 @@ export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly
  *  the server still stores nothing about anybody. */
 export const GOOGLE_COOKIE = "gcal";
 
+/** Cut Room only ever touches the folders and files it made itself. */
+export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
+/** Cut Room runs on her computer, so after Google it's sent back to
+ *  localhost rather than to a dashboard page. */
+export const CUTROOM_STATE = "cutroom:";
+
 export const googleConfigured = () =>
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
 export const redirectUri = (req: Request) => new URL("/api/google/callback", req.url).toString();
 
-export function consentUrl(req: Request, state: string): string {
+export function consentUrl(req: Request, state: string, scope = CALENDAR_SCOPE): string {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", process.env.GOOGLE_CLIENT_ID ?? "");
   url.searchParams.set("redirect_uri", redirectUri(req));
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", CALENDAR_SCOPE);
+  url.searchParams.set("scope", scope);
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("include_granted_scopes", "true");

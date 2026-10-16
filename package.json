@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "cutroom:zip": "rm -f public/cut-room.zip && mkdir -p .zip/\"Cut Room\" && rsync -a --delete --exclude node_modules cutroom/ .zip/\"Cut Room\"/ && cd .zip && zip -qr ../public/cut-room.zip \"Cut Room\" && cd .. && rm -rf .zip"
   },
   "dependencies": {
     "next": "15.5.25",

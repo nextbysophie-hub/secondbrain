@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { consentUrl, googleConfigured } from "@/lib/google";
+import { consentUrl, CUTROOM_STATE, DRIVE_SCOPE, googleConfigured } from "@/lib/google";
 
 export const runtime = "nodejs";
 
@@ -11,6 +11,13 @@ export function GET(req: Request) {
       { status: 503 },
     );
 
-  const back = new URL(req.url).searchParams.get("back") ?? "/dashboard";
+  const params = new URL(req.url).searchParams;
+  const port = params.get("cutroom");
+  if (port && /^\d{2,5}$/.test(port))
+    return NextResponse.redirect(
+      consentUrl(req, Buffer.from(CUTROOM_STATE + port).toString("base64url"), DRIVE_SCOPE),
+    );
+
+  const back = params.get("back") ?? "/dashboard";
   return NextResponse.redirect(consentUrl(req, Buffer.from(back).toString("base64url")));
 }

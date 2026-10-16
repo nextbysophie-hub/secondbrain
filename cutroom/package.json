@@ -1,0 +1,16 @@
+{
+  "name": "cut-room",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Raw footage in, rough cuts out: matches clips to Notion scripts, cuts the best takes, and hands approved cuts to the editor on Google Drive.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  }
+}

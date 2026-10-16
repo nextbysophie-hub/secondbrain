@@ -42,3 +42,7 @@ next-env.d.ts
 
 # local setup store
 .data/
+
+# cut room (runs on her computer)
+/cutroom/node_modules
+/public/cut-room.zip
