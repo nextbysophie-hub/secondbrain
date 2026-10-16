@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cut Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet" />
+<style>
+  :root { --paper:#f6efe4; --card:#fffaf2; --cocoa:#4a3428; --cocoa-2:#6b4f3f; --mustard:#e2b04a; --mustard-soft:#f6e3b4; --blue:#7fa7c9; --blue-soft:#dde9f3; --line:#eadfcd; --muted:#8a7565; --red:#c0573f; --green:#5f8b5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--cocoa); font:15px/1.5 Poppins, system-ui, sans-serif; }
+  header { padding:28px 32px 8px; display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; justify-content:space-between; }
+  h1 { margin:0; font:italic 46px/1 "Instrument Serif", serif; }
+  h1 small { display:block; font:400 14px Poppins; color:var(--muted); margin-top:6px; }
+  h2 { font-weight:600; font-size:17px; margin:28px 0 12px; display:flex; gap:8px; align-items:center; }
+  h2 .n { background:var(--cocoa); color:var(--paper); border-radius:99px; font-size:12px; padding:1px 9px; }
+  main { padding:0 32px 60px; max-width:1240px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { background:var(--card); border-radius:99px; padding:6px 14px; font-size:13px; cursor:default; display:inline-flex; gap:6px; align-items:center; border:0; color:inherit; font-family:inherit; }
+  button.chip { cursor:pointer; } button.chip:hover { background:var(--mustard-soft); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .dot.on { background:var(--green); } .dot.warn { background:var(--mustard); }
+  .card { background:var(--card); border-radius:22px; padding:20px; margin-bottom:16px; }
+  .cut { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:22px; }
+  @media (max-width:900px){ .cut { grid-template-columns:1fr; } header, main { padding-left:16px; padding-right:16px; } }
+  video { width:100%; max-height:62vh; background:#1d1410; border-radius:16px; display:block; }
+  .placeholder { aspect-ratio:16/9; border-radius:16px; background:var(--blue-soft); display:grid; place-items:center; color:var(--cocoa-2); text-align:center; padding:20px; }
+  .title { font-size:20px; font-weight:600; margin:0 0 4px; }
+  .meta { color:var(--muted); font-size:13px; display:flex; gap:10px; flex-wrap:wrap; }
+  .tag { background:var(--mustard-soft); border-radius:99px; padding:1px 10px; font-size:12px; color:var(--cocoa); }
+  .tag.blue { background:var(--blue-soft); }
+  .note { background:var(--blue-soft); border-radius:14px; padding:10px 14px; margin:12px 0; font-size:14px; }
+  .err { background:#f6dcd3; color:#7a2e1c; border-radius:14px; padding:10px 14px; margin:10px 0; font-size:14px; }
+  details { margin:10px 0; } summary { cursor:pointer; font-weight:500; font-size:14px; }
+  .picks { max-height:240px; overflow:auto; font-size:13px; margin-top:6px; }
+  .pick { display:grid; grid-template-columns:28px 1fr; gap:6px; padding:6px 0; border-top:1px solid var(--line); cursor:pointer; }
+  .pick:hover { background:var(--mustard-soft); }
+  .pick b { color:var(--muted); font-weight:500; }
+  .pick span.src { display:block; color:var(--muted); font-size:12px; }
+  pre.script { white-space:pre-wrap; font:13px/1.55 Poppins, sans-serif; max-height:220px; overflow:auto; margin:6px 0 0; }
+  label { font-size:13px; font-weight:500; display:block; margin:12px 0 4px; }
+  select, input[type=text], input[type=password], input[type=email] { width:100%; padding:10px 12px; border-radius:12px; border:1.5px solid var(--line); background:#fff; font:inherit; color:inherit; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+  textarea { width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:14px Poppins, sans-serif; background:#fff; color:var(--cocoa); resize:vertical; }
+  .btn { border:0; border-radius:99px; padding:11px 20px; font:500 14px Poppins, sans-serif; cursor:pointer; background:var(--line); color:var(--cocoa); }
+  .btn.go { background:var(--cocoa); color:var(--paper); } .btn.go:hover { background:var(--cocoa-2); }
+  .btn.small { padding:7px 14px; font-size:13px; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  a { color:var(--cocoa-2); }
+  .bar { height:8px; border-radius:99px; background:var(--line); overflow:hidden; margin-top:8px; }
+  .bar i { display:block; height:100%; background:var(--mustard); transition:width .4s; }
+  .list .item { display:grid; grid-template-columns:1fr auto; gap:12px; padding:12px 0; border-top:1px solid var(--line); align-items:center; }
+  .list .item:first-child { border-top:0; }
+  .small { font-size:13px; color:var(--muted); }
+  .quote { font-size:13px; color:var(--cocoa-2); font-style:italic; margin-top:2px; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:14px; }
+  .empty { color:var(--muted); font-size:14px; padding:6px 2px; }
+  .check { display:flex; gap:8px; align-items:center; font-weight:400; }
+  #log { font:12px/1.6 ui-monospace, Menlo, monospace; color:var(--muted); white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cut Room<small>Raw footage in, rough cuts out — approve and it goes to your editor.</small></h1>
+  <div class="chips" id="chips"></div>
+</header>
+<main>
+  <div id="setup"></div>
+  <div id="older"></div>
+  <h2>Ready for you <span class="n" id="nReview">0</span></h2>
+  <div id="review"></div>
+  <h2>Needs a script <span class="n" id="nUnmatched">0</span></h2>
+  <div class="card list" id="unmatched"></div>
+  <h2>Working on it <span class="n" id="nWorking">0</span></h2>
+  <div class="card list" id="working"></div>
+  <h2>Sent to editors <span class="n" id="nSent">0</span></h2>
+  <div class="card list" id="sent"></div>
+  <details><summary class="small">Activity</summary><div id="log"></div></details>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+const mins = (t) => `${Math.floor((t||0)/60)}:${String(Math.round((t||0)%60)).padStart(2,"0")}`;
+const post = async (url, body) => {
+  const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || "Something went wrong");
+  return j;
+};
+let S = null;
+const drafts = {}; // per-cut editor choices the poll mustn't wipe
+
+/* Each card is redrawn only when what it shows changes, so a playing video keeps playing. */
+function patch(container, items, key, sig, draw, emptyText) {
+  const el = $(container);
+  if (!items.length) { el.innerHTML = `<div class="empty">${emptyText}</div>`; el.dataset.empty = "1"; return; }
+  if (el.dataset.empty) { el.innerHTML = ""; delete el.dataset.empty; }
+  const keep = new Set(items.map(key));
+  [...el.children].forEach((c) => { if (!keep.has(c.dataset.key)) c.remove(); });
+  items.forEach((it, i) => {
+    const k = key(it), s = sig(it);
+    let node = [...el.children].find((c) => c.dataset.key === k);
+    if (!node || node.dataset.sig !== s) {
+      const fresh = document.createElement("div");
+      fresh.innerHTML = draw(it);
+      const n = fresh.firstElementChild; n.dataset.key = k; n.dataset.sig = s;
+      if (node) node.replaceWith(n); else el.appendChild(n);
+      node = n;
+    }
+    if (el.children[i] !== node) el.insertBefore(node, el.children[i]);
+  });
+}
+
+function chips() {
+  const c = S.config, v = S.volumes;
+  $("#chips").innerHTML = [
+    `<button class="chip" onclick="post('/api/open',{what:'inbox'})" title="${esc(S.inbox)}"><span class="dot on"></span>Watching Desktop › Cut Room Inbox</button>`,
+    v.length ? v.map((n) => `<span class="chip"><span class="dot on"></span>Card: ${esc(n)}</span>`).join("") : `<span class="chip"><span class="dot"></span>No SD card</span>`,
+    c.linked ? `<button class="chip" onclick="refresh(this)"><span class="dot ${S.scriptsError ? "warn" : "on"}"></span>${S.scriptsError ? "Notion: " + esc(S.scriptsError) : `Notion: ${S.scripts.length} scripts in progress`} ↻</button>` : "",
+    c.linked ? (c.drive ? `<span class="chip"><span class="dot on"></span>Google Drive connected</span>` : `<a class="chip" href="/connect-drive" style="background:var(--mustard-soft);text-decoration:none"><span class="dot warn"></span>Connect Google Drive</a>`) : "",
+    `<button class="chip" onclick="post('/api/open',{what:'cuts'})">Open rough cuts folder</button>`,
+  ].join("");
+}
+
+function setup() {
+  const el = $("#setup");
+  const err = new URLSearchParams(location.search).get("drive_error");
+  if (S.config.linked) { el.innerHTML = err ? `<div class="err">Google Drive didn't connect: ${esc(err)}</div>` : ""; return; }
+  if (el.dataset.drawn) return;
+  el.dataset.drawn = "1";
+  el.innerHTML = `<div class="card" style="max-width:640px">
+    <div class="title">Connect your dashboard</div>
+    <div class="small">Open your dashboard, copy the whole address from the top of the browser and paste it here. That's how Cut Room reads your scripts in Notion.</div>
+    <label>Dashboard link</label><input type="text" id="link" placeholder="https://capture-idea-setup.vercel.app/dashboard?key=…" />
+    <label>Deals passcode <span class="small">(optional — lets it use your brand-deal scripts too)</span></label><input type="password" id="code" />
+    <div class="row"><button class="btn go" id="save">Connect</button><span class="small" id="setupMsg"></span></div></div>`;
+  $("#save").onclick = async () => {
+    $("#setupMsg").textContent = "Checking…";
+    try { await post("/api/setup", { link: $("#link").value, dealsCode: $("#code").value }); el.innerHTML = ""; delete el.dataset.drawn; load(); }
+    catch (e) { $("#setupMsg").textContent = e.message; }
+  };
+}
+
+function older() {
+  const o = Object.entries(S.older || {});
+  $("#older").innerHTML = o.map(([vol, n]) => `<div class="note">“${esc(vol)}” also has ${n} older clip${n > 1 ? "s" : ""} (more than two weeks old). <button class="btn small" onclick="post('/api/import-older',{volume:'${esc(vol)}'})">Import those too</button></div>`).join("");
+}
+
+function editorPicker(cut) {
+  const d = drafts[cut.id] ?? { editorId: cut.editor?.id || "", email: cut.editor && !cut.editor.id ? cut.editor.email : "" };
+  drafts[cut.id] = d;
+  const opts = S.people.map((p) => `<option value="${p.id}" ${p.id === d.editorId ? "selected" : ""}>${esc(p.name)}${p.email ? ` — ${esc(p.email)}` : ""}</option>`).join("");
+  return `<label>Editor</label>
+    <select onchange="drafts['${cut.id}'].editorId=this.value; this.nextElementSibling.style.display=this.value==='other'?'block':'none'">
+      <option value="">Choose who edits this…</option>${opts}<option value="other" ${d.email ? "selected" : ""}>Someone else (type their email)</option>
+    </select>
+    <input type="email" placeholder="editor@email.com" value="${esc(d.email)}" style="margin-top:8px;display:${d.email ? "block" : "none"}" oninput="drafts['${cut.id}'].email=this.value" />`;
+}
+
+function drawCut(cut) {
+  const busy = cut.status === "cutting" || cut.status === "waiting";
+  const sending = cut.status === "approving";
+  const src = cut.source === "deal" ? `<span class="tag">Brand deal</span>` : `<span class="tag blue">Content</span>`;
+  const video = cut.file && !busy
+    ? `<video controls preload="metadata" src="/media/cut/${encodeURIComponent(cut.id)}?v=${cut.version}"></video>`
+    : `<div class="placeholder">${cut.status === "cutting" ? `Cutting the best takes…<div class="bar" style="width:220px"><i style="width:${Math.round((cut.progress || 0) * 100)}%"></i></div>` : "Waiting for all the clips to finish transcribing…"}</div>`;
+  const picks = (cut.picks || []).map((p, i) => `<div class="pick" onclick="seek(this,${i})"><b>${i + 1}</b><div>${esc(p.text)}<span class="src">${esc(p.clipName)} · ${mins(p.start)}–${mins(p.end)}</span></div></div>`).join("");
+  return `<div class="card"><div class="cut">
+    <div>${video}</div>
+    <div>
+      <div class="title">${esc(cut.title)}</div>
+      <div class="meta">${src}${cut.stage ? `<span>${esc(cut.stage)}</span>` : ""}${cut.version ? `<span>v${cut.version}</span>` : ""}${cut.length ? `<span>${mins(cut.length)} from ${mins(cut.rawLength)} of footage</span>` : ""}<span>${(cut.clipIds || []).length} clip${(cut.clipIds || []).length === 1 ? "" : "s"}</span>${cut.url ? `<a href="${esc(cut.url)}" target="_blank">Open in Notion</a>` : ""}</div>
+      ${cut.notes ? `<div class="note">${esc(cut.notes)}</div>` : ""}
+      ${cut.error ? `<div class="err">${esc(cut.error)}</div>` : ""}
+      ${picks ? `<details><summary>What made the cut (${(cut.picks || []).length} pieces) — tap to jump</summary><div class="picks">${picks}</div></details>` : ""}
+      <details><summary>Script</summary><pre class="script">${esc(cut.script || "")}</pre></details>
+      ${versions(cut)}
+      ${cut.pendingRevision && busy ? `<div class="note">Revising: “${esc(cut.pendingRevision)}”</div>` : ""}
+      ${!sending && cut.file && !busy ? `
+        <label>Revisions <span class="small">(tell it what to change)</span></label>
+        <textarea id="rev-${cut.id}" rows="2" placeholder="e.g. use the second take of the hook, cut the part about my dog, make it tighter" oninput="(drafts['${cut.id}'] ??= {}).rev=this.value">${esc((drafts[cut.id] || {}).rev || "")}</textarea>
+        <div class="row"><button class="btn" onclick="revise('${cut.id}', this)">Revise → v${(cut.version || 0) + 1}</button></div>` : ""}
+      ${sending ? `<div class="note">${esc(cut.sendStep || "Sending…")}<div class="bar"><i style="width:${Math.round((cut.sendProgress || 0) * 100)}%"></i></div></div>` : `
+        ${editorPicker(cut)}
+        <label class="check"><input type="checkbox" id="raw-${cut.id}" checked /> Send the raw clips too</label>
+        <label>Note for the editor <span class="small">(optional)</span></label><input type="text" id="note-${cut.id}" placeholder="e.g. keep it under 45s, add captions" />
+        <div class="row">
+          <button class="btn go" ${busy || !cut.file ? "disabled" : ""} onclick="approve('${cut.id}', this)">Approve &amp; send to editor</button>
+          <button class="btn" ${busy ? "disabled" : ""} onclick="post('/api/cuts/${encodeURIComponent(cut.id)}/recut').then(load)">Re-cut</button>
+        </div>`}
+    </div></div></div>`;
+}
+
+function versions(cut) {
+  const v = cut.versions || [];
+  if (v.length < 2) return "";
+  const rows = [...v].reverse().map((x) => `<div class="pick" onclick="watch('${cut.id}',${x.version})"><b>v${x.version}</b><div>${x.revision ? `“${esc(x.revision)}”` : "First cut"}<span class="src">${mins(x.length)}${x.version === cut.version ? " · latest" : ""} · tap to watch</span></div></div>`).join("");
+  return `<details><summary>Versions (${v.length})</summary><div class="picks">${rows}</div></details>`;
+}
+
+function watch(id, n) {
+  const card = [...document.querySelectorAll("#review .card")].find((c) => c.dataset.key === id);
+  const vid = card?.querySelector("video"); if (!vid) return;
+  vid.src = `/media/cut/${encodeURIComponent(id)}?v=${n}`; vid.play();
+}
+
+async function revise(id, btn) {
+  const notes = ($(`#rev-${id}`)?.value || "").trim();
+  if (!notes) return alert("Type what should change first.");
+  btn.disabled = true;
+  try { await post(`/api/cuts/${encodeURIComponent(id)}/revise`, { notes }); (drafts[id] ??= {}).rev = ""; }
+  catch (e) { alert(e.message); btn.disabled = false; }
+  load();
+}
+
+function seek(el, i) {
+  const card = el.closest(".card"); const v = card.querySelector("video"); if (!v) return;
+  const id = card.dataset.key; const cut = S.cuts.find((c) => c.id === id);
+  let t = 0; for (let k = 0; k < i; k++) t += cut.picks[k].end - cut.picks[k].start;
+  v.currentTime = t + 0.01; v.play();
+}
+
+async function approve(id, btn) {
+  const d = drafts[id] || {};
+  const editorId = d.editorId && d.editorId !== "other" ? d.editorId : null;
+  const editorEmail = d.editorId === "other" ? d.email : null;
+  if (!editorId && !editorEmail && !confirm("No editor picked — upload to Drive without pinging anyone?")) return;
+  btn.disabled = true;
+  try { await post(`/api/cuts/${encodeURIComponent(id)}/approve`, { editorId, editorEmail, note: $(`#note-${id}`)?.value || "", raw: $(`#raw-${id}`)?.checked !== false }); }
+  catch (e) { alert(e.message); btn.disabled = false; }
+  load();
+}
+
+const STATUS = { found: "Found — copying soon", copying: "Copying off the card…", copied: "Waiting to transcribe", transcribing: "Transcribing…", heard: "Finding its script…", error: "Problem", nospeech: "No talking in this one" };
+
+function scriptOptions(sel) {
+  return `<option value="">Pick the script…</option>` + S.scripts.map((s) => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.title)}</option>`).join("");
+}
+
+function render() {
+  chips(); setup(); older();
+  const review = S.cuts.filter((c) => ["waiting", "cutting", "review", "approving", "error"].includes(c.status));
+  $("#nReview").textContent = review.length;
+  patch("#review", review, (c) => c.id, (c) => JSON.stringify([c.status, c.version, c.error, c.sendStep, Math.round((c.sendProgress || 0) * 50), Math.round((c.progress || 0) * 20), c.title, c.notes, c.pendingRevision, (c.versions || []).length, S.people.length]), drawCut,
+    S.config.linked ? "Nothing to review yet. Drop clips in the Cut Room Inbox on your Desktop, or plug in your SD card." : "Connect your dashboard above to start.");
+
+  const unmatched = S.clips.filter((c) => c.status === "unmatched" || c.status === "nospeech");
+  $("#nUnmatched").textContent = unmatched.length;
+  patch("#unmatched", unmatched, (c) => c.id, (c) => JSON.stringify([c.status, S.scripts.length]), (c) => `<div class="item"><div><b>${esc(c.name)}</b> <span class="small">${mins(c.duration)} · ${new Date(c.recorded).toLocaleDateString()}</span>
+      <div class="quote">${c.status === "nospeech" ? "No talking found — B-roll?" : `“${esc((c.preview || "").slice(0, 160))}…”`}</div></div>
+      <div class="row" style="margin:0"><select style="width:220px" onchange="post('/api/clips/${c.id}/assign',{scriptId:this.value}).then(load)">${scriptOptions(c.scriptId)}</select>
+      <button class="btn small" onclick="post('/api/clips/${c.id}/skip').then(load)">Not for a video</button></div></div>`,
+    "Every clip found its script.");
+
+  const working = S.clips.filter((c) => ["found", "copying", "copied", "transcribing", "heard", "error"].includes(c.status));
+  $("#nWorking").textContent = working.length;
+  patch("#working", working, (c) => c.id, (c) => JSON.stringify([c.status, c.error]), (c) => `<div class="item"><div><b>${esc(c.name)}</b> <span class="small">${c.volume ? `from ${esc(c.volume)}` : "from the inbox"}</span>
+      <div class="small">${esc(STATUS[c.status] || c.status)}${c.error ? ` — ${esc(c.error)}` : ""}</div></div>
+      ${c.status === "error" ? `<button class="btn small" onclick="post('/api/clips/${c.id}/retry').then(load)">Try again</button>` : "<span></span>"}</div>`,
+    "Nothing in progress.");
+
+  const sent = S.cuts.filter((c) => c.status === "sent");
+  $("#nSent").textContent = sent.length;
+  patch("#sent", sent, (c) => c.id, (c) => JSON.stringify([c.sentAt]), (c) => `<div class="item"><div><b>${esc(c.title)}</b> <span class="small">v${c.version} · ${new Date(c.sentAt).toLocaleString()}</span>
+      <div class="small">${c.editor ? `Sent to ${esc(c.editor.name)}` : "Uploaded to Drive"} · pinged on Notion</div></div>
+      <div class="row" style="margin:0"><a class="btn small" href="${esc(c.driveUrl)}" target="_blank" style="text-decoration:none">Open Drive folder</a>
+      <button class="btn small" onclick="post('/api/cuts/${encodeURIComponent(c.id)}/recut').then(load)">Re-cut</button></div></div>`,
+    "Nothing sent yet.");
+
+  $("#log").textContent = S.log.join("\n");
+}
+
+async function refresh(btn) { btn.disabled = true; await post("/api/refresh").catch(() => {}); btn.disabled = false; load(); }
+async function load() { try { S = await (await fetch("/api/state")).json(); render(); } catch {} }
+load(); setInterval(load, 2000);
+</script>
+</body>
+</html>
