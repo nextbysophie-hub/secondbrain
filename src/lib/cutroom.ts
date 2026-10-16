@@ -100,6 +100,22 @@ export async function scriptDbs(token: string) {
   return { calendar, content, deals };
 }
 
+/** The Content Calendar may sit behind a different Notion connection than the
+ *  dashboard's own, so the server keeps one that can always reach it. */
+const fallbackToken = () => process.env.CUTROOM_NOTION_TOKEN?.trim() || null;
+
+async function tokenFor(token: string, path: string): Promise<string> {
+  try {
+    await notion(token, path);
+    return token;
+  } catch (e) {
+    const fb = fallbackToken();
+    if (!fb || fb === token) throw e;
+    await notion(fb, path);
+    return fb;
+  }
+}
+
 /** An editor is a person, and Notion only pings people from a people column. */
 async function ensureEditorColumn(token: string, dbId: string) {
   const db = await notion<{ properties: Record<string, Prop> }>(token, `/databases/${dbId}`);
@@ -163,9 +179,10 @@ export async function readScripts(token: string, withDeals: boolean): Promise<Sc
 
   // Her real scripts: the Content Calendar, one page body per video. Its
   // editors are a name select, so it doesn't get an extra people column.
-  if (dbs.calendar) {
-    const rows = (await queryAll(token, dbs.calendar)).filter((r) => LIVE_CONTENT.test(choice(r.properties.Status) ?? ""));
-    const bodies = await Promise.all(rows.map((r) => pageText(token, r.id).catch(() => "")));
+  const calToken = dbs.calendar ? await tokenFor(token, `/databases/${dbs.calendar}`).catch(() => null) : null;
+  if (dbs.calendar && calToken) {
+    const rows = (await queryAll(calToken, dbs.calendar)).filter((r) => LIVE_CONTENT.test(choice(r.properties.Status) ?? ""));
+    const bodies = await Promise.all(rows.map((r) => pageText(calToken, r.id).catch(() => "")));
     rows.forEach((r, i) => {
       const p = r.properties;
       const titleProp = Object.values(p).find((x) => x.type === "title");
@@ -256,6 +273,7 @@ export async function handOff(
   driveUrl: string,
   note: string,
 ) {
+  token = await tokenFor(token, `/pages/${pageId}`);
   const page = await notion<{ properties: Record<string, Prop & { id: string }>; parent: { database_id?: string } }>(
     token,
     `/pages/${pageId}`,
