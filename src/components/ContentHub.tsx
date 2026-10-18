@@ -642,12 +642,29 @@ function Calendar({ videos, send }: { videos: HubVideo[]; send: Send }) {
             <VideoDetail v={opened} send={send} onClose={() => setOpenId(null)} />
           </section>
         ) : null}
-        <section className="hub-box">
+        <section
+          className={`hub-box hub-pool ${over === "pool" ? "is-over" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setOver("pool");
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setOver(null);
+            const id = e.dataTransfer.getData("text/hub-video");
+            if (id && videos.find((v) => v.id === id)?.post) slot(id, null);
+          }}
+        >
           <p className="hub-kicker">
             {picking ? `Pick a video for ${short(picking)}` : "Not on a day yet"}
           </p>
           <p className="mb-2 mt-1 text-[12px] text-muted">
-            {picking ? "Tap one to put it on that day." : "Drag one onto a day, or tap a day first."}
+            {picking
+              ? "Tap one to put it on that day."
+              : "Drag one onto a day, or tap a day first. Put one on the wrong day? Drag it back here."}
           </p>
           <div className="max-h-[520px] space-y-1.5 overflow-y-auto">
             {pool.map((v) => (
