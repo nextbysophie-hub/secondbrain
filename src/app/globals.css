@@ -943,3 +943,16 @@ select {
   .board-theme .hub-day { min-height: 58px; padding: 17px 2px 2px; }
   .board-theme .hub-slot { font-size: 9.5px; -webkit-line-clamp: 2; padding: 2px 3px; }
 }
+.board-theme .hub-fmts { margin-top: 16px; display: grid; gap: 10px; grid-template-columns: 1fr; }
+@media (min-width: 760px) { .board-theme .hub-fmts { grid-template-columns: repeat(3, 1fr); } }
+.board-theme .hub-fmt { background: var(--paper-panel-2); border-radius: 18px; padding: 14px 16px; }
+.board-theme .hub-mrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.board-theme .hub-meter { flex: 1; height: 8px; border-radius: 999px; background: var(--paper-panel-3); overflow: hidden; }
+.board-theme .hub-meter > span { display: block; height: 100%; border-radius: 999px; transition: width .3s; }
+.board-theme .hub-meter-lg { height: 12px; }
+.board-theme .hub-fill-all { background: var(--paper-ok); }
+.board-theme .hub-fill-carousel { background: var(--paper-accent-2); }
+.board-theme .hub-fill-yap { background: var(--paper-warn); }
+.board-theme .hub-fill-talking-head { background: var(--paper-bad); }
+.board-theme .hub-tag-fmt { background: var(--paper-accent-2-bg); color: var(--paper-accent-2); }
+.board-theme .hub-pill.hub-pill-dark.on { background: var(--paper-ink); color: var(--paper-accent-ink); }

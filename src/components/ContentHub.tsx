@@ -30,6 +30,26 @@ const stageOf = (s: string | null): StageId =>
   STAGES.find((x) => (x.match as readonly string[]).includes(s ?? ""))?.id ?? "idea";
 const isReady = (v: HubVideo) => RANK[stageOf(v.status)] >= RANK.ready;
 
+/** The monthly split: 30 pieces, 10 of each. `steps` are the meters, each
+ *  counting pieces that have reached at least that stage. */
+const FORMATS = [
+  { id: "Carousel", label: "Carousels", who: "swipe posts", target: 10, steps: [["Written", "scripted"], ["Designed", "editing"], ["Approved", "ready"]] },
+  { id: "Yap", label: "Yaps", who: "Brent Cooper style · easy edit · Bernal", target: 10, steps: [["Scripted", "scripted"], ["Filmed", "editing"], ["Edited", "ready"]] },
+  { id: "Talking head", label: "Talking heads", who: "fully edited · Chandan", target: 10, steps: [["Scripted", "scripted"], ["Filmed", "editing"], ["Edited", "ready"]] },
+] as const;
+const WEIGHT: Record<StageId, number> = { idea: 0.1, scripted: 0.3, filming: 0.5, editing: 0.75, ready: 1, posted: 1, hold: 0 };
+
+/** Set in Notion's "Format", else guessed from the content type or editor. */
+const formatOf = (v: HubVideo): string | null =>
+  v.format ??
+  (v.type === "Carrusels"
+    ? "Carousel"
+    : v.editor === "Bernal"
+      ? "Yap"
+      : v.editor === "Chandan Deshmukh" || v.type === "Talking Head"
+        ? "Talking head"
+        : null);
+
 /** December 2026 is the first month with a post every day. */
 const FIRST_DAILY = new Date(2026, 11, 1);
 const CATCH_UP = new Date(2026, 10, 1);
@@ -231,6 +251,105 @@ function AheadCard({ videos, onTile }: { videos: HubVideo[]; onTile: () => void 
   );
 }
 
+/* ------------------------------------------------------- month progress */
+
+/** A piece counts toward a month when it posts that month, or when it's still
+ *  in the works with no day yet (it's what's being made for the month ahead). */
+const inMonth = (v: HubVideo, key: string) =>
+  v.post ? v.post.startsWith(key) : !["posted", "hold"].includes(stageOf(v.status));
+
+function Meter({ label, n, of, cls }: { label: string; n: number; of: number; cls: string }) {
+  return (
+    <div className="hub-mrow">
+      <span className="w-[68px] shrink-0 text-muted">{label}</span>
+      <div className="hub-meter">
+        <span className={cls} style={{ width: `${Math.min(100, (100 * n) / of)}%` }} />
+      </div>
+      <b className="w-[38px] shrink-0 text-right tabular-nums">
+        {n}/{of}
+      </b>
+    </div>
+  );
+}
+
+function MonthProgress({ videos, onUnsorted }: { videos: HubVideo[]; onUnsorted: () => void }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const { target } = aheadPlan(today);
+  const key = monthKey(target);
+  const M = monthName(target);
+  const mine = videos.filter((v) => inMonth(v, key));
+  const rows = FORMATS.map((f) => {
+    const list = mine
+      .filter((v) => formatOf(v) === f.id)
+      .sort((a, b) => RANK[stageOf(b.status)] - RANK[stageOf(a.status)]);
+    const reached = (s: StageId) =>
+      Math.min(f.target, list.filter((v) => RANK[stageOf(v.status)] >= RANK[s]).length);
+    const score = list.slice(0, f.target).reduce((n, v) => n + WEIGHT[stageOf(v.status)], 0);
+    return { f, list, reached, score, ready: reached("ready") };
+  });
+  const total = rows.reduce((n, r) => n + r.f.target, 0);
+  const ready = rows.reduce((n, r) => n + r.ready, 0);
+  const pct = Math.round((100 * rows.reduce((n, r) => n + r.score, 0)) / total);
+  const unsorted = mine.filter((v) => !formatOf(v)).length;
+
+  return (
+    <section className="hub-box">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="hub-kicker">{M} progress</p>
+          <h2 className="display mt-1 text-[22px] font-bold leading-tight sm:text-[26px]">
+            {pct}% of {M} made
+          </h2>
+          <p className="mt-1 text-[13.5px] text-muted">
+            <b className="text-ink">{ready}</b> of {total} pieces ready to post ·{" "}
+            {FORMATS.map((f) => `${f.target} ${f.label.toLowerCase()}`).join(", ")}
+          </p>
+        </div>
+      </div>
+      <div className="hub-meter hub-meter-lg mt-3">
+        <span className="hub-fill-all" style={{ width: `${pct}%` }} />
+      </div>
+
+      <div className="hub-fmts">
+        {rows.map(({ f, list, reached, ready: r }) => {
+          const cls = `hub-fill-${f.id.toLowerCase().replace(" ", "-")}`;
+          return (
+            <div key={f.id} className="hub-fmt">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-semibold">{f.label}</p>
+                  <p className="text-[12px] text-muted">{f.who}</p>
+                </div>
+                <p className="display shrink-0 text-right text-[28px] font-bold leading-none">
+                  {r}
+                  <span className="text-[15px] text-muted">/{f.target}</span>
+                  <span className="block text-[11px] font-normal text-muted">ready</span>
+                </p>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                <Meter label="Planned" n={reached("idea")} of={f.target} cls={cls} />
+                {f.steps.map(([label, s]) => (
+                  <Meter key={label} label={label} n={reached(s)} of={f.target} cls={cls} />
+                ))}
+              </div>
+              {list.length > f.target ? (
+                <p className="mt-2 text-[12px] text-muted">+{list.length - f.target} extra in the works</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {unsorted ? (
+        <button type="button" onClick={onUnsorted} className="mt-3 text-left text-[12.5px] text-muted underline">
+          {unsorted} {unsorted === 1 ? "piece" : "pieces"} in the works {unsorted === 1 ? "has" : "have"} no format yet, so {unsorted === 1 ? "it isn't" : "they aren't"} counted. Tap a card in the pipeline to set one.
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 /* ----------------------------------------------------------- one video */
 
 function VideoDetail({ v, send, onClose }: { v: HubVideo; send: Send; onClose?: () => void }) {
@@ -251,6 +370,23 @@ function VideoDetail({ v, send, onClose }: { v: HubVideo; send: Send; onClose?: 
             {s.label}
           </button>
         ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted">
+        Format
+        {FORMATS.map((f) => {
+          const on = formatOf(v) === f.id;
+          const next = on && v.format ? null : f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              className={`hub-pill hub-pill-dark ${on ? "on" : ""}`}
+              onClick={() => send({ action: "hubVideoFormat", id: v.id, format: next }, patchVideo(v.id, { format: next }))}
+            >
+              {f.id}
+            </button>
+          );
+        })}
       </div>
       <label className="flex items-center gap-2 text-[12.5px] text-muted">
         Posts on
@@ -304,7 +440,8 @@ function VideoCard({ v, send }: { v: HubVideo; send: Send }) {
       <p className="text-[13.5px] font-semibold leading-snug">{v.title}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {v.post ? <span className="ci-tag hub-tag-post">posts {short(v.post)}</span> : null}
-        {v.type ? <span className="ci-tag">{v.type}</span> : null}
+        {formatOf(v) ? <span className="ci-tag hub-tag-fmt">{formatOf(v)}</span> : null}
+        {v.type && !["Carrusels", "Talking Head"].includes(v.type) ? <span className="ci-tag">{v.type}</span> : null}
         {v.editor && !["Yes", "No"].includes(v.editor) ? <span className="ci-tag">ed. {v.editor}</span> : null}
         {v.film && stageOf(v.status) !== "posted" ? <span className="ci-tag">film {short(v.film)}</span> : null}
       </div>
@@ -365,7 +502,7 @@ function Pipeline({ videos, send }: { videos: HubVideo[]; send: Send }) {
                       withHub(b, (h) => ({
                         ...h,
                         videos: [
-                          { id: `tmp-${Date.now()}`, title, status: "Idea", type: null, editor: null, film: null, post: null, turnIn: null, postUrl: null, url: "#" },
+                          { id: `tmp-${Date.now()}`, title, status: "Idea", type: null, editor: null, format: null, film: null, post: null, turnIn: null, postUrl: null, url: "#" },
                           ...(h.videos ?? []),
                         ],
                       })),
@@ -772,6 +909,7 @@ export function ContentHub({ board, send }: { board: Board; send: Send }) {
   return (
     <div className="space-y-5">
       {hub.videos ? <AheadCard videos={videos} onTile={() => setView("calendar")} /> : null}
+      {hub.videos ? <MonthProgress videos={videos} onUnsorted={() => setView("pipeline")} /> : null}
       <div className="seg seg-lg" role="group" aria-label="Content hub view">
         {VIEWS.map((v) => (
           <button key={v.id} type="button" aria-pressed={view === v.id} onClick={() => setView(v.id)}>

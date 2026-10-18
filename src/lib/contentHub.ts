@@ -12,6 +12,8 @@ export type HubVideo = {
   status: string | null;
   type: string | null;
   editor: string | null;
+  /** "Carousel", "Yap" or "Talking head" — which slot of the monthly split it fills. */
+  format: string | null;
   film: string | null;
   /** The day it goes out ("Post date"). */
   post: string | null;
@@ -56,6 +58,7 @@ export const FREEBIE_STATUSES = ["Idea", "Building", "Live", "Posted"];
 export type HubAction =
   | { action: "hubVideoStatus"; id: string; status: string }
   | { action: "hubVideoPost"; id: string; date: string | null }
+  | { action: "hubVideoFormat"; id: string; format: string | null }
   | { action: "hubAddVideo"; title: string; status: string }
   | {
       action: "hubFreebie";
@@ -155,6 +158,7 @@ async function readVideos(token: string, dbId: string | null) {
       status: tag(p.Status),
       type: tag(p["Content type"]),
       editor: tag(p["Editor?"]),
+      format: tag(p.Format),
       film: day(p["Film date"]),
       post: day(p["Post date"]),
       turnIn: day(p["Turn in Date"]),
@@ -235,6 +239,9 @@ export async function applyHubAction(token: string, a: HubAction): Promise<void>
       return;
     case "hubVideoPost":
       await update(token, a.id, { "Post date": date(a.date) });
+      return;
+    case "hubVideoFormat":
+      await update(token, a.id, { Format: { select: a.format ? { name: a.format } : null } });
       return;
     case "hubAddVideo":
       await create(token, dbs.calendar, {
