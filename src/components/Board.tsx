@@ -28,6 +28,7 @@ import type {
   WeekGoal,
 } from "@/lib/board";
 import type { CalendarEvent } from "@/lib/google";
+import type { ProjectStep } from "@/app/api/project/route";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -5562,6 +5563,235 @@ function MonthGoals({
   );
 }
 
+type PlannedStep = { title: string; slot: "deep" | "quick"; day: string; minutes: number };
+
+const weekend = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00`).getDay());
+
+/** Lays the steps onto weekdays from tomorrow, in order, never past the day's
+ *  caps. One of the project's deep tasks a day if that still lands by the
+ *  deadline; otherwise as many as the day has room for. */
+function scheduleSteps(board: Board, steps: ProjectStep[], by: string | null): PlannedStep[] {
+  const lay = (perDay: number) => {
+    const added: Record<string, number> = {};
+    let from = shiftDay(TODAY, 1);
+    return steps.map((s) => {
+      const slot = s.deep ? "deep" : "quick";
+      const cap = slot === "deep" ? DEEP_CAP : QUICK_CAP;
+      let day = from;
+      for (let i = 0; i < 365; i++, day = shiftDay(day, 1)) {
+        if (weekend(day)) continue;
+        const held = board.todos.filter(
+          (t) => !t.done && t.slot === slot && pickedOn(t, day),
+        ).length;
+        const mine = added[`${slot}:${day}`] ?? 0;
+        if (held + mine < cap && mine < perDay) break;
+      }
+      added[`${slot}:${day}`] = (added[`${slot}:${day}`] ?? 0) + 1;
+      from = day; // keep the order: no step lands before the one it follows
+      return { title: s.title, slot, day, minutes: s.minutes } as PlannedStep;
+    });
+  };
+  const spread = lay(1);
+  if (!by || spread.every((p) => p.day <= by)) return spread;
+  return lay(Math.max(DEEP_CAP, QUICK_CAP));
+}
+
+/** Drop a whole project in; get it back as small tasks already given days. */
+function ProjectChopper({ board, send }: { board: Board; send: Send }) {
+  const [project, setProject] = useState("");
+  const [by, setBy] = useState("");
+  const [goal, setGoal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<PlannedStep[] | null>(null);
+  const [saved, setSaved] = useState<number | null>(null);
+  const goals = board.goals.filter((g) => !g.done);
+
+  const chop = async () => {
+    if (!project.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const key =
+        board.dbs.task === "demo" ? "demo" : (localStorage.getItem("captureKey") ?? undefined);
+      const res = await fetch("/api/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, by: by || null, key }),
+      });
+      const data = (await res.json()) as { ok: boolean; tasks?: ProjectStep[]; error?: string };
+      if (!data.ok || !data.tasks) throw new Error(data.error ?? "Couldn't chop that up.");
+      setPlan(scheduleSteps(board, data.tasks, by || null));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't chop that up.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const edit = (i: number, patch: Partial<PlannedStep>) =>
+    setPlan((p) => p && p.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  const scheduleAll = () => {
+    if (!plan) return;
+    const steps = plan.filter((s) => s.title.trim());
+    steps.forEach((s, i) =>
+      send(
+        {
+          action: "addTodo",
+          title: s.title.trim(),
+          slot: s.slot,
+          plan: s.day,
+          kind: s.slot === "deep" ? "deadline" : "want",
+          goal: goal || null,
+        },
+        (b) => ({
+          ...b,
+          todos: [
+            ...b.todos,
+            {
+              ...newTodo(s.title.trim(), s.slot, s.day),
+              id: `tmp-${Date.now()}-${i}`,
+              minutes: s.minutes,
+              goal: goal || null,
+            },
+          ],
+        }),
+      ),
+    );
+    setSaved(steps.length);
+    setPlan(null);
+    setProject("");
+    setBy("");
+  };
+
+  const total = plan?.reduce((m, s) => m + s.minutes, 0) ?? 0;
+
+  return (
+    <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-[13px] font-semibold">Drop a project</span>
+        <span className="text-[11px] text-muted">chopped into tasks, given days</span>
+      </div>
+
+      {plan ? (
+        <>
+          <p className="mb-2 text-[12px] text-muted">
+            {plan.length} tasks, about {spell(total)} of work. Change anything, then add them.
+          </p>
+          <div className="space-y-1.5">
+            {plan.map((s, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-panel px-2 py-1.5">
+                <input
+                  value={s.title}
+                  onChange={(e) => edit(i, { title: e.target.value })}
+                  aria-label="Task"
+                  className="min-w-[180px] flex-1 bg-transparent text-[13px] outline-none"
+                />
+                <span className="text-[11px] text-muted">{spell(s.minutes)}</span>
+                <button
+                  type="button"
+                  onClick={() => edit(i, { slot: s.slot === "deep" ? "quick" : "deep" })}
+                  title="Switch between Deep and Quick"
+                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    s.slot === "deep" ? "bg-accent/20 text-ink" : "bg-line text-muted"
+                  }`}
+                >
+                  {s.slot === "deep" ? "Deep" : "Quick"}
+                </button>
+                <input
+                  type="date"
+                  value={s.day}
+                  onChange={(e) => e.target.value && edit(i, { day: e.target.value })}
+                  aria-label="Day"
+                  className="rounded-md border border-line bg-transparent px-1.5 py-0.5 text-[11px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPlan((p) => p && p.filter((_, j) => j !== i))}
+                  title="Remove"
+                  className="text-[12px] text-muted hover:text-bad"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn" onClick={scheduleAll} disabled={!plan.length}>
+              Add {plan.length} tasks to my plan
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlan(null)}
+              className="text-[12px] text-muted hover:text-ink"
+            >
+              Start over
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <textarea
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            rows={2}
+            placeholder="e.g. Launch my Notion template — landing page, 3 reels, email to the list"
+            aria-label="Project"
+            className="w-full resize-none rounded-lg border border-line bg-panel px-3 py-2 text-[13px] outline-none focus:border-muted"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[12px] text-muted">
+              Finish by
+              <input
+                type="date"
+                value={by}
+                min={TODAY}
+                onChange={(e) => setBy(e.target.value)}
+                className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[12px]"
+              />
+            </label>
+            {goals.length ? (
+              <select
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                aria-label="Goal"
+                className="rounded-md border border-line bg-panel px-1.5 py-1 text-[12px]"
+              >
+                <option value="">No goal</option>
+                {goals.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
+              className="btn ml-auto"
+              onClick={chop}
+              disabled={busy || !project.trim()}
+            >
+              {busy ? "Chopping…" : "Chop it up"}
+            </button>
+          </div>
+        </>
+      )}
+      {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
+      {saved ? (
+        <p className="mt-2 text-[12px] text-muted">
+          Added {saved} tasks — they&rsquo;re on their days in{" "}
+          <a href="#todos" className="underline">
+            Plan week
+          </a>
+          .
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function GoalsPane({ board, send }: { board: Board; send: Send }) {
   const [shift, setShift] = useState(0);
   const { period, year, first } = quarterAt(shift);
@@ -5596,6 +5826,7 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
         </div>
       }
     >
+      <ProjectChopper board={board} send={send} />
       <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-[13px] font-semibold">The quarter</span>
