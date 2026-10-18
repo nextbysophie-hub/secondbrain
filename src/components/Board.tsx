@@ -4052,6 +4052,9 @@ function PlanDay({
   const drop = (e: React.DragEvent, into: "deep" | "quick") => {
     e.preventDefault();
     setOver(null);
+    const emailId = e.dataTransfer.getData("text/email-id");
+    const email = board.emails.find((x) => x.id === emailId);
+    if (email) return emailToDay(email, into, day, send);
     const id = e.dataTransfer.getData("text/todo-id");
     const todo = board.todos.find((t) => t.id === id);
     if (todo && !isFixed(todo)) place(todo, into);
@@ -4581,6 +4584,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
               ))}
             </div>
             <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
+              <PlanInbox board={board} send={send} />
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
             </div>
@@ -6777,6 +6781,116 @@ function FlightDay({
 
 /* ------------------------------------------------------------ email items */
 
+/** Turns an inbox item into a real to-do on the given day; the item itself
+ *  is marked done so it leaves the inbox lists. */
+function emailToDay(
+  e: EmailItem,
+  slot: "deep" | "quick",
+  day: string,
+  send: Send,
+) {
+  const due = e.date ?? day;
+  send(
+    { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
+    (b) => ({
+      ...b,
+      emails: b.emails.map((x) => (x.id === e.id ? { ...x, done: true } : x)),
+      todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
+    }),
+  );
+}
+
+/** Plan week's view of the inbox: everything the bot found that hasn't been
+ *  given a day yet, whatever date it came in on. */
+function PlanInbox({ board, send }: { board: Board; send: Send }) {
+  if (!board.dbs.emails && board.dbs.task !== "demo") return null;
+  const items = board.emails
+    .filter((e) => !e.done)
+    .sort((a, b) => (a.date ?? a.created).localeCompare(b.date ?? b.created));
+  if (!items.length) return null;
+
+  return (
+    <div className="card card-inbox p-3.5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2.5 text-[15px] font-semibold">
+          <span className="badge badge-bad">✉</span>
+          From your inbox
+        </h3>
+        <span className="text-[12px] text-bad">
+          {items.length} not scheduled
+        </span>
+      </div>
+      <div className="max-h-[min(360px,40vh)] space-y-0.5 overflow-auto">
+        {items.map((e) => (
+          <div
+            key={e.id}
+            draggable
+            onDragStart={(ev) => {
+              ev.dataTransfer.setData("text/email-id", e.id);
+              ev.dataTransfer.effectAllowed = "move";
+            }}
+            className="group cursor-grab border-b border-line/60 px-1 py-2 text-[13px] last:border-0 active:cursor-grabbing"
+          >
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 pt-0.5 text-[11px] text-faint">⠿</span>
+              <div className="min-w-0 flex-1">
+                <p className="leading-snug">{e.title}</p>
+                {e.from || e.date ? (
+                  <p
+                    className={`text-[11px] ${e.date && e.date < TODAY ? "text-bad" : "text-muted"}`}
+                  >
+                    {[e.from, e.date ? `due ${dueLabel(e.date)}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[19px]">
+              <button
+                type="button"
+                onClick={() => emailToDay(e, "quick", TODAY, send)}
+                className="btn"
+              >
+                Today
+              </button>
+              <input
+                type="date"
+                min={TODAY}
+                aria-label="Plan it on a day"
+                title="Plan it on a day"
+                onChange={(ev) =>
+                  ev.target.value &&
+                  emailToDay(e, "quick", ev.target.value, send)
+                }
+                className="rounded-full border border-line-2 bg-transparent px-2 py-0.5 text-[11px] text-muted outline-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  send({ action: "emailDone", id: e.id, done: true }, (b) => ({
+                    ...b,
+                    emails: b.emails.map((x) =>
+                      x.id === e.id ? { ...x, done: true } : x,
+                    ),
+                  }))
+                }
+                title="Mark as done in the Grok database"
+                className="btn btn-ok"
+              >
+                ✓ Done
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        Drag one onto a day&rsquo;s deep or quick to schedule it.
+      </p>
+    </div>
+  );
+}
+
 /** What the inbox bot found for the day. Each line can be ticked off on the
  *  spot, given the day it really has to happen, or promoted into a quick or
  *  deep task — at which point it leaves this list and becomes a real to-do. */
@@ -6805,16 +6919,8 @@ function EmailItems({
   const setDate = (e: EmailItem, date: string | null) => {
     send({ action: "emailDate", id: e.id, date }, patch(e.id, { date }));
   };
-  const promote = (e: EmailItem, slot: "deep" | "quick") => {
-    const due = e.date ?? day;
-    send(
-      { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
-      (b) => ({
-        ...patch(e.id, { done: true })(b),
-        todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
-      }),
-    );
-  };
+  const promote = (e: EmailItem, slot: "deep" | "quick") =>
+    emailToDay(e, slot, day, send);
 
   return (
     <section className="card card-inbox px-4 py-4">
