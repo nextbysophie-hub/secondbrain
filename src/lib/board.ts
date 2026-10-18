@@ -128,10 +128,33 @@ export type Todo = {
   // How often it comes back (rent: every 1 month), from the tracker's own
   // recur columns.
   every: Every | null;
+  // Steps inside a deep task, kept as lines in the tracker's Subtasks column.
+  subtasks?: Subtask[];
   url: string;
 };
 
 export type Every = { n: number; unit: "day" | "week" | "month" | "year" };
+
+export type Subtask = { text: string; done: boolean };
+
+/** One step per line, ticked with ☑ and open with ☐, so the column still
+ *  reads as a checklist when opened in Notion. */
+export const parseSubtasks = (s: string): Subtask[] =>
+  s
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const m = /^(☑|☐|\[x\]|\[ \])\s*/i.exec(l);
+      return {
+        text: m ? l.slice(m[0].length) : l,
+        done: !!m && (m[1] === "☑" || m[1].toLowerCase() === "[x]"),
+      };
+    })
+    .filter((t) => t.text);
+
+export const formatSubtasks = (items: Subtask[]) =>
+  items.map((t) => `${t.done ? "☑" : "☐"} ${t.text}`).join("\n");
 
 /** How long a finished task really took, kept for estimating the next one. */
 export type Timing = { title: string; minutes: number };
@@ -218,9 +241,11 @@ export type Goal = {
   name: string;
   area: string;
   period: string;
-  horizon: "month" | "quarter";
+  horizon: "month" | "quarter" | "project";
   parent: string | null;
   done: boolean;
+  /** Projects only: one prize per chest, ticked once she's opened it. */
+  rewards?: Subtask[];
   /** A goal you count up to ("post 40 reels") has a target, a tally and the
    *  day it has to be hit by; a plain goal has none of the three. */
   count: number | null;
@@ -479,6 +504,7 @@ export type TaskMap = {
   deal: string | null;
   fixed: string | null;
   recur: { interval: string; units: string } | null;
+  subtasks: string | null;
 };
 
 type SchemaProp = {
@@ -690,6 +716,9 @@ export async function readTaskMap(
     deal: pick(props, "relation", /deal|brand/i)?.name ?? null,
     fixed: pick(props, "checkbox", /^(fixed|locked)$/i)?.name ?? null,
     recur: recurOf(props),
+    subtasks:
+      pick(props, "rich_text", /^(sub-?tasks?|steps|checklist)$/i)?.name ??
+      null,
   };
 }
 
@@ -763,6 +792,7 @@ export async function ensureDayColumns(
     properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
   if (!map.minutes) properties.Minutes = { number: { format: "number" } };
   if (!map.fixed) properties.Fixed = { checkbox: {} };
+  if (!map.subtasks) properties.Subtasks = { rich_text: {} };
   if (!Object.keys(properties).length) return map;
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
@@ -773,6 +803,7 @@ export async function ensureDayColumns(
     slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
     minutes: map.minutes ?? "Minutes",
     fixed: map.fixed ?? "Fixed",
+    subtasks: map.subtasks ?? "Subtasks",
   };
 }
 
@@ -865,6 +896,7 @@ export async function ensureGoalColumns(
   if (!db.properties.Target) missing.Target = { number: {} };
   if (!db.properties.Count) missing.Count = { number: {} };
   if (!db.properties.By) missing.By = { date: {} };
+  if (!db.properties.Rewards) missing.Rewards = { rich_text: {} };
   if (!Object.keys(missing).length) return;
   await notion(token, `/databases/${goalsDbId}`, {
     method: "PATCH",
@@ -1584,6 +1616,9 @@ export async function readBoard(
       deal: map.deal ? relationOf(r.properties[map.deal]) : null,
       fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
       every: everyOf(r, map),
+      subtasks: map.subtasks
+        ? parseSubtasks(textOf(r.properties[map.subtasks]))
+        : [],
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
@@ -1627,7 +1662,12 @@ export async function readBoard(
       area: selectOf(r.properties.Area) ?? AREAS[0],
       period: textOf(r.properties.Period),
       horizon:
-        selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
+        selectOf(r.properties.Horizon) === "Quarter"
+          ? "quarter"
+          : selectOf(r.properties.Horizon) === "Project"
+            ? "project"
+            : "month",
+      rewards: parseSubtasks(textOf(r.properties.Rewards)),
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
       count: numberOf(r.properties.Count),
@@ -1699,6 +1739,15 @@ async function archivePage(token: string, pageId: string) {
 }
 
 export type Action =
+  | { action: "subtasks"; id: string; items: Subtask[] }
+  | {
+      action: "addProject";
+      name: string;
+      by?: string | null;
+      rewards: Subtask[];
+      tasks: { title: string; slot: "deep" | "quick"; plan: string }[];
+    }
+  | { action: "projectRewards"; id: string; rewards: Subtask[] }
   | {
       action: "addTodo";
       title: string;
@@ -2057,6 +2106,12 @@ export async function applyAction(
       await updatePage(token, body.id, taskProps(map, fields));
       return;
     }
+    case "subtasks":
+      if (map.subtasks)
+        await updatePage(token, body.id, {
+          [map.subtasks]: richText(formatSubtasks(body.items)),
+        });
+      return;
     case "toggleTodo":
       await updatePage(token, body.id, taskProps(map, { done: body.done }));
       return;
@@ -2147,6 +2202,40 @@ export async function applyAction(
           : {}),
         ...(body.by ? { By: dateProp(body.by) } : {}),
         Done: { checkbox: false },
+      });
+      return;
+    case "addProject": {
+      const project = await createPage(token, dbs.goals, {
+        Goal: title(body.name),
+        Area: selectProp(AREAS[0]),
+        Period: richText(""),
+        Horizon: selectProp("Project"),
+        ...(body.by ? { By: dateProp(body.by) } : {}),
+        Rewards: richText(formatSubtasks(body.rewards)),
+        Done: { checkbox: false },
+      });
+      for (const t of body.tasks)
+        await createPage(
+          token,
+          dbs.task,
+          taskProps(map, {
+            title: t.title,
+            done: false,
+            due: t.plan,
+            plan: t.plan,
+            kind: t.slot === "deep" ? "deadline" : "want",
+            slot: t.slot,
+            goal: project,
+            deal: null,
+            category: null,
+            source: "Manual",
+          }),
+        );
+      return;
+    }
+    case "projectRewards":
+      await updatePage(token, body.id, {
+        Rewards: richText(formatSubtasks(body.rewards)),
       });
       return;
     case "toggleGoal":

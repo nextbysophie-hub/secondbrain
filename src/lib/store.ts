@@ -100,3 +100,19 @@ export function unpackCredentials(key: string): Credentials | null {
     return null;
   }
 }
+
+const VIEW_PREFIX = "view.";
+
+/** A look-don't-touch link: the real key sealed inside, so it opens the board
+ *  but no write route will take it (none of them know how to unwrap it). */
+export const sealViewKey = (key: string) => VIEW_PREFIX + encrypt(JSON.stringify({ view: key }));
+
+export function openViewKey(key: string): string | null {
+  if (!key.startsWith(VIEW_PREFIX)) return null;
+  try {
+    const { view } = JSON.parse(decrypt(key.slice(VIEW_PREFIX.length))) as { view?: unknown };
+    return typeof view === "string" && view ? view : null;
+  } catch {
+    return null;
+  }
+}

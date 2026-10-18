@@ -27,6 +27,8 @@ import type {
   Todo,
   WeekGoal,
 } from "@/lib/board";
+import type { CalendarEvent } from "@/lib/google";
+import type { ProjectStep } from "@/app/api/project/route";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -1633,6 +1635,109 @@ function EmptySlot({
 
 /** One of the three deep blocks: what it is, what it usually costs, and a
  *  stopwatch for what it actually cost. */
+type Step = NonNullable<Todo["subtasks"]>[number];
+
+/** The steps inside a deep task: tick them off, drop one, or type the next. */
+function Subtasks({
+  todo,
+  send,
+  onEditing,
+  big,
+}: {
+  todo: Todo;
+  send: Send;
+  onEditing?: (on: boolean) => void;
+  big?: boolean;
+}) {
+  const items = todo.subtasks ?? [];
+  const [draft, setDraft] = useState("");
+  const save = (next: Step[]) =>
+    send({ action: "subtasks", id: todo.id, items: next }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) =>
+        t.id === todo.id ? { ...t, subtasks: next } : t,
+      ),
+    }));
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    save([...items, { text, done: false }]);
+  };
+
+  return (
+    <div className={`space-y-0.5 ${big ? "text-[14px]" : "text-[12px]"}`}>
+      {items.map((s, i) => (
+        <div key={i} className="group/sub flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={s.done ? "Mark step as not done" : "Mark step done"}
+            onClick={() =>
+              save(items.map((x, k) => (k === i ? { ...x, done: !x.done } : x)))
+            }
+            className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border text-[9px] transition ${
+              s.done
+                ? "border-accent bg-accent text-accent-ink"
+                : "border-line-2 hover:border-muted"
+            }`}
+          >
+            {s.done ? "✓" : ""}
+          </button>
+          <span
+            className={`min-w-0 flex-1 ${s.done ? "text-muted line-through" : ""}`}
+          >
+            {s.text}
+          </span>
+          <button
+            type="button"
+            aria-label="Remove step"
+            onClick={() => save(items.filter((_, k) => k !== i))}
+            className="shrink-0 text-[11px] text-faint opacity-0 transition hover:text-bad group-hover/sub:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        onFocus={() => onEditing?.(true)}
+        onBlur={() => onEditing?.(false)}
+        enterKeyHint="done"
+        aria-label={`Add a subtask to ${todo.title}`}
+        placeholder="+ Add a subtask"
+        className="w-full bg-transparent py-0.5 pl-[22px] outline-none placeholder:text-faint"
+      />
+    </div>
+  );
+}
+
+/** "2/3" beside a deep task that has steps, doubling as the open/close switch. */
+function StepCount({
+  todo,
+  open,
+  onClick,
+}: {
+  todo: Todo;
+  open: boolean;
+  onClick: () => void;
+}) {
+  const items = todo.subtasks ?? [];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={open ? "Hide subtasks" : "Show subtasks"}
+      className="shrink-0 rounded-full bg-panel-2 px-2 py-0.5 text-[11px] text-muted transition hover:text-ink"
+    >
+      {items.length
+        ? `${items.filter((s) => s.done).length}/${items.length}`
+        : "+ subtasks"}
+    </button>
+  );
+}
+
 function DeepRow({
   todo,
   board,
@@ -1646,9 +1751,11 @@ function DeepRow({
 }) {
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
+  const [steps, setSteps] = useState(!!todo.subtasks?.length);
+  const [typing, setTyping] = useState(false);
   return (
     <div
-      draggable
+      draggable={!typing}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
@@ -1683,7 +1790,13 @@ function DeepRow({
         >
           {todo.title}
         </span>
+        {todo.subtasks?.length ? (
+          <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+        ) : null}
         <span className="row-actions flex shrink-0 items-center gap-3">
+        {todo.subtasks?.length ? null : (
+          <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+        )}
         {estimate !== null ? (
           <span
             title={
@@ -1708,6 +1821,11 @@ function DeepRow({
         </button>
         </span>
       </div>
+      {steps ? (
+        <div className="mt-2 pl-10">
+          <Subtasks todo={todo} send={send} onEditing={setTyping} big />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1818,6 +1936,114 @@ async function readCalendarDay(): Promise<DayCalendar | null> {
   } catch {
     return null;
   }
+}
+
+/** All-day events run from their start date up to (not including) the end. */
+const eventOn = (e: CalendarEvent, day: string) =>
+  e.allDay
+    ? e.start.slice(0, 10) <= day && day < e.end.slice(0, 10)
+    : localDay(new Date(e.start)) === day;
+
+const DEMO_EVENTS = (): CalendarEvent[] => {
+  const at = (h: number, m = 0) => {
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
+  return [
+    { id: "ev1", title: "Call with Vercel team", start: at(10), end: at(10, 30), allDay: false, link: null },
+    { id: "ev2", title: "Lunch with Millie", start: at(13), end: at(14), allDay: false, link: null },
+  ];
+};
+
+/** Google Calendar events for a run of days (inclusive), read in her own
+ *  timezone. `connected` stays null until Google has answered. */
+function useEvents(first: string, last: string, demo: boolean) {
+  const [state, setState] = useState<{
+    events: CalendarEvent[];
+    connected: boolean | null;
+  }>({ events: [], connected: null });
+  useEffect(() => {
+    if (demo) {
+      setState({ events: DEMO_EVENTS(), connected: true });
+      return;
+    }
+    let live = true;
+    const from = new Date(`${first}T00:00:00`);
+    const to = new Date(`${shiftDay(last, 1)}T00:00:00`);
+    const params = new URLSearchParams({
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    fetch(`/api/google/events?${params}`)
+      .then((r) => r.json())
+      .then(
+        (data: {
+          connected?: boolean;
+          configured?: boolean;
+          events?: CalendarEvent[];
+        }) => {
+          if (!live) return;
+          setState({
+            events: data.events ?? [],
+            connected: data.configured === false ? null : !!data.connected,
+          });
+        },
+      )
+      .catch(() => live && setState({ events: [], connected: null }));
+    return () => {
+      live = false;
+    };
+  }, [first, last, demo]);
+  return state;
+}
+
+const eventTime = (e: CalendarEvent) =>
+  e.allDay
+    ? "All day"
+    : new Date(e.start)
+        .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+        .replace(":00", "")
+        .replace(/\s/g, "")
+        .toLowerCase();
+
+/** Meetings and plans already on the day, above the work that fits around them. */
+function EventList({ events, big }: { events: CalendarEvent[]; big?: boolean }) {
+  if (!events.length) return null;
+  return (
+    <div className="rounded-xl bg-panel-2/70 px-2 py-1.5">
+      <span className="eyebrow">Events</span>
+      <div className="mt-1 space-y-0.5">
+        {events.map((e) => {
+          const row = (
+            <>
+              <span className="w-[52px] shrink-0 text-[11px] text-muted">
+                {eventTime(e)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{e.title}</span>
+            </>
+          );
+          const cls = `flex items-baseline gap-2 ${big ? "text-[14px]" : "text-[12px]"}`;
+          return e.link ? (
+            <a
+              key={e.id}
+              href={e.link}
+              target="_blank"
+              rel="noreferrer"
+              className={`${cls} hover:text-accent-2`}
+            >
+              {row}
+            </a>
+          ) : (
+            <div key={e.id} className={cls}>
+              {row}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function Arrow({
@@ -2242,6 +2468,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
   const [calendar, setCalendar] = useState<DayCalendar | null>(null);
+  const cal = useEvents(day, day, board.dbs.task === "demo");
+  const dayEvents = cal.events.filter((e) => eventOn(e, day));
 
   useEffect(() => {
     setHours(window.localStorage.getItem(`hours:${day}`) ?? "");
@@ -2436,6 +2664,12 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         ) : null}
 
         <DueReminders board={board} send={send} day={day} />
+
+        {dayEvents.length ? (
+          <section className="card px-5 py-3">
+            <EventList events={dayEvents} big />
+          </section>
+        ) : null}
 
         <section className="card card-deep px-5 py-4">
           <div className="flex items-center justify-between">
@@ -3542,6 +3776,8 @@ function PlanOn({ todo, send }: { todo: Todo; send: Send }) {
  *  way to put it back down. */
 function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
   const [editing, setEditing] = useState(false);
+  const [steps, setSteps] = useState(false);
+  const deep = todo.slot === "deep";
 
   return (
     <div
@@ -3550,8 +3786,9 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className="group flex cursor-grab items-start gap-2.5 py-1.5 active:cursor-grabbing"
+      className="group cursor-grab py-1.5 active:cursor-grabbing"
     >
+      <div className="flex items-start gap-2.5">
       <button
         type="button"
         aria-label={todo.done ? "Mark as not done" : "Mark done"}
@@ -3584,7 +3821,20 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         onEditing={setEditing}
         className={`text-[14px] ${todo.done ? "text-muted line-through" : ""}`}
       />
+      {deep && todo.subtasks?.length ? (
+        <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+      ) : null}
       <span className="row-actions flex shrink-0 items-center gap-1.5">
+        {deep && !todo.subtasks?.length ? (
+          <button
+            type="button"
+            onClick={() => setSteps(!steps)}
+            title="Add subtasks"
+            className="whitespace-nowrap text-[11px] text-muted transition hover:text-ink"
+          >
+            + sub
+          </button>
+        ) : null}
         <EditDue todo={todo} send={send} />
         <button
           type="button"
@@ -3595,6 +3845,12 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
           ×
         </button>
       </span>
+      </div>
+      {deep && steps ? (
+        <div className="mt-1 pl-[28px]">
+          <Subtasks todo={todo} send={send} onEditing={setEditing} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3940,11 +4196,13 @@ function PlanDay({
   board,
   send,
   days,
+  events,
 }: {
   board: Board;
   send: Send;
   /** One day, or Saturday and Sunday together as the weekend. */
   days: string[];
+  events: CalendarEvent[];
 }) {
   const day = days[0];
   const onDays = (t: Todo) => days.some((d) => pickedOn(t, d));
@@ -3982,23 +4240,36 @@ function PlanDay({
   const candidates = ranked.filter((t) => !t.slot).slice(0, 40);
   const elsewhere = ranked.filter((t) => t.slot).slice(0, 20);
 
-  const add = () => {
-    const title = draft.trim();
-    if (!title) return;
-    setDraft("");
+  const [typed, setTyped] = useState("");
+
+  const addTyped = (title: string, into: "deep" | "quick") =>
     send(
       {
         action: "addTodo",
         title,
-        slot,
+        slot: into,
         plan: day,
-        kind: slot === "deep" ? "deadline" : "want",
+        kind: into === "deep" ? "deadline" : "want",
       },
       (b) => ({
         ...b,
-        todos: [...b.todos, newTodo(title, slot, day)],
+        todos: [...b.todos, newTodo(title, into, day)],
       }),
     );
+
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    addTyped(title, slot);
+  };
+
+  /** Typed straight onto the day: deep while there's room, otherwise quick. */
+  const addQuickly = () => {
+    const title = typed.trim();
+    if (!title) return;
+    setTyped("");
+    addTyped(title, deep.length < DEEP_CAP ? "deep" : "quick");
   };
 
   const room =
@@ -4039,6 +4310,9 @@ function PlanDay({
   const drop = (e: React.DragEvent, into: "deep" | "quick") => {
     e.preventDefault();
     setOver(null);
+    const emailId = e.dataTransfer.getData("text/email-id");
+    const email = board.emails.find((x) => x.id === emailId);
+    if (email) return emailToDay(email, into, day, send);
     const id = e.dataTransfer.getData("text/todo-id");
     const todo = board.todos.find((t) => t.id === id);
     if (todo && !isFixed(todo)) place(todo, into);
@@ -4125,6 +4399,7 @@ function PlanDay({
       <p className="serif mt-1 text-[30px] leading-none">{numbers}</p>
 
       <div className="mt-3 flex-1 space-y-2">
+        <EventList events={events} />
         {fixed.length ? <MoneyDue rows={fixed} send={send} day={day} /> : null}
         {zone("deep", deep)}
         <div className="border-t border-line" />
@@ -4231,13 +4506,24 @@ function PlanDay({
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setOpen("deep")}
-          className="mt-3 w-full rounded-lg border border-dashed border-line-2 py-2 text-[12px] text-muted transition hover:border-muted hover:text-ink"
-        >
-          + Add task
-        </button>
+        <div className="mt-3 space-y-1.5">
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addQuickly()}
+            enterKeyHint="done"
+            aria-label={`Type a task for ${label}`}
+            placeholder="+ Type a task, press Enter"
+            className="w-full rounded-lg border border-dashed border-line-2 bg-transparent px-2.5 py-2 text-[12px] outline-none placeholder:text-muted focus:border-solid focus:border-muted focus:bg-panel-2"
+          />
+          <button
+            type="button"
+            onClick={() => setOpen(deep.length < DEEP_CAP ? "deep" : "quick")}
+            className="w-full py-0.5 text-[11px] text-faint transition hover:text-ink"
+          >
+            or pick from backlog
+          </button>
+        </div>
       )}
     </div>
   );
@@ -4341,6 +4627,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   const [showLate, setShowLate] = useState(false);
   const cats = categoriesOf(board);
   const days = planWeek(week);
+  const cal = useEvents(days[0], days[6], board.dbs.task === "demo");
   const pickedIn = (list: string[]) =>
     board.todos.filter((t) => t.slot && list.some((d) => pickedOn(t, d)));
   const planned = pickedIn(days);
@@ -4547,16 +4834,32 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             )}
           </div>
 
+          {cal.connected === false ? (
+            <a
+              href={connectCalendarHref()}
+              className="card flex items-center px-4 py-3 text-[13px] text-muted hover:text-ink"
+            >
+              ▦ Connect Google Calendar to see your events on each day →
+            </a>
+          ) : null}
+
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div
               className="grid gap-2.5 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]"
               style={{ "--cols": columns.length } as CSSProperties}
             >
               {columns.map((c) => (
-                <PlanDay key={c[0]} board={board} send={send} days={c} />
+                <PlanDay
+                  key={c[0]}
+                  board={board}
+                  send={send}
+                  days={c}
+                  events={cal.events.filter((e) => c.some((d) => eventOn(e, d)))}
+                />
               ))}
             </div>
             <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
+              <PlanInbox board={board} send={send} />
               <PlanPile board={board} send={send} />
               <PlanHandoff board={board} send={send} />
             </div>
@@ -5260,6 +5563,570 @@ function MonthGoals({
   );
 }
 
+type PlannedStep = { title: string; slot: "deep" | "quick"; day: string; minutes: number };
+
+const weekend = (day: string) => [0, 6].includes(new Date(`${day}T12:00:00`).getDay());
+
+/** Lays the steps onto weekdays from tomorrow, in order, never past the day's
+ *  caps. One of the project's deep tasks a day if that still lands by the
+ *  deadline; otherwise as many as the day has room for. */
+function scheduleSteps(board: Board, steps: ProjectStep[], by: string | null): PlannedStep[] {
+  const lay = (perDay: number) => {
+    const added: Record<string, number> = {};
+    let from = shiftDay(TODAY, 1);
+    return steps.map((s) => {
+      const slot = s.deep ? "deep" : "quick";
+      const cap = slot === "deep" ? DEEP_CAP : QUICK_CAP;
+      let day = from;
+      for (let i = 0; i < 365; i++, day = shiftDay(day, 1)) {
+        if (weekend(day)) continue;
+        const held = board.todos.filter(
+          (t) => !t.done && t.slot === slot && pickedOn(t, day),
+        ).length;
+        const mine = added[`${slot}:${day}`] ?? 0;
+        if (held + mine < cap && mine < perDay) break;
+      }
+      added[`${slot}:${day}`] = (added[`${slot}:${day}`] ?? 0) + 1;
+      from = day; // keep the order: no step lands before the one it follows
+      return { title: s.title, slot, day, minutes: s.minutes } as PlannedStep;
+    });
+  };
+  const spread = lay(1);
+  if (!by || spread.every((p) => p.day <= by)) return spread;
+  return lay(Math.max(DEEP_CAP, QUICK_CAP));
+}
+
+const QUEST_EVERY = 3;
+const REWARD_IDEAS = [
+  "Fancy iced coffee",
+  "An episode of your show",
+  "New lip gloss",
+  "A long bath",
+  "Takeout night",
+  "A new book",
+  "Spa afternoon",
+  "Something off the wishlist",
+];
+const chestCount = (tasks: number) => Math.ceil(tasks / QUEST_EVERY);
+const chestAt = (i: number, tasks: number) => Math.min((i + 1) * QUEST_EVERY, tasks);
+const rewardIdea = (i: number) => REWARD_IDEAS[i % REWARD_IDEAS.length];
+
+/** Drop a whole project in; get it back as a quest: small tasks already given
+ *  days, and a reward chest every few of them. */
+function ProjectChopper({ board, send }: { board: Board; send: Send }) {
+  const [project, setProject] = useState("");
+  const [by, setBy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [plan, setPlan] = useState<PlannedStep[] | null>(null);
+  const [rewards, setRewards] = useState<string[]>([]);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const chop = async () => {
+    if (!project.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const key =
+        board.dbs.task === "demo" ? "demo" : (localStorage.getItem("captureKey") ?? undefined);
+      const res = await fetch("/api/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, by: by || null, key }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        name?: string;
+        tasks?: ProjectStep[];
+        error?: string;
+      };
+      if (!data.ok || !data.tasks) throw new Error(data.error ?? "Couldn't chop that up.");
+      setName(data.name ?? project.trim().slice(0, 40));
+      setRewards([]);
+      setPlan(scheduleSteps(board, data.tasks, by || null));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't chop that up.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const edit = (i: number, patch: Partial<PlannedStep>) =>
+    setPlan((p) => p && p.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  const start = () => {
+    if (!plan) return;
+    const steps = plan.filter((s) => s.title.trim());
+    if (!steps.length) return;
+    const prizes = Array.from({ length: chestCount(steps.length) }, (_, i) => ({
+      text: rewards[i]?.trim() || rewardIdea(i),
+      done: false,
+    }));
+    const quest = name.trim() || "New quest";
+    const tmp = `tmp-${Date.now()}`;
+    send(
+      {
+        action: "addProject",
+        name: quest,
+        by: by || null,
+        rewards: prizes,
+        tasks: steps.map((s) => ({ title: s.title.trim(), slot: s.slot, plan: s.day })),
+      },
+      (b) => ({
+        ...b,
+        goals: [
+          ...b.goals,
+          {
+            id: tmp,
+            name: quest,
+            area: AREAS[0],
+            period: "",
+            horizon: "project" as const,
+            parent: null,
+            done: false,
+            count: null,
+            target: null,
+            by: by || null,
+            rewards: prizes,
+          },
+        ],
+        todos: [
+          ...b.todos,
+          ...steps.map((s, i) => ({
+            ...newTodo(s.title.trim(), s.slot, s.day),
+            id: `${tmp}-${i}`,
+            minutes: s.minutes,
+            goal: tmp,
+          })),
+        ],
+      }),
+    );
+    setSaved(quest);
+    setPlan(null);
+    setProject("");
+    setBy("");
+  };
+
+  const total = plan?.reduce((m, s) => m + s.minutes, 0) ?? 0;
+  const chests = plan ? chestCount(plan.length) : 0;
+
+  return (
+    <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-[13px] font-semibold">Drop a project</span>
+        <span className="text-[11px] text-muted">it becomes a quest, with rewards</span>
+      </div>
+
+      {plan ? (
+        <>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label="Quest name"
+            className="display mb-1 w-full bg-transparent text-[22px] font-semibold outline-none"
+          />
+          <p className="mb-2 text-[12px] text-muted">
+            {plan.length} tasks, about {spell(total)} of work. Change anything, then start the quest.
+          </p>
+          <div className="space-y-1.5">
+            {plan.map((s, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-panel px-2 py-1.5">
+                <span className="w-5 text-center text-[11px] text-muted">{i + 1}</span>
+                <input
+                  value={s.title}
+                  onChange={(e) => edit(i, { title: e.target.value })}
+                  aria-label="Task"
+                  className="min-w-[180px] flex-1 bg-transparent text-[13px] outline-none"
+                />
+                <span className="text-[11px] text-muted">{spell(s.minutes)}</span>
+                <button
+                  type="button"
+                  onClick={() => edit(i, { slot: s.slot === "deep" ? "quick" : "deep" })}
+                  title="Switch between Deep and Quick"
+                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    s.slot === "deep" ? "bg-accent/20 text-ink" : "bg-line text-muted"
+                  }`}
+                >
+                  {s.slot === "deep" ? "Deep" : "Quick"}
+                </button>
+                <input
+                  type="date"
+                  value={s.day}
+                  onChange={(e) => e.target.value && edit(i, { day: e.target.value })}
+                  aria-label="Day"
+                  className="rounded-md border border-line bg-transparent px-1.5 py-0.5 text-[11px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPlan((p) => p && p.filter((_, j) => j !== i))}
+                  title="Remove"
+                  className="text-[12px] text-muted hover:text-bad"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 rounded-lg bg-panel p-3">
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="flex items-center gap-1.5 text-[12px] font-semibold">
+                <ChestIcon state="ready" size={18} /> Rewards
+              </span>
+              <span className="text-[11px] text-muted">a chest every {QUEST_EVERY} tasks — what&rsquo;s inside?</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Array.from({ length: chests }, (_, i) => (
+                <label key={i} className="flex items-center gap-2 text-[11px] text-muted">
+                  <span className="w-[64px] shrink-0">after {chestAt(i, plan.length)}</span>
+                  <input
+                    value={rewards[i] ?? ""}
+                    onChange={(e) =>
+                      setRewards((r) => {
+                        const next = [...r];
+                        next[i] = e.target.value;
+                        return next;
+                      })
+                    }
+                    placeholder={rewardIdea(i)}
+                    aria-label={`Reward after task ${chestAt(i, plan.length)}`}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-transparent px-2 py-1 text-[12px] text-ink outline-none focus:border-muted"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn" onClick={start} disabled={!plan.length}>
+              Start the quest ({plan.length} tasks)
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlan(null)}
+              className="text-[12px] text-muted hover:text-ink"
+            >
+              Start over
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <textarea
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            rows={2}
+            placeholder="e.g. Launch my Notion template — landing page, 3 reels, email to the list"
+            aria-label="Project"
+            className="w-full resize-none rounded-lg border border-line bg-panel px-3 py-2 text-[13px] outline-none focus:border-muted"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[12px] text-muted">
+              Finish by
+              <input
+                type="date"
+                value={by}
+                min={TODAY}
+                onChange={(e) => setBy(e.target.value)}
+                className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[12px]"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn ml-auto"
+              onClick={chop}
+              disabled={busy || !project.trim()}
+            >
+              {busy ? "Chopping…" : "Chop it up"}
+            </button>
+          </div>
+        </>
+      )}
+      {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
+      {saved ? (
+        <p className="mt-2 text-[12px] text-muted">
+          &ldquo;{saved}&rdquo; has started — its tasks are on their days in{" "}
+          <a href="#todos" className="underline">
+            Plan week
+          </a>
+          .
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Drawn rather than emoji so it looks the same on every device. */
+function ChestIcon({
+  state,
+  size = 28,
+}: {
+  state: "locked" | "ready" | "claimed";
+  size?: number;
+}) {
+  const open = state === "claimed";
+  return (
+    <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden>
+      {open ? (
+        <>
+          <path d="M16 0.5l1.3 2.7 3 .4-2.2 2 .6 2.9L16 7.1l-2.7 1.4.6-2.9-2.2-2 3-.4z" fill="#fff3b0" />
+          <path d="M6 13 9 6h14l3 7Z" fill="#6b3a10" />
+        </>
+      ) : (
+        <path d="M5 14c0-5 3-8 8-8h6c5 0 8 3 8 8Z" fill={state === "locked" ? "#9a8f8a" : "#e8962d"} />
+      )}
+      <rect x="5" y="14" width="22" height="13" rx="2.5" fill={state === "locked" ? "#7d736f" : "#b8661a"} />
+      <rect x="5" y="17" width="22" height="2.6" fill={state === "locked" ? "#b9b0aa" : "#ffd25e"} />
+      {state === "locked" ? (
+        <g>
+          <path d="M13.6 18.5v-2.2a2.4 2.4 0 0 1 4.8 0v2.2" fill="none" stroke="#e9e4df" strokeWidth="1.6" />
+          <rect x="12.4" y="18.3" width="7.2" height="6" rx="1.2" fill="#e9e4df" />
+        </g>
+      ) : (
+        <rect x="14" y="15.5" width="4" height="6" rx="1" fill="#ffd25e" stroke="#7a4410" strokeWidth=".8" />
+      )}
+    </svg>
+  );
+}
+
+const CONFETTI = ["#ffd25e", "#ff8fab", "#8fd3ff", "#b8f28b", "#c9a7ff"];
+
+function ChestPop({
+  reward,
+  fresh,
+  onClose,
+}: {
+  reward: string;
+  fresh: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="quest-pop" onClick={onClose} role="dialog" aria-label="Reward">
+      <div className="quest-pop-card" onClick={(e) => e.stopPropagation()}>
+        {fresh ? (
+          <div className="confetti" aria-hidden>
+            {Array.from({ length: 28 }, (_, i) => (
+              <i
+                key={i}
+                style={
+                  {
+                    left: `${(i * 37) % 100}%`,
+                    background: CONFETTI[i % CONFETTI.length],
+                    animationDelay: `${(i % 7) * 70}ms`,
+                    "--spin": `${(i % 2 ? 1 : -1) * (360 + i * 20)}deg`,
+                  } as CSSProperties
+                }
+              />
+            ))}
+          </div>
+        ) : null}
+        <div className="quest-pop-chest">
+          <ChestIcon state={fresh ? "ready" : "claimed"} size={88} />
+        </div>
+        <p className="quest-tag">{fresh ? "Chest unlocked" : "Your reward"}</p>
+        <h4 className="display mt-1 text-[26px] font-semibold leading-tight">{reward}</h4>
+        <p className="mt-1 text-[12px] opacity-75">
+          {fresh ? "You earned it. Go enjoy it." : "Already claimed — nice work."}
+        </p>
+        <button type="button" className="quest-btn mt-4" onClick={onClose}>
+          {fresh ? "Claim it" : "Close"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One project as a game: XP bar, level, and chests that open as tasks land. */
+function QuestCard({ quest, tasks, send }: { quest: Goal; tasks: Todo[]; send: Send }) {
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.done).length;
+  const level = Math.floor(done / QUEST_EVERY) + 1;
+  const chests = Array.from({ length: chestCount(total) }, (_, i) => ({
+    at: chestAt(i, total),
+    reward: quest.rewards?.[i] ?? { text: rewardIdea(i), done: false },
+  }));
+  const nextChest = chests.find((c) => done < c.at);
+  const allDone = total > 0 && done === total;
+  const [opening, setOpening] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // A task ticked off that crosses a chest line gets its own little moment.
+  const seen = useRef(done);
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = done;
+    if (done <= before) return;
+    const crossed =
+      Math.floor(done / QUEST_EVERY) > Math.floor(before / QUEST_EVERY) ||
+      (done === total && before < total);
+    if (!crossed) return;
+    setToast(done === total ? "Quest complete!" : "Chest unlocked!");
+    const t = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(t);
+  }, [done, total]);
+
+  const sorted = [...tasks].sort(
+    (a, b) =>
+      Number(a.done) - Number(b.done) ||
+      (a.plan ?? a.due ?? "9").localeCompare(b.plan ?? b.due ?? "9"),
+  );
+  const visible = showAll ? sorted : sorted.filter((t) => !t.done).slice(0, 4);
+
+  const toggle = (t: Todo) =>
+    send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+      ...b,
+      todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
+    }));
+
+  const claim = (i: number) => {
+    const list = chests.map((c, j) => ({
+      text: c.reward.text,
+      done: j === i ? true : c.reward.done,
+    }));
+    send({ action: "projectRewards", id: quest.id, rewards: list }, (b) => ({
+      ...b,
+      goals: b.goals.map((g) => (g.id === quest.id ? { ...g, rewards: list } : g)),
+    }));
+  };
+
+  const archive = () =>
+    send({ action: "toggleGoal", id: quest.id, done: true }, (b) => ({
+      ...b,
+      goals: b.goals.map((g) => (g.id === quest.id ? { ...g, done: true } : g)),
+    }));
+
+  return (
+    <div className="quest">
+      <div className="relative z-[1]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="quest-tag">Quest{quest.by ? ` · by ${dayStamp(quest.by)}` : ""}</span>
+            <h4 className="display mt-1 text-[22px] font-semibold leading-tight">{quest.name}</h4>
+          </div>
+          <div className="quest-lv" title={`Level ${level}`}>
+            <span>LV</span>
+            <b>{level}</b>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between text-[11px]">
+          <span className="quest-xp">{done * 100} XP</span>
+          <span className="opacity-75">
+            {done}/{total} tasks
+          </span>
+        </div>
+        <div className="quest-bar mt-1">
+          {Array.from({ length: total }, (_, i) => (
+            <span
+              key={i}
+              className={`quest-seg ${i < done ? "on" : ""} ${
+                chests.some((c) => c.at === i + 1) ? "gate" : ""
+              }`}
+            />
+          ))}
+        </div>
+        <p className="mt-2 text-[12px] opacity-80">
+          {allDone
+            ? "Quest complete — every chest is yours."
+            : nextChest
+              ? `${nextChest.at - done} more task${nextChest.at - done === 1 ? "" : "s"} to the next chest`
+              : ""}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {chests.map((c, i) => {
+            const state = c.reward.done ? "claimed" : done >= c.at ? "ready" : "locked";
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={state === "locked"}
+                onClick={() => setOpening(i)}
+                title={state === "locked" ? `Unlocks after task ${c.at}` : c.reward.text}
+                className={`chest ${state}`}
+              >
+                <span className="chest-icon">
+                  <ChestIcon state={state} />
+                </span>
+                <span className="chest-at">{state === "claimed" ? "claimed" : `task ${c.at}`}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 space-y-1">
+          {visible.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => toggle(t)}
+              className={`quest-task ${t.done ? "done" : ""}`}
+            >
+              <span className="quest-check">{t.done ? "✓" : ""}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{t.title}</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wide opacity-60">
+                {t.slot === "deep" ? "Deep" : "Quick"}
+                {t.plan ? ` · ${dayStamp(t.plan)}` : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+        {total > 4 || done > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAll((s) => !s)}
+            className="mt-1 text-[11px] opacity-70 hover:opacity-100"
+          >
+            {showAll ? "Show less" : `Show all ${total}`}
+          </button>
+        ) : null}
+        {allDone ? (
+          <button type="button" className="quest-btn mt-3" onClick={archive}>
+            Claim the win &amp; archive
+          </button>
+        ) : null}
+      </div>
+      {toast ? <div className="quest-toast">{toast}</div> : null}
+      {opening !== null && chests[opening] ? (
+        <ChestPop
+          reward={chests[opening].reward.text}
+          fresh={!chests[opening].reward.done}
+          onClose={() => {
+            if (!chests[opening].reward.done) claim(opening);
+            setOpening(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectQuests({ board, send }: { board: Board; send: Send }) {
+  const quests = board.goals.filter((g) => g.horizon === "project" && !g.done);
+  if (!quests.length) return null;
+  return (
+    <div className="mb-3">
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <span className="text-[13px] font-semibold">Your quests</span>
+        <span className="text-[11px] text-muted">a reward chest every {QUEST_EVERY} tasks</span>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {quests.map((q) => (
+          <QuestCard
+            key={q.id}
+            quest={q}
+            tasks={board.todos.filter((t) => t.goal === q.id)}
+            send={send}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function GoalsPane({ board, send }: { board: Board; send: Send }) {
   const [shift, setShift] = useState(0);
   const { period, year, first } = quarterAt(shift);
@@ -5294,6 +6161,8 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
         </div>
       }
     >
+      <ProjectChopper board={board} send={send} />
+      <ProjectQuests board={board} send={send} />
       <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-[13px] font-semibold">The quarter</span>
@@ -6753,6 +7622,116 @@ function FlightDay({
 
 /* ------------------------------------------------------------ email items */
 
+/** Turns an inbox item into a real to-do on the given day; the item itself
+ *  is marked done so it leaves the inbox lists. */
+function emailToDay(
+  e: EmailItem,
+  slot: "deep" | "quick",
+  day: string,
+  send: Send,
+) {
+  const due = e.date ?? day;
+  send(
+    { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
+    (b) => ({
+      ...b,
+      emails: b.emails.map((x) => (x.id === e.id ? { ...x, done: true } : x)),
+      todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
+    }),
+  );
+}
+
+/** Plan week's view of the inbox: everything the bot found that hasn't been
+ *  given a day yet, whatever date it came in on. */
+function PlanInbox({ board, send }: { board: Board; send: Send }) {
+  if (!board.dbs.emails && board.dbs.task !== "demo") return null;
+  const items = board.emails
+    .filter((e) => !e.done)
+    .sort((a, b) => (a.date ?? a.created).localeCompare(b.date ?? b.created));
+  if (!items.length) return null;
+
+  return (
+    <div className="card card-inbox p-3.5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2.5 text-[15px] font-semibold">
+          <span className="badge badge-bad">✉</span>
+          From your inbox
+        </h3>
+        <span className="text-[12px] text-bad">
+          {items.length} not scheduled
+        </span>
+      </div>
+      <div className="max-h-[min(360px,40vh)] space-y-0.5 overflow-auto">
+        {items.map((e) => (
+          <div
+            key={e.id}
+            draggable
+            onDragStart={(ev) => {
+              ev.dataTransfer.setData("text/email-id", e.id);
+              ev.dataTransfer.effectAllowed = "move";
+            }}
+            className="group cursor-grab border-b border-line/60 px-1 py-2 text-[13px] last:border-0 active:cursor-grabbing"
+          >
+            <div className="flex items-start gap-2">
+              <span className="shrink-0 pt-0.5 text-[11px] text-faint">⠿</span>
+              <div className="min-w-0 flex-1">
+                <p className="leading-snug">{e.title}</p>
+                {e.from || e.date ? (
+                  <p
+                    className={`text-[11px] ${e.date && e.date < TODAY ? "text-bad" : "text-muted"}`}
+                  >
+                    {[e.from, e.date ? `due ${dueLabel(e.date)}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[19px]">
+              <button
+                type="button"
+                onClick={() => emailToDay(e, "quick", TODAY, send)}
+                className="btn"
+              >
+                Today
+              </button>
+              <input
+                type="date"
+                min={TODAY}
+                aria-label="Plan it on a day"
+                title="Plan it on a day"
+                onChange={(ev) =>
+                  ev.target.value &&
+                  emailToDay(e, "quick", ev.target.value, send)
+                }
+                className="rounded-full border border-line-2 bg-transparent px-2 py-0.5 text-[11px] text-muted outline-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  send({ action: "emailDone", id: e.id, done: true }, (b) => ({
+                    ...b,
+                    emails: b.emails.map((x) =>
+                      x.id === e.id ? { ...x, done: true } : x,
+                    ),
+                  }))
+                }
+                title="Mark as done in the Grok database"
+                className="btn btn-ok"
+              >
+                ✓ Done
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        Drag one onto a day&rsquo;s deep or quick to schedule it.
+      </p>
+    </div>
+  );
+}
+
 /** What the inbox bot found for the day. Each line can be ticked off on the
  *  spot, given the day it really has to happen, or promoted into a quick or
  *  deep task — at which point it leaves this list and becomes a real to-do. */
@@ -6781,16 +7760,8 @@ function EmailItems({
   const setDate = (e: EmailItem, date: string | null) => {
     send({ action: "emailDate", id: e.id, date }, patch(e.id, { date }));
   };
-  const promote = (e: EmailItem, slot: "deep" | "quick") => {
-    const due = e.date ?? day;
-    send(
-      { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
-      (b) => ({
-        ...patch(e.id, { done: true })(b),
-        todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
-      }),
-    );
-  };
+  const promote = (e: EmailItem, slot: "deep" | "quick") =>
+    emailToDay(e, slot, day, send);
 
   return (
     <section className="card card-inbox px-4 py-4">
@@ -7797,7 +8768,37 @@ export default function BoardApp({
   // burst is over, so a sweep of twenty items is twenty saves and one load.
   const queue = useRef<Promise<void>>(Promise.resolve());
   const reload = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewOnly = captureKey.startsWith("view.");
+  const [shared, setShared] = useState<"idle" | "busy" | "copied">("idle");
+  const share = async () => {
+    setShared("busy");
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: captureKey }),
+      });
+      const data = (await res.json()) as { ok: boolean; viewKey?: string; error?: string };
+      if (!data.ok || !data.viewKey) throw new Error(data.error);
+      const url = `${window.location.origin}/dashboard?key=${encodeURIComponent(data.viewKey)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        window.prompt("Copy this view-only link", url);
+      }
+      setShared("copied");
+      setTimeout(() => setShared("idle"), 4000);
+    } catch (e) {
+      setShared("idle");
+      setError(e instanceof Error && e.message ? e.message : "Couldn't make a share link.");
+    }
+  };
+
   const send: Send = (action, optimistic) => {
+    if (viewOnly) {
+      setError("This is a view-only link, so nothing here can be changed.");
+      return;
+    }
     setBoard((b) => (b ? optimistic(b) : b));
     // The demo board has nothing to write to, so a re-read would undo the click.
     if (captureKey === "demo") return;
@@ -7904,6 +8905,29 @@ export default function BoardApp({
             </Fragment>
           ))}
           <div className="sb-foot">
+            {viewOnly ? (
+              <span className="sb-btn" title="You can look around but not change anything">
+                <NavIcon id="notion" />
+                <span className="sb-label">View only</span>
+              </span>
+            ) : captureKey !== "demo" ? (
+              <button
+                type="button"
+                onClick={() => void share()}
+                disabled={shared === "busy"}
+                className="sb-btn"
+                title="Copy a view-only link to send a friend"
+              >
+                <span aria-hidden className="w-[18px] text-center">↗</span>
+                <span className="sb-label">
+                  {shared === "copied"
+                    ? "Link copied!"
+                    : shared === "busy"
+                      ? "Making link…"
+                      : "Share view-only"}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void load()}

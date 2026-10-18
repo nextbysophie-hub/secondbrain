@@ -1,7 +1,7 @@
 import { decrypt, encrypt } from "@/lib/crypto";
 
-/** Read-only, and only the calendar: the dashboard needs to know when she's
- *  busy, never what the meetings are about. */
+/** Read-only, and only the calendar: enough to size the day and list the
+ *  meetings on it, never to change them. */
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 /** The signed-in calendar lives in a cookie rather than a database: the
@@ -106,4 +106,56 @@ export async function busyMinutes(
     cursor = Math.max(cursor, b.end);
   }
   return Math.round(total / 60000);
+}
+
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  /** ISO date-time, or a plain YYYY-MM-DD for all-day events. */
+  start: string;
+  end: string;
+  allDay: boolean;
+  link: string | null;
+};
+
+type EventsReply = {
+  items?: {
+    id: string;
+    summary?: string;
+    status?: string;
+    htmlLink?: string;
+    start?: { date?: string; dateTime?: string };
+    end?: { date?: string; dateTime?: string };
+  }[];
+  error?: { message?: string };
+};
+
+/** The meetings and plans on the primary calendar between two moments,
+ *  repeating ones expanded, in start order. */
+export async function listEvents(
+  accessToken: string,
+  from: Date,
+  to: Date,
+  timeZone: string,
+): Promise<CalendarEvent[]> {
+  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+  url.searchParams.set("timeMin", from.toISOString());
+  url.searchParams.set("timeMax", to.toISOString());
+  url.searchParams.set("timeZone", timeZone);
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("maxResults", "250");
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const data = (await res.json()) as EventsReply;
+  if (!res.ok) throw new Error(data.error?.message ?? "Google wouldn't share the calendar.");
+  return (data.items ?? [])
+    .filter((e) => e.status !== "cancelled" && (e.start?.date || e.start?.dateTime))
+    .map((e) => ({
+      id: e.id,
+      title: e.summary?.trim() || "Busy",
+      start: (e.start?.dateTime ?? e.start?.date) as string,
+      end: (e.end?.dateTime ?? e.end?.date ?? e.start?.dateTime ?? e.start?.date) as string,
+      allDay: !e.start?.dateTime,
+      link: e.htmlLink ?? null,
+    }));
 }
