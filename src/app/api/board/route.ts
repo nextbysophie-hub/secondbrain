@@ -23,7 +23,7 @@ import {
 } from "@/lib/board";
 import { demoBoard } from "./demo";
 import { humanizeNotionError } from "@/lib/notion";
-import { resolveCredentials } from "@/lib/store";
+import { openViewKey, resolveCredentials } from "@/lib/store";
 
 export const runtime = "nodejs";
 
@@ -103,7 +103,10 @@ export async function GET(req: Request) {
   const key = new URL(req.url).searchParams.get("key")?.trim() || undefined;
   // A filled-in dashboard nobody has to hand their Notion key to, for demos.
   if (key === "demo") return demoBoard();
-  const creds = await resolveCredentials(key);
+  // A view-only link opens the same board, minus the deals and any writing.
+  const viewKey = key ? openViewKey(key) : null;
+  const viewOnly = !!viewKey;
+  const creds = await resolveCredentials(viewKey ?? key);
   if (!creds) return NextResponse.json({ ok: false, error: NO_KEY }, { status: 401 });
 
   // Habit ticks are only needed for the grid on screen, which is this month.
@@ -120,8 +123,8 @@ export async function GET(req: Request) {
       readContentIdeas(creds.token).catch(() => null),
       readBusinessIdeas(creds.token).catch(() => null),
     ]);
-    if (!dealsUnlocked(req))
-      return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, deals: [], dealsLocked: true, dbs });
+    if (viewOnly || !dealsUnlocked(req))
+      return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, deals: [], dealsLocked: true, dbs, viewOnly });
     return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, dbs });
   } catch (e) {
     return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400 });

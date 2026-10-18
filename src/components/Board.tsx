@@ -8432,7 +8432,37 @@ export default function BoardApp({
   // burst is over, so a sweep of twenty items is twenty saves and one load.
   const queue = useRef<Promise<void>>(Promise.resolve());
   const reload = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewOnly = captureKey.startsWith("view.");
+  const [shared, setShared] = useState<"idle" | "busy" | "copied">("idle");
+  const share = async () => {
+    setShared("busy");
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: captureKey }),
+      });
+      const data = (await res.json()) as { ok: boolean; viewKey?: string; error?: string };
+      if (!data.ok || !data.viewKey) throw new Error(data.error);
+      const url = `${window.location.origin}/dashboard?key=${encodeURIComponent(data.viewKey)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        window.prompt("Copy this view-only link", url);
+      }
+      setShared("copied");
+      setTimeout(() => setShared("idle"), 4000);
+    } catch (e) {
+      setShared("idle");
+      setError(e instanceof Error && e.message ? e.message : "Couldn't make a share link.");
+    }
+  };
+
   const send: Send = (action, optimistic) => {
+    if (viewOnly) {
+      setError("This is a view-only link, so nothing here can be changed.");
+      return;
+    }
     setBoard((b) => (b ? optimistic(b) : b));
     // The demo board has nothing to write to, so a re-read would undo the click.
     if (captureKey === "demo") return;
@@ -8539,6 +8569,29 @@ export default function BoardApp({
             </Fragment>
           ))}
           <div className="sb-foot">
+            {viewOnly ? (
+              <span className="sb-btn" title="You can look around but not change anything">
+                <NavIcon id="notion" />
+                <span className="sb-label">View only</span>
+              </span>
+            ) : captureKey !== "demo" ? (
+              <button
+                type="button"
+                onClick={() => void share()}
+                disabled={shared === "busy"}
+                className="sb-btn"
+                title="Copy a view-only link to send a friend"
+              >
+                <span aria-hidden className="w-[18px] text-center">↗</span>
+                <span className="sb-label">
+                  {shared === "copied"
+                    ? "Link copied!"
+                    : shared === "busy"
+                      ? "Making link…"
+                      : "Share view-only"}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void load()}
