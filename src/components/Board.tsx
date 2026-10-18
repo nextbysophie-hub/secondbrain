@@ -3982,23 +3982,36 @@ function PlanDay({
   const candidates = ranked.filter((t) => !t.slot).slice(0, 40);
   const elsewhere = ranked.filter((t) => t.slot).slice(0, 20);
 
-  const add = () => {
-    const title = draft.trim();
-    if (!title) return;
-    setDraft("");
+  const [typed, setTyped] = useState("");
+
+  const addTyped = (title: string, into: "deep" | "quick") =>
     send(
       {
         action: "addTodo",
         title,
-        slot,
+        slot: into,
         plan: day,
-        kind: slot === "deep" ? "deadline" : "want",
+        kind: into === "deep" ? "deadline" : "want",
       },
       (b) => ({
         ...b,
-        todos: [...b.todos, newTodo(title, slot, day)],
+        todos: [...b.todos, newTodo(title, into, day)],
       }),
     );
+
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    addTyped(title, slot);
+  };
+
+  /** Typed straight onto the day: deep while there's room, otherwise quick. */
+  const addQuickly = () => {
+    const title = typed.trim();
+    if (!title) return;
+    setTyped("");
+    addTyped(title, deep.length < DEEP_CAP ? "deep" : "quick");
   };
 
   const room =
@@ -4231,13 +4244,24 @@ function PlanDay({
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setOpen("deep")}
-          className="mt-3 w-full rounded-lg border border-dashed border-line-2 py-2 text-[12px] text-muted transition hover:border-muted hover:text-ink"
-        >
-          + Add task
-        </button>
+        <div className="mt-3 space-y-1.5">
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addQuickly()}
+            enterKeyHint="done"
+            aria-label={`Type a task for ${label}`}
+            placeholder="+ Type a task, press Enter"
+            className="w-full rounded-lg border border-dashed border-line-2 bg-transparent px-2.5 py-2 text-[12px] outline-none placeholder:text-muted focus:border-solid focus:border-muted focus:bg-panel-2"
+          />
+          <button
+            type="button"
+            onClick={() => setOpen(deep.length < DEEP_CAP ? "deep" : "quick")}
+            className="w-full py-0.5 text-[11px] text-faint transition hover:text-ink"
+          >
+            or pick from backlog
+          </button>
+        </div>
       )}
     </div>
   );
