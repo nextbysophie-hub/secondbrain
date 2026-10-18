@@ -253,10 +253,8 @@ function AheadCard({ videos, onTile }: { videos: HubVideo[]; onTile: () => void 
 
 /* ------------------------------------------------------- month progress */
 
-/** A piece counts toward a month when it posts that month, or when it's still
- *  in the works with no day yet (it's what's being made for the month ahead). */
-const inMonth = (v: HubVideo, key: string) =>
-  v.post ? v.post.startsWith(key) : !["posted", "hold"].includes(stageOf(v.status));
+/** A piece counts toward a month only once it's on one of that month's days. */
+const inMonth = (v: HubVideo, key: string) => !!v.post?.startsWith(key);
 
 function Meter({ label, n, of, cls }: { label: string; n: number; of: number; cls: string }) {
   return (
@@ -272,7 +270,7 @@ function Meter({ label, n, of, cls }: { label: string; n: number; of: number; cl
   );
 }
 
-function MonthProgress({ videos, onUnsorted }: { videos: HubVideo[]; onUnsorted: () => void }) {
+function MonthProgress({ videos, onUnsorted, onPlan }: { videos: HubVideo[]; onUnsorted: () => void; onPlan: () => void }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const { target } = aheadPlan(today);
@@ -341,9 +339,13 @@ function MonthProgress({ videos, onUnsorted }: { videos: HubVideo[]; onUnsorted:
         })}
       </div>
 
-      {unsorted ? (
+      {!mine.length ? (
+        <button type="button" onClick={onPlan} className="mt-3 text-left text-[12.5px] text-muted underline">
+          Nothing is on a {M} day yet. Put pieces on days in the Calendar and they&rsquo;ll count here.
+        </button>
+      ) : unsorted ? (
         <button type="button" onClick={onUnsorted} className="mt-3 text-left text-[12.5px] text-muted underline">
-          {unsorted} {unsorted === 1 ? "piece" : "pieces"} in the works {unsorted === 1 ? "has" : "have"} no format yet, so {unsorted === 1 ? "it isn't" : "they aren't"} counted. Tap a card in the pipeline to set one.
+          {unsorted} {M} {unsorted === 1 ? "piece has" : "pieces have"} no format yet, so {unsorted === 1 ? "it isn't" : "they aren't"} counted. Tap a card in the pipeline to set one.
         </button>
       ) : null}
     </section>
@@ -926,7 +928,7 @@ export function ContentHub({ board, send }: { board: Board; send: Send }) {
   return (
     <div className="space-y-5">
       {hub.videos ? <AheadCard videos={videos} onTile={() => setView("calendar")} /> : null}
-      {hub.videos ? <MonthProgress videos={videos} onUnsorted={() => setView("pipeline")} /> : null}
+      {hub.videos ? <MonthProgress videos={videos} onUnsorted={() => setView("pipeline")} onPlan={() => setView("calendar")} /> : null}
       <div className="seg seg-lg" role="group" aria-label="Content hub view">
         {VIEWS.map((v) => (
           <button key={v.id} type="button" aria-pressed={view === v.id} onClick={() => setView(v.id)}>
