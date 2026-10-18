@@ -5596,16 +5596,32 @@ function scheduleSteps(board: Board, steps: ProjectStep[], by: string | null): P
   return lay(Math.max(DEEP_CAP, QUICK_CAP));
 }
 
-/** Drop a whole project in; get it back as small tasks already given days. */
+const QUEST_EVERY = 3;
+const REWARD_IDEAS = [
+  "Fancy iced coffee",
+  "An episode of your show",
+  "New lip gloss",
+  "A long bath",
+  "Takeout night",
+  "A new book",
+  "Spa afternoon",
+  "Something off the wishlist",
+];
+const chestCount = (tasks: number) => Math.ceil(tasks / QUEST_EVERY);
+const chestAt = (i: number, tasks: number) => Math.min((i + 1) * QUEST_EVERY, tasks);
+const rewardIdea = (i: number) => REWARD_IDEAS[i % REWARD_IDEAS.length];
+
+/** Drop a whole project in; get it back as a quest: small tasks already given
+ *  days, and a reward chest every few of them. */
 function ProjectChopper({ board, send }: { board: Board; send: Send }) {
   const [project, setProject] = useState("");
   const [by, setBy] = useState("");
-  const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [plan, setPlan] = useState<PlannedStep[] | null>(null);
-  const [saved, setSaved] = useState<number | null>(null);
-  const goals = board.goals.filter((g) => !g.done);
+  const [rewards, setRewards] = useState<string[]>([]);
+  const [saved, setSaved] = useState<string | null>(null);
 
   const chop = async () => {
     if (!project.trim() || busy) return;
@@ -5620,8 +5636,15 @@ function ProjectChopper({ board, send }: { board: Board; send: Send }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project, by: by || null, key }),
       });
-      const data = (await res.json()) as { ok: boolean; tasks?: ProjectStep[]; error?: string };
+      const data = (await res.json()) as {
+        ok: boolean;
+        name?: string;
+        tasks?: ProjectStep[];
+        error?: string;
+      };
       if (!data.ok || !data.tasks) throw new Error(data.error ?? "Couldn't chop that up.");
+      setName(data.name ?? project.trim().slice(0, 40));
+      setRewards([]);
       setPlan(scheduleSteps(board, data.tasks, by || null));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't chop that up.");
@@ -5633,56 +5656,84 @@ function ProjectChopper({ board, send }: { board: Board; send: Send }) {
   const edit = (i: number, patch: Partial<PlannedStep>) =>
     setPlan((p) => p && p.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
-  const scheduleAll = () => {
+  const start = () => {
     if (!plan) return;
     const steps = plan.filter((s) => s.title.trim());
-    steps.forEach((s, i) =>
-      send(
-        {
-          action: "addTodo",
-          title: s.title.trim(),
-          slot: s.slot,
-          plan: s.day,
-          kind: s.slot === "deep" ? "deadline" : "want",
-          goal: goal || null,
-        },
-        (b) => ({
-          ...b,
-          todos: [
-            ...b.todos,
-            {
-              ...newTodo(s.title.trim(), s.slot, s.day),
-              id: `tmp-${Date.now()}-${i}`,
-              minutes: s.minutes,
-              goal: goal || null,
-            },
-          ],
-        }),
-      ),
+    if (!steps.length) return;
+    const prizes = Array.from({ length: chestCount(steps.length) }, (_, i) => ({
+      text: rewards[i]?.trim() || rewardIdea(i),
+      done: false,
+    }));
+    const quest = name.trim() || "New quest";
+    const tmp = `tmp-${Date.now()}`;
+    send(
+      {
+        action: "addProject",
+        name: quest,
+        by: by || null,
+        rewards: prizes,
+        tasks: steps.map((s) => ({ title: s.title.trim(), slot: s.slot, plan: s.day })),
+      },
+      (b) => ({
+        ...b,
+        goals: [
+          ...b.goals,
+          {
+            id: tmp,
+            name: quest,
+            area: AREAS[0],
+            period: "",
+            horizon: "project" as const,
+            parent: null,
+            done: false,
+            count: null,
+            target: null,
+            by: by || null,
+            rewards: prizes,
+          },
+        ],
+        todos: [
+          ...b.todos,
+          ...steps.map((s, i) => ({
+            ...newTodo(s.title.trim(), s.slot, s.day),
+            id: `${tmp}-${i}`,
+            minutes: s.minutes,
+            goal: tmp,
+          })),
+        ],
+      }),
     );
-    setSaved(steps.length);
+    setSaved(quest);
     setPlan(null);
     setProject("");
     setBy("");
   };
 
   const total = plan?.reduce((m, s) => m + s.minutes, 0) ?? 0;
+  const chests = plan ? chestCount(plan.length) : 0;
 
   return (
     <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
       <div className="mb-2 flex items-baseline justify-between">
         <span className="text-[13px] font-semibold">Drop a project</span>
-        <span className="text-[11px] text-muted">chopped into tasks, given days</span>
+        <span className="text-[11px] text-muted">it becomes a quest, with rewards</span>
       </div>
 
       {plan ? (
         <>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label="Quest name"
+            className="display mb-1 w-full bg-transparent text-[22px] font-semibold outline-none"
+          />
           <p className="mb-2 text-[12px] text-muted">
-            {plan.length} tasks, about {spell(total)} of work. Change anything, then add them.
+            {plan.length} tasks, about {spell(total)} of work. Change anything, then start the quest.
           </p>
           <div className="space-y-1.5">
             {plan.map((s, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-panel px-2 py-1.5">
+                <span className="w-5 text-center text-[11px] text-muted">{i + 1}</span>
                 <input
                   value={s.title}
                   onChange={(e) => edit(i, { title: e.target.value })}
@@ -5718,9 +5769,39 @@ function ProjectChopper({ board, send }: { board: Board; send: Send }) {
               </div>
             ))}
           </div>
+
+          <div className="mt-3 rounded-lg bg-panel p-3">
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="flex items-center gap-1.5 text-[12px] font-semibold">
+                <ChestIcon state="ready" size={18} /> Rewards
+              </span>
+              <span className="text-[11px] text-muted">a chest every {QUEST_EVERY} tasks — what&rsquo;s inside?</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Array.from({ length: chests }, (_, i) => (
+                <label key={i} className="flex items-center gap-2 text-[11px] text-muted">
+                  <span className="w-[64px] shrink-0">after {chestAt(i, plan.length)}</span>
+                  <input
+                    value={rewards[i] ?? ""}
+                    onChange={(e) =>
+                      setRewards((r) => {
+                        const next = [...r];
+                        next[i] = e.target.value;
+                        return next;
+                      })
+                    }
+                    placeholder={rewardIdea(i)}
+                    aria-label={`Reward after task ${chestAt(i, plan.length)}`}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-transparent px-2 py-1 text-[12px] text-ink outline-none focus:border-muted"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" onClick={scheduleAll} disabled={!plan.length}>
-              Add {plan.length} tasks to my plan
+            <button type="button" className="btn" onClick={start} disabled={!plan.length}>
+              Start the quest ({plan.length} tasks)
             </button>
             <button
               type="button"
@@ -5752,21 +5833,6 @@ function ProjectChopper({ board, send }: { board: Board; send: Send }) {
                 className="rounded-md border border-line bg-panel px-1.5 py-0.5 text-[12px]"
               />
             </label>
-            {goals.length ? (
-              <select
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                aria-label="Goal"
-                className="rounded-md border border-line bg-panel px-1.5 py-1 text-[12px]"
-              >
-                <option value="">No goal</option>
-                {goals.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
             <button
               type="button"
               className="btn ml-auto"
@@ -5781,13 +5847,282 @@ function ProjectChopper({ board, send }: { board: Board; send: Send }) {
       {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
       {saved ? (
         <p className="mt-2 text-[12px] text-muted">
-          Added {saved} tasks — they&rsquo;re on their days in{" "}
+          &ldquo;{saved}&rdquo; has started — its tasks are on their days in{" "}
           <a href="#todos" className="underline">
             Plan week
           </a>
           .
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** Drawn rather than emoji so it looks the same on every device. */
+function ChestIcon({
+  state,
+  size = 28,
+}: {
+  state: "locked" | "ready" | "claimed";
+  size?: number;
+}) {
+  const open = state === "claimed";
+  return (
+    <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden>
+      {open ? (
+        <>
+          <path d="M16 0.5l1.3 2.7 3 .4-2.2 2 .6 2.9L16 7.1l-2.7 1.4.6-2.9-2.2-2 3-.4z" fill="#fff3b0" />
+          <path d="M6 13 9 6h14l3 7Z" fill="#6b3a10" />
+        </>
+      ) : (
+        <path d="M5 14c0-5 3-8 8-8h6c5 0 8 3 8 8Z" fill={state === "locked" ? "#9a8f8a" : "#e8962d"} />
+      )}
+      <rect x="5" y="14" width="22" height="13" rx="2.5" fill={state === "locked" ? "#7d736f" : "#b8661a"} />
+      <rect x="5" y="17" width="22" height="2.6" fill={state === "locked" ? "#b9b0aa" : "#ffd25e"} />
+      {state === "locked" ? (
+        <g>
+          <path d="M13.6 18.5v-2.2a2.4 2.4 0 0 1 4.8 0v2.2" fill="none" stroke="#e9e4df" strokeWidth="1.6" />
+          <rect x="12.4" y="18.3" width="7.2" height="6" rx="1.2" fill="#e9e4df" />
+        </g>
+      ) : (
+        <rect x="14" y="15.5" width="4" height="6" rx="1" fill="#ffd25e" stroke="#7a4410" strokeWidth=".8" />
+      )}
+    </svg>
+  );
+}
+
+const CONFETTI = ["#ffd25e", "#ff8fab", "#8fd3ff", "#b8f28b", "#c9a7ff"];
+
+function ChestPop({
+  reward,
+  fresh,
+  onClose,
+}: {
+  reward: string;
+  fresh: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="quest-pop" onClick={onClose} role="dialog" aria-label="Reward">
+      <div className="quest-pop-card" onClick={(e) => e.stopPropagation()}>
+        {fresh ? (
+          <div className="confetti" aria-hidden>
+            {Array.from({ length: 28 }, (_, i) => (
+              <i
+                key={i}
+                style={
+                  {
+                    left: `${(i * 37) % 100}%`,
+                    background: CONFETTI[i % CONFETTI.length],
+                    animationDelay: `${(i % 7) * 70}ms`,
+                    "--spin": `${(i % 2 ? 1 : -1) * (360 + i * 20)}deg`,
+                  } as CSSProperties
+                }
+              />
+            ))}
+          </div>
+        ) : null}
+        <div className="quest-pop-chest">
+          <ChestIcon state={fresh ? "ready" : "claimed"} size={88} />
+        </div>
+        <p className="quest-tag">{fresh ? "Chest unlocked" : "Your reward"}</p>
+        <h4 className="display mt-1 text-[26px] font-semibold leading-tight">{reward}</h4>
+        <p className="mt-1 text-[12px] opacity-75">
+          {fresh ? "You earned it. Go enjoy it." : "Already claimed — nice work."}
+        </p>
+        <button type="button" className="quest-btn mt-4" onClick={onClose}>
+          {fresh ? "Claim it" : "Close"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One project as a game: XP bar, level, and chests that open as tasks land. */
+function QuestCard({ quest, tasks, send }: { quest: Goal; tasks: Todo[]; send: Send }) {
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.done).length;
+  const level = Math.floor(done / QUEST_EVERY) + 1;
+  const chests = Array.from({ length: chestCount(total) }, (_, i) => ({
+    at: chestAt(i, total),
+    reward: quest.rewards?.[i] ?? { text: rewardIdea(i), done: false },
+  }));
+  const nextChest = chests.find((c) => done < c.at);
+  const allDone = total > 0 && done === total;
+  const [opening, setOpening] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // A task ticked off that crosses a chest line gets its own little moment.
+  const seen = useRef(done);
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = done;
+    if (done <= before) return;
+    const crossed =
+      Math.floor(done / QUEST_EVERY) > Math.floor(before / QUEST_EVERY) ||
+      (done === total && before < total);
+    if (!crossed) return;
+    setToast(done === total ? "Quest complete!" : "Chest unlocked!");
+    const t = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(t);
+  }, [done, total]);
+
+  const sorted = [...tasks].sort(
+    (a, b) =>
+      Number(a.done) - Number(b.done) ||
+      (a.plan ?? a.due ?? "9").localeCompare(b.plan ?? b.due ?? "9"),
+  );
+  const visible = showAll ? sorted : sorted.filter((t) => !t.done).slice(0, 4);
+
+  const toggle = (t: Todo) =>
+    send({ action: "toggleTodo", id: t.id, done: !t.done }, (b) => ({
+      ...b,
+      todos: b.todos.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)),
+    }));
+
+  const claim = (i: number) => {
+    const list = chests.map((c, j) => ({
+      text: c.reward.text,
+      done: j === i ? true : c.reward.done,
+    }));
+    send({ action: "projectRewards", id: quest.id, rewards: list }, (b) => ({
+      ...b,
+      goals: b.goals.map((g) => (g.id === quest.id ? { ...g, rewards: list } : g)),
+    }));
+  };
+
+  const archive = () =>
+    send({ action: "toggleGoal", id: quest.id, done: true }, (b) => ({
+      ...b,
+      goals: b.goals.map((g) => (g.id === quest.id ? { ...g, done: true } : g)),
+    }));
+
+  return (
+    <div className="quest">
+      <div className="relative z-[1]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="quest-tag">Quest{quest.by ? ` · by ${dayStamp(quest.by)}` : ""}</span>
+            <h4 className="display mt-1 text-[22px] font-semibold leading-tight">{quest.name}</h4>
+          </div>
+          <div className="quest-lv" title={`Level ${level}`}>
+            <span>LV</span>
+            <b>{level}</b>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between text-[11px]">
+          <span className="quest-xp">{done * 100} XP</span>
+          <span className="opacity-75">
+            {done}/{total} tasks
+          </span>
+        </div>
+        <div className="quest-bar mt-1">
+          {Array.from({ length: total }, (_, i) => (
+            <span
+              key={i}
+              className={`quest-seg ${i < done ? "on" : ""} ${
+                chests.some((c) => c.at === i + 1) ? "gate" : ""
+              }`}
+            />
+          ))}
+        </div>
+        <p className="mt-2 text-[12px] opacity-80">
+          {allDone
+            ? "Quest complete — every chest is yours."
+            : nextChest
+              ? `${nextChest.at - done} more task${nextChest.at - done === 1 ? "" : "s"} to the next chest`
+              : ""}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {chests.map((c, i) => {
+            const state = c.reward.done ? "claimed" : done >= c.at ? "ready" : "locked";
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={state === "locked"}
+                onClick={() => setOpening(i)}
+                title={state === "locked" ? `Unlocks after task ${c.at}` : c.reward.text}
+                className={`chest ${state}`}
+              >
+                <span className="chest-icon">
+                  <ChestIcon state={state} />
+                </span>
+                <span className="chest-at">{state === "claimed" ? "claimed" : `task ${c.at}`}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 space-y-1">
+          {visible.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => toggle(t)}
+              className={`quest-task ${t.done ? "done" : ""}`}
+            >
+              <span className="quest-check">{t.done ? "✓" : ""}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{t.title}</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wide opacity-60">
+                {t.slot === "deep" ? "Deep" : "Quick"}
+                {t.plan ? ` · ${dayStamp(t.plan)}` : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+        {total > 4 || done > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAll((s) => !s)}
+            className="mt-1 text-[11px] opacity-70 hover:opacity-100"
+          >
+            {showAll ? "Show less" : `Show all ${total}`}
+          </button>
+        ) : null}
+        {allDone ? (
+          <button type="button" className="quest-btn mt-3" onClick={archive}>
+            Claim the win &amp; archive
+          </button>
+        ) : null}
+      </div>
+      {toast ? <div className="quest-toast">{toast}</div> : null}
+      {opening !== null && chests[opening] ? (
+        <ChestPop
+          reward={chests[opening].reward.text}
+          fresh={!chests[opening].reward.done}
+          onClose={() => {
+            if (!chests[opening].reward.done) claim(opening);
+            setOpening(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectQuests({ board, send }: { board: Board; send: Send }) {
+  const quests = board.goals.filter((g) => g.horizon === "project" && !g.done);
+  if (!quests.length) return null;
+  return (
+    <div className="mb-3">
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <span className="text-[13px] font-semibold">Your quests</span>
+        <span className="text-[11px] text-muted">a reward chest every {QUEST_EVERY} tasks</span>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {quests.map((q) => (
+          <QuestCard
+            key={q.id}
+            quest={q}
+            tasks={board.todos.filter((t) => t.goal === q.id)}
+            send={send}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -5827,6 +6162,7 @@ function GoalsPane({ board, send }: { board: Board; send: Send }) {
       }
     >
       <ProjectChopper board={board} send={send} />
+      <ProjectQuests board={board} send={send} />
       <div className="mb-3 rounded-xl border border-line bg-panel-2 p-4">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-[13px] font-semibold">The quarter</span>

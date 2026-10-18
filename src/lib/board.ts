@@ -241,9 +241,11 @@ export type Goal = {
   name: string;
   area: string;
   period: string;
-  horizon: "month" | "quarter";
+  horizon: "month" | "quarter" | "project";
   parent: string | null;
   done: boolean;
+  /** Projects only: one prize per chest, ticked once she's opened it. */
+  rewards?: Subtask[];
   /** A goal you count up to ("post 40 reels") has a target, a tally and the
    *  day it has to be hit by; a plain goal has none of the three. */
   count: number | null;
@@ -894,6 +896,7 @@ export async function ensureGoalColumns(
   if (!db.properties.Target) missing.Target = { number: {} };
   if (!db.properties.Count) missing.Count = { number: {} };
   if (!db.properties.By) missing.By = { date: {} };
+  if (!db.properties.Rewards) missing.Rewards = { rich_text: {} };
   if (!Object.keys(missing).length) return;
   await notion(token, `/databases/${goalsDbId}`, {
     method: "PATCH",
@@ -1659,7 +1662,12 @@ export async function readBoard(
       area: selectOf(r.properties.Area) ?? AREAS[0],
       period: textOf(r.properties.Period),
       horizon:
-        selectOf(r.properties.Horizon) === "Quarter" ? "quarter" : "month",
+        selectOf(r.properties.Horizon) === "Quarter"
+          ? "quarter"
+          : selectOf(r.properties.Horizon) === "Project"
+            ? "project"
+            : "month",
+      rewards: parseSubtasks(textOf(r.properties.Rewards)),
       parent: relationOf(r.properties.Parent),
       done: r.properties.Done?.checkbox ?? false,
       count: numberOf(r.properties.Count),
@@ -1732,6 +1740,14 @@ async function archivePage(token: string, pageId: string) {
 
 export type Action =
   | { action: "subtasks"; id: string; items: Subtask[] }
+  | {
+      action: "addProject";
+      name: string;
+      by?: string | null;
+      rewards: Subtask[];
+      tasks: { title: string; slot: "deep" | "quick"; plan: string }[];
+    }
+  | { action: "projectRewards"; id: string; rewards: Subtask[] }
   | {
       action: "addTodo";
       title: string;
@@ -2186,6 +2202,40 @@ export async function applyAction(
           : {}),
         ...(body.by ? { By: dateProp(body.by) } : {}),
         Done: { checkbox: false },
+      });
+      return;
+    case "addProject": {
+      const project = await createPage(token, dbs.goals, {
+        Goal: title(body.name),
+        Area: selectProp(AREAS[0]),
+        Period: richText(""),
+        Horizon: selectProp("Project"),
+        ...(body.by ? { By: dateProp(body.by) } : {}),
+        Rewards: richText(formatSubtasks(body.rewards)),
+        Done: { checkbox: false },
+      });
+      for (const t of body.tasks)
+        await createPage(
+          token,
+          dbs.task,
+          taskProps(map, {
+            title: t.title,
+            done: false,
+            due: t.plan,
+            plan: t.plan,
+            kind: t.slot === "deep" ? "deadline" : "want",
+            slot: t.slot,
+            goal: project,
+            deal: null,
+            category: null,
+            source: "Manual",
+          }),
+        );
+      return;
+    }
+    case "projectRewards":
+      await updatePage(token, body.id, {
+        Rewards: richText(formatSubtasks(body.rewards)),
       });
       return;
     case "toggleGoal":

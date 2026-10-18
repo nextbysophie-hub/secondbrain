@@ -13,7 +13,8 @@ Rules:
 - Each title starts with a verb and is under 70 characters. Concrete, not vague ("Write the 3 hook options", not "Work on hooks").
 - "minutes" is an honest estimate of how long it takes.
 - "deep" is true for focused work (writing, filming, editing, building, thinking) that needs 45+ minutes of attention; false for quick admin (emails, booking, sending, buying).
-- Reply only with JSON: {"tasks":[{"title":"...","minutes":60,"deep":true}]}`;
+- "name" is a short, fun quest name for the whole project, 2 to 5 words, no emoji.
+- Reply only with JSON: {"name":"...","tasks":[{"title":"...","minutes":60,"deep":true}]}`;
 
 const DEMO: ProjectStep[] = [
   { title: "Outline the video and the one takeaway", minutes: 45, deep: true },
@@ -34,7 +35,8 @@ export async function POST(req: Request) {
   };
   const text = project?.trim().slice(0, 2000);
   if (!text) return NextResponse.json({ ok: false, error: "Type the project first." }, { status: 400 });
-  if (key?.trim() === "demo") return NextResponse.json({ ok: true, tasks: DEMO });
+  if (key?.trim() === "demo")
+    return NextResponse.json({ ok: true, name: "The Morning Routine Video", tasks: DEMO });
   if (!(await resolveCredentials(key?.trim() || undefined)))
     return NextResponse.json({ ok: false, error: "Open your dashboard link again." }, { status: 401 });
 
@@ -58,7 +60,10 @@ export async function POST(req: Request) {
     });
     if (!res.ok) throw new Error(`OpenAI ${res.status}`);
     const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}") as { tasks?: Partial<ProjectStep>[] };
+    const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? "{}") as {
+      name?: string;
+      tasks?: Partial<ProjectStep>[];
+    };
     const tasks = (parsed.tasks ?? [])
       .filter((t) => typeof t.title === "string" && t.title.trim())
       .slice(0, 15)
@@ -68,7 +73,8 @@ export async function POST(req: Request) {
         deep: !!t.deep,
       }));
     if (!tasks.length) throw new Error("no tasks");
-    return NextResponse.json({ ok: true, tasks });
+    const name = typeof parsed.name === "string" ? parsed.name.trim().slice(0, 60) : "";
+    return NextResponse.json({ ok: true, name: name || text.slice(0, 40), tasks });
   } catch {
     return NextResponse.json({ ok: false, error: "Couldn't chop that up just now — try again." }, { status: 502 });
   }
