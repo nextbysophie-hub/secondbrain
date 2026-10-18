@@ -29,6 +29,7 @@ import type {
 } from "@/lib/board";
 import type { CalendarEvent } from "@/lib/google";
 import type { ProjectStep } from "@/app/api/project/route";
+import { ContentHub } from "@/components/ContentHub";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -8397,6 +8398,7 @@ function RemindersPane({ board, send }: { board: Board; send: Send }) {
 const TABS = [
   { id: "today", label: "Today" },
   { id: "ideas", label: "Ideas" },
+  { id: "content", label: "Content hub" },
   { id: "todos", label: "Plan week" },
   { id: "reminders", label: "Reminders" },
   { id: "deals", label: "Deals" },
@@ -8407,7 +8409,7 @@ const TABS = [
 
 const NAV_GROUPS = [
   { label: "Plan", ids: ["today", "todos", "reminders"] },
-  { label: "Create", ids: ["ideas", "agent"] },
+  { label: "Create", ids: ["ideas", "content", "agent"] },
   { label: "Grow", ids: ["habits", "goals"] },
   { label: "Money", ids: ["deals"] },
 ];
@@ -8418,6 +8420,7 @@ const ICON_PATHS: Record<string, string> = {
   reminders: "M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0",
   ideas:
     "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2v.1h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z",
+  content: "M4 9h16v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 9l1.5-4.5 14 3.5M8.5 5.2 10 8.6M13.5 6.4 15 9.6",
   agent:
     "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
   habits:
@@ -8858,7 +8861,7 @@ export default function BoardApp({
         .length
     : 0;
   // The week and the deal wall need every pixel, so the menu shrinks to icons.
-  const slim = tab === "todos" || tab === "deals";
+  const slim = tab === "todos" || tab === "deals" || tab === "content";
   const tabLabel = TABS.find((t) => t.id === tab)?.label ?? "";
   const syncLabel = loading
     ? "Syncing with Notion…"
@@ -8956,7 +8959,7 @@ export default function BoardApp({
         <main className="min-w-0 flex-1 pb-28 lg:pb-8">
           <div
             className={`mx-auto px-1 pt-2 lg:px-3 lg:pt-5 ${
-              tab === "todos" || tab === "deals" ? "max-w-[1600px]" : "max-w-[1180px]"
+              tab === "todos" || tab === "deals" || tab === "content" ? "max-w-[1600px]" : "max-w-[1180px]"
             }`}
           >
             <div className="mtop">
@@ -9024,6 +9027,8 @@ export default function BoardApp({
           </>
         ) : tab === "ideas" ? (
           <IdeasPane board={board} send={send} />
+        ) : tab === "content" ? (
+          <ContentHub board={board} send={send} />
         ) : tab === "todos" ? (
           <PlanPane board={board} send={send} />
         ) : tab === "deals" ? (

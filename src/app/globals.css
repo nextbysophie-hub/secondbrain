@@ -885,3 +885,61 @@ select {
   from { transform: translateY(0) rotate(0); opacity: 1; }
   to { transform: translateY(380px) rotate(var(--spin)); opacity: 0; }
 }
+
+/* Content hub */
+.board-theme .hub-box { background: var(--paper-panel); border-radius: 22px; padding: 18px 20px; }
+.board-theme .hub-ahead { background: var(--paper-panel); border-radius: 26px; padding: 22px 24px; }
+.board-theme .hub-kicker { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--paper-muted); }
+.board-theme .hub-tiles { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 5px; width: 100%; }
+.board-theme .hub-tile { aspect-ratio: 1; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 11px; background: var(--paper-panel-3); color: var(--paper-faint); }
+.board-theme .hub-stat { border-radius: 999px; padding: 4px 11px; background: var(--paper-panel-3); color: var(--paper-ink); }
+.board-theme .hub-stat b { font-weight: 700; }
+.board-theme .hub-st-idea { background: var(--paper-tan); color: var(--paper-ink); }
+.board-theme .hub-st-scripted { background: var(--paper-peri); color: var(--paper-accent-2); }
+.board-theme .hub-st-filming { background: var(--paper-yellow); color: var(--paper-ink); }
+.board-theme .hub-st-editing { background: var(--paper-rust); color: var(--paper-bad); }
+.board-theme .hub-st-ready { background: #cfe0bd; color: var(--paper-ok-ink); }
+.board-theme .hub-st-posted { background: var(--paper-sidebar); color: var(--paper-sidebar-ink); }
+.board-theme .hub-st-hold { background: var(--paper-panel-3); color: var(--paper-faint); }
+.board-theme .hub-fb-idea { background: var(--paper-tan); }
+.board-theme .hub-fb-building { background: var(--paper-yellow); }
+.board-theme .hub-fb-live { background: var(--paper-peri); color: var(--paper-accent-2); }
+.board-theme .hub-fb-posted { background: #cfe0bd; color: var(--paper-ok-ink); }
+.board-theme .hub-dot { display: inline-block; width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+.board-theme .hub-cols { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+.board-theme .hub-col { flex: 0 0 260px; scroll-snap-align: start; background: var(--paper-panel); border-radius: 22px; padding: 12px; transition: background .15s; min-height: 160px; }
+@media (min-width: 1400px) { .board-theme .hub-col { flex: 1 1 0; min-width: 150px; } }
+.board-theme .hub-card .hub-input, .board-theme .hub-asset .hub-input, .board-theme .hub-librow .hub-input { background: var(--paper-panel-3); }
+.board-theme .hub-col.is-over, .board-theme .hub-day.is-over { background: var(--paper-peri); }
+.board-theme .hub-card { background: var(--paper-panel-2); border-radius: 16px; padding: 11px 12px; transition: background .15s; }
+.board-theme .hub-card:hover { background: var(--paper-panel-3); }
+.board-theme .hub-tag-post { background: #cfe0bd; color: var(--paper-ok-ink); }
+.board-theme .hub-late { background: var(--paper-rust); color: var(--paper-bad); }
+.board-theme .hub-pill { border-radius: 999px; padding: 4px 11px; font-size: 12px; background: var(--paper-panel-3); color: var(--paper-muted); }
+.board-theme .hub-pill.on { font-weight: 600; }
+.board-theme .hub-input { border-radius: 12px; background: var(--paper-panel-2); padding: 8px 11px; font-size: 13px; color: var(--paper-ink); outline: none; border: 1px solid transparent; }
+.board-theme .hub-input:focus { border-color: var(--paper-line-2); }
+.board-theme .hub-input::placeholder { color: var(--paper-faint); }
+.board-theme .hub-btn { flex-shrink: 0; border-radius: 12px; padding: 0 14px; font-size: 13px; font-weight: 600; background: var(--paper-sidebar); color: var(--paper-sidebar-ink); }
+.board-theme .hub-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.board-theme .hub-wd { text-align: center; font-size: 11px; color: var(--paper-muted); padding-bottom: 2px; }
+.board-theme .hub-day { position: relative; min-height: 84px; border-radius: 12px; background: var(--paper-panel-2); padding: 20px 4px 4px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: background .15s; }
+.board-theme .hub-day.is-empty { background: var(--paper-panel-3); }
+.board-theme .hub-day.is-picking { background: var(--paper-yellow); }
+.board-theme .hub-daynum { position: absolute; top: 4px; left: 7px; font-size: 11px; color: var(--paper-muted); }
+.board-theme .hub-day.is-today .hub-daynum { color: var(--paper-bad); font-weight: 700; }
+.board-theme .hub-plus { margin: auto; font-size: 16px; color: var(--paper-faint); }
+.board-theme .hub-slot { display: block; width: 100%; border-radius: 7px; padding: 3px 5px; font-size: 10.5px; line-height: 1.25; text-align: left; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.board-theme .hub-poolrow { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: 12px; padding: 7px 10px; font-size: 12.5px; background: var(--paper-panel-2); }
+.board-theme .hub-poolrow:hover, .board-theme .hub-poolrow.is-picking:hover { background: var(--paper-yellow); }
+.board-theme .hub-bar { height: 8px; border-radius: 999px; background: var(--paper-panel-3); overflow: hidden; }
+.board-theme .hub-bar > span { display: block; height: 100%; background: var(--paper-ok-ink); border-radius: inherit; transition: width .3s; }
+.board-theme .hub-asset { display: flex; gap: 11px; align-items: flex-start; background: var(--paper-panel-2); border-radius: 16px; padding: 11px 12px; }
+.board-theme .hub-librow { display: flex; align-items: center; gap: 10px; background: var(--paper-panel-2); border-radius: 14px; padding: 7px 10px; }
+.board-theme .hub-check { flex-shrink: 0; width: 20px; height: 20px; margin-top: 1px; border-radius: 7px; background: var(--paper-panel-3); font-size: 12px; line-height: 20px; color: var(--paper-sidebar-ink); }
+.board-theme .hub-check:hover { background: var(--paper-tan); }
+.board-theme .hub-check.is-on { background: var(--paper-ok-ink); }
+@media (max-width: 640px) {
+  .board-theme .hub-day { min-height: 58px; padding: 17px 2px 2px; }
+  .board-theme .hub-slot { font-size: 9.5px; -webkit-line-clamp: 2; padding: 2px 3px; }
+}

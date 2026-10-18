@@ -22,6 +22,7 @@ import {
   TaskMap,
 } from "@/lib/board";
 import { demoBoard } from "./demo";
+import { applyHubAction, isHubAction, readHub } from "@/lib/contentHub";
 import { humanizeNotionError } from "@/lib/notion";
 import { openViewKey, resolveCredentials } from "@/lib/store";
 
@@ -118,14 +119,15 @@ export async function GET(req: Request) {
 
   try {
     const { dbs, map, dealMap } = await setup(creds.token, ideaDbId, taskDbId);
-    const [board, contentIdeas, businessIdeas] = await Promise.all([
+    const [board, contentIdeas, businessIdeas, hub] = await Promise.all([
       readBoard(creds.token, dbs, map, dealMap, since.toISOString().slice(0, 10)),
       readContentIdeas(creds.token).catch(() => null),
       readBusinessIdeas(creds.token).catch(() => null),
+      readHub(creds.token).catch(() => null),
     ]);
     if (viewOnly || !dealsUnlocked(req))
-      return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, deals: [], dealsLocked: true, dbs, viewOnly });
-    return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, dbs });
+      return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, hub, deals: [], dealsLocked: true, dbs, viewOnly });
+    return NextResponse.json({ ok: true, ...board, contentIdeas, businessIdeas, hub, dbs });
   } catch (e) {
     return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400 });
   }
@@ -141,6 +143,15 @@ export async function POST(req: Request) {
   if (!body?.action) return NextResponse.json({ ok: false, error: "No action given." }, { status: 400 });
   if (DEAL_ACTIONS.includes(body.action) && !dealsUnlocked(req))
     return NextResponse.json({ ok: false, error: "The deals are locked. Enter the passcode first." }, { status: 401 });
+
+  if (isHubAction(body)) {
+    try {
+      await applyHubAction(creds.token, body);
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400 });
+    }
+  }
 
   const taskDbId = todoDbOverride(req) ?? creds.taskDbId;
   const ideaDbId = ideaDbOverride(req) ?? creds.contentDbId;

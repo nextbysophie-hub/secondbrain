@@ -5,10 +5,12 @@
  * page and created on first use, which keeps the capture key format unchanged.
  */
 
+import type { Hub, HubAction } from "@/lib/contentHub";
+
 const NOTION_VERSION = "2022-06-28";
 const API = "https://api.notion.com/v1";
 
-async function notion<T>(
+export async function notion<T>(
   token: string,
   endpoint: string,
   init?: RequestInit,
@@ -363,6 +365,8 @@ export type Board = {
   /** Null when there's no Content Ideas database the integration can read. */
   contentIdeas?: ContentIdea[] | null;
   businessIdeas?: ContentIdea[] | null;
+  /** The Content Hub: videos, freebies and assets. */
+  hub?: Hub | null;
 };
 
 export type BoardDbs = {
@@ -1869,7 +1873,8 @@ export type Action =
       field: DealField;
       value: string | null;
     }
-  | { action: "deleteDeal"; id: string };
+  | { action: "deleteDeal"; id: string }
+  | HubAction;
 
 /** Only writes columns the database actually has, so the same action works on
  *  the wizard's To-dos and on a tracker somebody built years ago. */
