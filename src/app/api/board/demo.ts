@@ -32,7 +32,7 @@ export function demoBoard() {
     dbs: { content: "demo", task: "demo", habits: "demo", ticks: "demo", goals: "demo", agent: "demo", reminders: "demo", deals: "demo", emails: null, weekGoals: "demo" },
     categories: ["Work", "Personal", "Health", "Money", "Other"],
     todos: [
-      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, deal: null, fixed: false, every: null, url: "#" },
+      { id: "d1", title: "Send Millie the script", done: false, due: iso(0), plan: iso(0), kind: "deadline", slot: "deep", minutes: null, category: "Work", priority: "High", link: null, source: "Siri", goal: null, deal: null, fixed: false, every: null, subtasks: [{ text: "Tighten the hook", done: true }, { text: "Add the CTA line", done: false }], url: "#" },
       { id: "d2", title: "Film the b-roll in the car", done: false, due: iso(0), plan: iso(0), kind: "want", slot: "deep", minutes: null, category: "Work", priority: null, link: null, source: "Siri", goal: null, deal: null, fixed: false, every: null, url: "#" },
       { id: "d3", title: "Renew the domain", done: false, due: iso(-2), plan: null, kind: null, slot: "quick", minutes: 15, category: "Money", priority: null, link: null, source: "Manual", goal: null, deal: null, fixed: true, every: null, url: "#" },
       { id: "d4", title: "Book the dentist", done: false, due: iso(3), plan: null, kind: null, slot: null, minutes: null, category: "Health", priority: null, link: null, source: "Siri", goal: null, deal: null, fixed: false, every: null, url: "#" },

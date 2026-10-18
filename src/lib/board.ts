@@ -128,10 +128,33 @@ export type Todo = {
   // How often it comes back (rent: every 1 month), from the tracker's own
   // recur columns.
   every: Every | null;
+  // Steps inside a deep task, kept as lines in the tracker's Subtasks column.
+  subtasks?: Subtask[];
   url: string;
 };
 
 export type Every = { n: number; unit: "day" | "week" | "month" | "year" };
+
+export type Subtask = { text: string; done: boolean };
+
+/** One step per line, ticked with ☑ and open with ☐, so the column still
+ *  reads as a checklist when opened in Notion. */
+export const parseSubtasks = (s: string): Subtask[] =>
+  s
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const m = /^(☑|☐|\[x\]|\[ \])\s*/i.exec(l);
+      return {
+        text: m ? l.slice(m[0].length) : l,
+        done: !!m && (m[1] === "☑" || m[1].toLowerCase() === "[x]"),
+      };
+    })
+    .filter((t) => t.text);
+
+export const formatSubtasks = (items: Subtask[]) =>
+  items.map((t) => `${t.done ? "☑" : "☐"} ${t.text}`).join("\n");
 
 /** How long a finished task really took, kept for estimating the next one. */
 export type Timing = { title: string; minutes: number };
@@ -479,6 +502,7 @@ export type TaskMap = {
   deal: string | null;
   fixed: string | null;
   recur: { interval: string; units: string } | null;
+  subtasks: string | null;
 };
 
 type SchemaProp = {
@@ -690,6 +714,9 @@ export async function readTaskMap(
     deal: pick(props, "relation", /deal|brand/i)?.name ?? null,
     fixed: pick(props, "checkbox", /^(fixed|locked)$/i)?.name ?? null,
     recur: recurOf(props),
+    subtasks:
+      pick(props, "rich_text", /^(sub-?tasks?|steps|checklist)$/i)?.name ??
+      null,
   };
 }
 
@@ -763,6 +790,7 @@ export async function ensureDayColumns(
     properties.Slot = selectSchema(["Deep", "Quick"], ["brown", "purple"]);
   if (!map.minutes) properties.Minutes = { number: { format: "number" } };
   if (!map.fixed) properties.Fixed = { checkbox: {} };
+  if (!map.subtasks) properties.Subtasks = { rich_text: {} };
   if (!Object.keys(properties).length) return map;
   await notion(token, `/databases/${taskDbId}`, {
     method: "PATCH",
@@ -773,6 +801,7 @@ export async function ensureDayColumns(
     slotProp: map.slotProp ?? { prop: "Slot", deep: "Deep", quick: "Quick" },
     minutes: map.minutes ?? "Minutes",
     fixed: map.fixed ?? "Fixed",
+    subtasks: map.subtasks ?? "Subtasks",
   };
 }
 
@@ -1584,6 +1613,9 @@ export async function readBoard(
       deal: map.deal ? relationOf(r.properties[map.deal]) : null,
       fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
       every: everyOf(r, map),
+      subtasks: map.subtasks
+        ? parseSubtasks(textOf(r.properties[map.subtasks]))
+        : [],
       url: r.url,
     })),
     agent: agentRows.map((r) => ({
@@ -1699,6 +1731,7 @@ async function archivePage(token: string, pageId: string) {
 }
 
 export type Action =
+  | { action: "subtasks"; id: string; items: Subtask[] }
   | {
       action: "addTodo";
       title: string;
@@ -2057,6 +2090,12 @@ export async function applyAction(
       await updatePage(token, body.id, taskProps(map, fields));
       return;
     }
+    case "subtasks":
+      if (map.subtasks)
+        await updatePage(token, body.id, {
+          [map.subtasks]: richText(formatSubtasks(body.items)),
+        });
+      return;
     case "toggleTodo":
       await updatePage(token, body.id, taskProps(map, { done: body.done }));
       return;

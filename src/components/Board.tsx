@@ -27,6 +27,7 @@ import type {
   Todo,
   WeekGoal,
 } from "@/lib/board";
+import type { CalendarEvent } from "@/lib/google";
 
 const CATEGORIES = ["Work", "Personal", "Health", "Money", "Other"];
 const AREAS = ["Business", "Content", "Health", "Life"];
@@ -1633,6 +1634,109 @@ function EmptySlot({
 
 /** One of the three deep blocks: what it is, what it usually costs, and a
  *  stopwatch for what it actually cost. */
+type Step = NonNullable<Todo["subtasks"]>[number];
+
+/** The steps inside a deep task: tick them off, drop one, or type the next. */
+function Subtasks({
+  todo,
+  send,
+  onEditing,
+  big,
+}: {
+  todo: Todo;
+  send: Send;
+  onEditing?: (on: boolean) => void;
+  big?: boolean;
+}) {
+  const items = todo.subtasks ?? [];
+  const [draft, setDraft] = useState("");
+  const save = (next: Step[]) =>
+    send({ action: "subtasks", id: todo.id, items: next }, (b) => ({
+      ...b,
+      todos: b.todos.map((t) =>
+        t.id === todo.id ? { ...t, subtasks: next } : t,
+      ),
+    }));
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    save([...items, { text, done: false }]);
+  };
+
+  return (
+    <div className={`space-y-0.5 ${big ? "text-[14px]" : "text-[12px]"}`}>
+      {items.map((s, i) => (
+        <div key={i} className="group/sub flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={s.done ? "Mark step as not done" : "Mark step done"}
+            onClick={() =>
+              save(items.map((x, k) => (k === i ? { ...x, done: !x.done } : x)))
+            }
+            className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[4px] border text-[9px] transition ${
+              s.done
+                ? "border-accent bg-accent text-accent-ink"
+                : "border-line-2 hover:border-muted"
+            }`}
+          >
+            {s.done ? "✓" : ""}
+          </button>
+          <span
+            className={`min-w-0 flex-1 ${s.done ? "text-muted line-through" : ""}`}
+          >
+            {s.text}
+          </span>
+          <button
+            type="button"
+            aria-label="Remove step"
+            onClick={() => save(items.filter((_, k) => k !== i))}
+            className="shrink-0 text-[11px] text-faint opacity-0 transition hover:text-bad group-hover/sub:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        onFocus={() => onEditing?.(true)}
+        onBlur={() => onEditing?.(false)}
+        enterKeyHint="done"
+        aria-label={`Add a subtask to ${todo.title}`}
+        placeholder="+ Add a subtask"
+        className="w-full bg-transparent py-0.5 pl-[22px] outline-none placeholder:text-faint"
+      />
+    </div>
+  );
+}
+
+/** "2/3" beside a deep task that has steps, doubling as the open/close switch. */
+function StepCount({
+  todo,
+  open,
+  onClick,
+}: {
+  todo: Todo;
+  open: boolean;
+  onClick: () => void;
+}) {
+  const items = todo.subtasks ?? [];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={open ? "Hide subtasks" : "Show subtasks"}
+      className="shrink-0 rounded-full bg-panel-2 px-2 py-0.5 text-[11px] text-muted transition hover:text-ink"
+    >
+      {items.length
+        ? `${items.filter((s) => s.done).length}/${items.length}`
+        : "+ subtasks"}
+    </button>
+  );
+}
+
 function DeepRow({
   todo,
   board,
@@ -1646,9 +1750,11 @@ function DeepRow({
 }) {
   const estimate = todo.minutes ?? estimateFor(board.timings, todo.title);
   const learned = todo.minutes === null && estimate !== null;
+  const [steps, setSteps] = useState(!!todo.subtasks?.length);
+  const [typing, setTyping] = useState(false);
   return (
     <div
-      draggable
+      draggable={!typing}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
@@ -1683,7 +1789,13 @@ function DeepRow({
         >
           {todo.title}
         </span>
+        {todo.subtasks?.length ? (
+          <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+        ) : null}
         <span className="row-actions flex shrink-0 items-center gap-3">
+        {todo.subtasks?.length ? null : (
+          <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+        )}
         {estimate !== null ? (
           <span
             title={
@@ -1708,6 +1820,11 @@ function DeepRow({
         </button>
         </span>
       </div>
+      {steps ? (
+        <div className="mt-2 pl-10">
+          <Subtasks todo={todo} send={send} onEditing={setTyping} big />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1818,6 +1935,114 @@ async function readCalendarDay(): Promise<DayCalendar | null> {
   } catch {
     return null;
   }
+}
+
+/** All-day events run from their start date up to (not including) the end. */
+const eventOn = (e: CalendarEvent, day: string) =>
+  e.allDay
+    ? e.start.slice(0, 10) <= day && day < e.end.slice(0, 10)
+    : localDay(new Date(e.start)) === day;
+
+const DEMO_EVENTS = (): CalendarEvent[] => {
+  const at = (h: number, m = 0) => {
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
+  return [
+    { id: "ev1", title: "Call with Vercel team", start: at(10), end: at(10, 30), allDay: false, link: null },
+    { id: "ev2", title: "Lunch with Millie", start: at(13), end: at(14), allDay: false, link: null },
+  ];
+};
+
+/** Google Calendar events for a run of days (inclusive), read in her own
+ *  timezone. `connected` stays null until Google has answered. */
+function useEvents(first: string, last: string, demo: boolean) {
+  const [state, setState] = useState<{
+    events: CalendarEvent[];
+    connected: boolean | null;
+  }>({ events: [], connected: null });
+  useEffect(() => {
+    if (demo) {
+      setState({ events: DEMO_EVENTS(), connected: true });
+      return;
+    }
+    let live = true;
+    const from = new Date(`${first}T00:00:00`);
+    const to = new Date(`${shiftDay(last, 1)}T00:00:00`);
+    const params = new URLSearchParams({
+      from: from.toISOString(),
+      to: to.toISOString(),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    fetch(`/api/google/events?${params}`)
+      .then((r) => r.json())
+      .then(
+        (data: {
+          connected?: boolean;
+          configured?: boolean;
+          events?: CalendarEvent[];
+        }) => {
+          if (!live) return;
+          setState({
+            events: data.events ?? [],
+            connected: data.configured === false ? null : !!data.connected,
+          });
+        },
+      )
+      .catch(() => live && setState({ events: [], connected: null }));
+    return () => {
+      live = false;
+    };
+  }, [first, last, demo]);
+  return state;
+}
+
+const eventTime = (e: CalendarEvent) =>
+  e.allDay
+    ? "All day"
+    : new Date(e.start)
+        .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+        .replace(":00", "")
+        .replace(/\s/g, "")
+        .toLowerCase();
+
+/** Meetings and plans already on the day, above the work that fits around them. */
+function EventList({ events, big }: { events: CalendarEvent[]; big?: boolean }) {
+  if (!events.length) return null;
+  return (
+    <div className="rounded-xl bg-panel-2/70 px-2 py-1.5">
+      <span className="eyebrow">Events</span>
+      <div className="mt-1 space-y-0.5">
+        {events.map((e) => {
+          const row = (
+            <>
+              <span className="w-[52px] shrink-0 text-[11px] text-muted">
+                {eventTime(e)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{e.title}</span>
+            </>
+          );
+          const cls = `flex items-baseline gap-2 ${big ? "text-[14px]" : "text-[12px]"}`;
+          return e.link ? (
+            <a
+              key={e.id}
+              href={e.link}
+              target="_blank"
+              rel="noreferrer"
+              className={`${cls} hover:text-accent-2`}
+            >
+              {row}
+            </a>
+          ) : (
+            <div key={e.id} className={cls}>
+              {row}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function Arrow({
@@ -2242,6 +2467,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
   const [calendar, setCalendar] = useState<DayCalendar | null>(null);
+  const cal = useEvents(day, day, board.dbs.task === "demo");
+  const dayEvents = cal.events.filter((e) => eventOn(e, day));
 
   useEffect(() => {
     setHours(window.localStorage.getItem(`hours:${day}`) ?? "");
@@ -2436,6 +2663,12 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         ) : null}
 
         <DueReminders board={board} send={send} day={day} />
+
+        {dayEvents.length ? (
+          <section className="card px-5 py-3">
+            <EventList events={dayEvents} big />
+          </section>
+        ) : null}
 
         <section className="card card-deep px-5 py-4">
           <div className="flex items-center justify-between">
@@ -3542,6 +3775,8 @@ function PlanOn({ todo, send }: { todo: Todo; send: Send }) {
  *  way to put it back down. */
 function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
   const [editing, setEditing] = useState(false);
+  const [steps, setSteps] = useState(false);
+  const deep = todo.slot === "deep";
 
   return (
     <div
@@ -3550,8 +3785,9 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         e.dataTransfer.setData("text/todo-id", todo.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className="group flex cursor-grab items-start gap-2.5 py-1.5 active:cursor-grabbing"
+      className="group cursor-grab py-1.5 active:cursor-grabbing"
     >
+      <div className="flex items-start gap-2.5">
       <button
         type="button"
         aria-label={todo.done ? "Mark as not done" : "Mark done"}
@@ -3584,7 +3820,20 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
         onEditing={setEditing}
         className={`text-[14px] ${todo.done ? "text-muted line-through" : ""}`}
       />
+      {deep && todo.subtasks?.length ? (
+        <StepCount todo={todo} open={steps} onClick={() => setSteps(!steps)} />
+      ) : null}
       <span className="row-actions flex shrink-0 items-center gap-1.5">
+        {deep && !todo.subtasks?.length ? (
+          <button
+            type="button"
+            onClick={() => setSteps(!steps)}
+            title="Add subtasks"
+            className="whitespace-nowrap text-[11px] text-muted transition hover:text-ink"
+          >
+            + sub
+          </button>
+        ) : null}
         <EditDue todo={todo} send={send} />
         <button
           type="button"
@@ -3595,6 +3844,12 @@ function PlanRow({ todo, send, day }: { todo: Todo; send: Send; day: string }) {
           ×
         </button>
       </span>
+      </div>
+      {deep && steps ? (
+        <div className="mt-1 pl-[28px]">
+          <Subtasks todo={todo} send={send} onEditing={setEditing} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3940,11 +4195,13 @@ function PlanDay({
   board,
   send,
   days,
+  events,
 }: {
   board: Board;
   send: Send;
   /** One day, or Saturday and Sunday together as the weekend. */
   days: string[];
+  events: CalendarEvent[];
 }) {
   const day = days[0];
   const onDays = (t: Todo) => days.some((d) => pickedOn(t, d));
@@ -4141,6 +4398,7 @@ function PlanDay({
       <p className="serif mt-1 text-[30px] leading-none">{numbers}</p>
 
       <div className="mt-3 flex-1 space-y-2">
+        <EventList events={events} />
         {fixed.length ? <MoneyDue rows={fixed} send={send} day={day} /> : null}
         {zone("deep", deep)}
         <div className="border-t border-line" />
@@ -4368,6 +4626,7 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
   const [showLate, setShowLate] = useState(false);
   const cats = categoriesOf(board);
   const days = planWeek(week);
+  const cal = useEvents(days[0], days[6], board.dbs.task === "demo");
   const pickedIn = (list: string[]) =>
     board.todos.filter((t) => t.slot && list.some((d) => pickedOn(t, d)));
   const planned = pickedIn(days);
@@ -4574,13 +4833,28 @@ function PlanPane({ board, send }: { board: Board; send: Send }) {
             )}
           </div>
 
+          {cal.connected === false ? (
+            <a
+              href={connectCalendarHref()}
+              className="card flex items-center px-4 py-3 text-[13px] text-muted hover:text-ink"
+            >
+              ▦ Connect Google Calendar to see your events on each day →
+            </a>
+          ) : null}
+
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div
               className="grid gap-2.5 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]"
               style={{ "--cols": columns.length } as CSSProperties}
             >
               {columns.map((c) => (
-                <PlanDay key={c[0]} board={board} send={send} days={c} />
+                <PlanDay
+                  key={c[0]}
+                  board={board}
+                  send={send}
+                  days={c}
+                  events={cal.events.filter((e) => c.some((d) => eventOn(e, d)))}
+                />
               ))}
             </div>
             <div className="min-w-0 space-y-3 xl:sticky xl:top-4 xl:self-start">
