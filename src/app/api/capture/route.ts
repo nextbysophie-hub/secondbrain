@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { DB_DEFAULTS, capture, humanizeNotionError } from "@/lib/notion";
+import { addCapturedTodo } from "@/lib/board";
+import { DB_DEFAULTS, capture, humanizeNotionError, isNotionError } from "@/lib/notion";
 import { resolveCredentials } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ type Body = {
   source?: string;
   due?: string;
   key?: string;
+  todos?: string;
 };
 
 const CORS = {
@@ -123,17 +125,33 @@ export async function POST(req: Request) {
   // before the rename keep working.
   const kind = body.type === "task" || body.type === "series" ? "task" : "content";
   const defaults = DB_DEFAULTS[kind];
-  const dbId = kind === "task" ? creds.taskDbId : creds.contentDbId;
+  // The dashboard can point at a to-do tracker of her own (?todos=…), and the
+  // capture link copied from it carries the same id so Siri lands there too.
+  const todosDb = (body.todos || new URL(req.url).searchParams.get("todos") || "").trim().replace(/-/g, "");
+  const dbId = kind === "task" ? todosDb || creds.taskDbId : creds.contentDbId;
+  const input = {
+    idea,
+    link: body.link?.trim() || undefined,
+    note: body.note?.trim() || undefined,
+    source: body.source?.trim() || "Siri",
+    due: normalizeDue(body.due),
+  };
+  const asTodo = () =>
+    addCapturedTodo(creds.token, dbId, { title: idea, due: input.due, link: input.link, source: input.source });
 
   try {
-    const page = await capture(creds.token, { ...defaults, id: dbId }, {
-      idea,
-      link: body.link?.trim() || undefined,
-      note: body.note?.trim() || undefined,
-      source: body.source?.trim() || "Siri",
-      due: normalizeDue(body.due),
-    });
-    return NextResponse.json({ ok: true, message: "Captured", url: page.url }, { headers: CORS });
+    // A tracker that wasn't made by the wizard has its own column names.
+    const page =
+      kind === "task" && todosDb
+        ? await asTodo()
+        : await capture(creds.token, { ...defaults, id: dbId }, input).catch((e) => {
+            if (kind === "task" && isNotionError(e) && e.status === 400) return asTodo();
+            throw e;
+          });
+    return NextResponse.json(
+      { ok: true, message: kind === "task" ? `Added to your to-dos: ${idea}` : "Captured", url: page.url },
+      { headers: CORS },
+    );
   } catch (e) {
     return NextResponse.json({ ok: false, error: humanizeNotionError(e) }, { status: 400, headers: CORS });
   }

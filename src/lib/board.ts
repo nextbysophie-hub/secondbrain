@@ -1950,6 +1950,29 @@ function taskProps(
   return out;
 }
 
+/** A to-do spoken to Siri, written under whatever column names the tracker
+ *  behind the dashboard uses, so it shows up there like one typed in. */
+export async function addCapturedTodo(
+  token: string,
+  taskDbId: string,
+  fields: { title: string; due?: string; link?: string; source?: string },
+): Promise<{ url: string }> {
+  const map = await readTaskMap(token, taskDbId);
+  const id = await createPage(
+    token,
+    taskDbId,
+    taskProps(map, {
+      title: fields.title,
+      done: false,
+      due: fields.due ?? null,
+      plan: fields.due ?? null,
+      link: fields.link ?? null,
+      source: fields.source,
+    }),
+  );
+  return { url: `https://www.notion.so/${id.replace(/-/g, "")}` };
+}
+
 /** Writes only the columns her deals table actually has, under its own names. */
 function dealProps(
   deals: DealMap,

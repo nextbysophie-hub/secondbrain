@@ -28,6 +28,7 @@ import type {
   WeekGoal,
 } from "@/lib/board";
 import type { CalendarEvent } from "@/lib/google";
+import { SHORTCUT_LINKS } from "@/lib/wizard";
 import type { ProjectStep } from "@/app/api/project/route";
 import { ContentHub } from "@/components/ContentHub";
 
@@ -5939,6 +5940,70 @@ function ChestPop({
   );
 }
 
+/** Everything needed to say "Hey Siri, capture to-do" and see it here: the
+ *  ready-made Shortcut plus the one link to paste into it, already pointing at
+ *  the same Notion list this dashboard reads. */
+function SiriSetup({ link, onClose }: { link: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      window.prompt("Copy this link", link);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 4000);
+  };
+  return (
+    <div className="quest-pop" onClick={onClose} role="dialog" aria-label="Siri to-dos">
+      <div className="siri-card" onClick={(e) => e.stopPropagation()}>
+        <p className="quest-tag">Siri → dashboard</p>
+        <h4 className="display mt-1 text-[24px] font-semibold leading-tight">
+          Say it, see it here
+        </h4>
+        <p className="mt-1 text-[13px] text-muted">
+          Do this once on your iPhone. Then &ldquo;Hey Siri, capture to-do&rdquo;
+          drops it straight into your to-dos.
+        </p>
+        <ol className="siri-steps">
+          <li>
+            <b>Copy your link</b>
+            <button type="button" className="siri-btn" onClick={() => void copy()}>
+              {copied ? "Copied!" : "Copy my Siri link"}
+            </button>
+          </li>
+          <li>
+            <b>Add the shortcut</b>
+            <a className="siri-btn" href={SHORTCUT_LINKS.task} target="_blank" rel="noreferrer">
+              Get &ldquo;Capture To-do&rdquo;
+            </a>
+            <span>Tap <b>Add Shortcut</b>.</span>
+          </li>
+          <li>
+            <b>Paste the link in</b>
+            <span>
+              In Shortcuts, tap ••• on Capture To-do. Tap the first box that says{" "}
+              <span className="font-mono text-[11px]">PASTE_YOUR_CAPTURE_LINK_HERE</span>,
+              select all, paste, tap <b>Done</b>.
+            </span>
+          </li>
+          <li>
+            <b>Try it</b>
+            <span>
+              &ldquo;Hey Siri, capture to-do&rdquo; → say the task → say when
+              (&ldquo;tomorrow&rdquo;, &ldquo;Friday&rdquo; or &ldquo;none&rdquo;).
+              It shows up here on that day, or in your backlog.
+            </span>
+          </li>
+        </ol>
+        <button type="button" className="siri-close" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** One project as a game: XP bar, level, and chests that open as tasks land. */
 function QuestCard({ quest, tasks, send }: { quest: Goal; tasks: Todo[]; send: Send }) {
   const total = tasks.length;
@@ -8773,6 +8838,11 @@ export default function BoardApp({
   const reload = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewOnly = captureKey.startsWith("view.");
   const [shared, setShared] = useState<"idle" | "busy" | "copied">("idle");
+  const [siriOpen, setSiriOpen] = useState(false);
+  const siriLink = () =>
+    `${window.location.origin}/api/capture?key=${encodeURIComponent(captureKey)}` +
+    (todoDb ? `&todos=${encodeURIComponent(todoDb)}` : "");
+  const canSiri = !viewOnly && !!captureKey && captureKey !== "demo";
   const share = async () => {
     setShared("busy");
     try {
@@ -8931,6 +9001,17 @@ export default function BoardApp({
                 </span>
               </button>
             ) : null}
+            {canSiri ? (
+              <button
+                type="button"
+                onClick={() => setSiriOpen(true)}
+                className="sb-btn"
+                title="Send to-dos from Siri"
+              >
+                <span className="flex w-[18px] justify-center"><svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></span>
+                <span className="sb-label">Siri to-dos</span>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void load()}
@@ -8954,6 +9035,8 @@ export default function BoardApp({
           </div>
         </nav>
 
+        {siriOpen ? <SiriSetup link={siriLink()} onClose={() => setSiriOpen(false)} /> : null}
+
         {/* A week and the deal wall need the whole desk; everything else reads
             better narrower. */}
         <main className="min-w-0 flex-1 pb-28 lg:pb-8">
@@ -8964,6 +9047,15 @@ export default function BoardApp({
           >
             <div className="mtop">
               <span className="mtop-logo display">{logo}</span>
+              {canSiri ? (
+                <button
+                  type="button"
+                  onClick={() => setSiriOpen(true)}
+                  className="sync-pill siri-pill ml-auto"
+                >
+                  <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg> Siri
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void load()}
