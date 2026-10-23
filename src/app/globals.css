@@ -610,6 +610,10 @@ select {
 .board-theme .ci-st-archived { background: var(--paper-panel-3); color: var(--paper-faint); }
 .board-theme .ci-st-backlog { background: var(--paper-panel-3); color: var(--paper-muted); }
 
+/* Today: a pile or the inbox lit up as a drop target. */
+.board-theme .pile-over { box-shadow: 0 0 0 2px var(--brand-rust); transform: scale(1.01); }
+.board-theme .inbox-drop { box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-rust) 35%, transparent); }
+
 /* Floating trash: rises from the bottom while a to-do or deal is dragged. */
 .board-theme {
   --trash-disc: var(--paper-sidebar);

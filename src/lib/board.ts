@@ -367,6 +367,9 @@ export type Board = {
   businessIdeas?: ContentIdea[] | null;
   /** The Content Hub: videos, freebies and assets. */
   hub?: Hub | null;
+  /** Appointments kept in the tracker (Slot "Calendar"), shown in Today's
+   *  calendar box instead of the deep/quick piles. */
+  agenda?: Todo[];
 };
 
 export type BoardDbs = {
@@ -455,6 +458,12 @@ const kindOf = (r: Row, map: TaskMap): "deadline" | "want" | null => {
       ? "want"
       : null;
 };
+
+/** Slot value that turns a tracker row into an appointment for the day. */
+export const CALENDAR_SLOT = "Calendar";
+const onAgenda = (r: Row, map: TaskMap) =>
+  !!map.slotProp &&
+  selectOf(r.properties[map.slotProp.prop]) === CALENDAR_SLOT;
 
 const slotOf = (r: Row, map: TaskMap): "deep" | "quick" | null => {
   if (!map.slotProp) return null;
@@ -1583,6 +1592,29 @@ export async function readBoard(
     special.map((r, i) => [r.id, checkLists[i]]),
   ) as Record<string, Check[]>;
 
+  const toTodo = (r: Row): Todo => ({
+    id: r.id,
+    title: titleOf(r),
+    done: doneOf(r),
+    due: map.due ? dateOf(r.properties[map.due]) : null,
+    plan: map.plan ? dateOf(r.properties[map.plan]) : null,
+    kind: kindOf(r, map),
+    slot: slotOf(r, map),
+    minutes: map.minutes ? (r.properties[map.minutes]?.number ?? null) : null,
+    category: map.category ? tagOf(r.properties[map.category.prop]) : null,
+    priority: map.priority ? selectOf(r.properties[map.priority]) : null,
+    link: map.link ? (r.properties[map.link]?.url ?? null) : null,
+    source: map.source ? selectOf(r.properties[map.source]) : null,
+    goal: map.goal ? relationOf(r.properties[map.goal]) : null,
+    deal: map.deal ? relationOf(r.properties[map.deal]) : null,
+    fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
+    every: everyOf(r, map),
+    subtasks: map.subtasks
+      ? parseSubtasks(textOf(r.properties[map.subtasks]))
+      : [],
+    url: r.url,
+});
+
   return {
     checks,
     weekGoals: weekGoalRows.map((r) => ({
@@ -1603,28 +1635,8 @@ export async function readBoard(
           }))
           .filter((t) => t.title && t.minutes > 0)
       : [],
-    todos: todoRows.map((r) => ({
-      id: r.id,
-      title: titleOf(r),
-      done: doneOf(r),
-      due: map.due ? dateOf(r.properties[map.due]) : null,
-      plan: map.plan ? dateOf(r.properties[map.plan]) : null,
-      kind: kindOf(r, map),
-      slot: slotOf(r, map),
-      minutes: map.minutes ? (r.properties[map.minutes]?.number ?? null) : null,
-      category: map.category ? tagOf(r.properties[map.category.prop]) : null,
-      priority: map.priority ? selectOf(r.properties[map.priority]) : null,
-      link: map.link ? (r.properties[map.link]?.url ?? null) : null,
-      source: map.source ? selectOf(r.properties[map.source]) : null,
-      goal: map.goal ? relationOf(r.properties[map.goal]) : null,
-      deal: map.deal ? relationOf(r.properties[map.deal]) : null,
-      fixed: map.fixed ? r.properties[map.fixed]?.checkbox === true : false,
-      every: everyOf(r, map),
-      subtasks: map.subtasks
-        ? parseSubtasks(textOf(r.properties[map.subtasks]))
-        : [],
-      url: r.url,
-    })),
+    todos: todoRows.filter((r) => !onAgenda(r, map)).map(toTodo),
+    agenda: todoRows.filter((r) => onAgenda(r, map)).map(toTodo),
     agent: agentRows.map((r) => ({
       id: r.id,
       title: titleOf(r),
@@ -1759,7 +1771,7 @@ export type Action =
       due?: string | null;
       plan?: string | null;
       kind?: "deadline" | "want" | null;
-      slot?: "deep" | "quick" | null;
+      slot?: "deep" | "quick" | "calendar" | null;
       goal?: string | null;
       deal?: string | null;
     }
@@ -1856,7 +1868,7 @@ export type Action =
       title: string;
       due: string | null;
       plan: string | null;
-      slot: "deep" | "quick" | null;
+      slot: "deep" | "quick" | "calendar" | null;
     }
   | {
       action: "addDeal";
@@ -1886,7 +1898,7 @@ function taskProps(
     due?: string | null;
     plan?: string | null;
     kind?: "deadline" | "want" | null;
-    slot?: "deep" | "quick" | null;
+    slot?: "deep" | "quick" | "calendar" | null;
     minutes?: number | null;
     category?: string | null;
     link?: string | null;
@@ -1924,7 +1936,9 @@ function taskProps(
         ? map.slotProp.deep
         : fields.slot === "quick"
           ? map.slotProp.quick
-          : null,
+          : fields.slot === "calendar"
+            ? CALENDAR_SLOT
+            : null,
     );
   if (fields.minutes !== undefined && map.minutes)
     out[map.minutes] = { number: fields.minutes };
@@ -2122,8 +2136,9 @@ export async function applyAction(
             "deadline" | "want" | null,
         },
         slot: {
-          slot: (value === "deep" || value === "quick" ? value : null) as
-            "deep" | "quick" | null,
+          slot: (value === "deep" || value === "quick" || value === "calendar"
+            ? value
+            : null) as "deep" | "quick" | "calendar" | null,
         },
         minutes: { minutes: value === null ? null : Number(value) || 0 },
         category: { category: value },

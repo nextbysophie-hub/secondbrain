@@ -1189,6 +1189,78 @@ function park(todo: Todo, send: Send, day: string) {
     );
 }
 
+/** Moving a task between the day's two piles without taking it off the day. */
+function reslot(
+  todo: Todo,
+  slot: "deep" | "quick",
+  board: Board,
+  send: Send,
+  day: string,
+) {
+  if (todo.slot === slot) return;
+  const deepTaken = board.todos.filter(
+    (t) => t.slot === "deep" && !t.done && pickedOn(t, day),
+  ).length;
+  if (
+    slot === "deep" &&
+    deepTaken >= DEEP_CAP &&
+    !confirm(
+      `Today's three are already full. Make "${todo.title}" deep task number ${deepTaken + 1} anyway?`,
+    )
+  )
+    return;
+  send(
+    { action: "editTodo", id: todo.id, field: "slot", value: slot },
+    (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
+    }),
+  );
+}
+
+/** The email a to-do was made from, if it was: "Add to today" ticks the
+ *  inbox row off and copies its title onto a new task. */
+const emailFor = (todo: Todo, board: Board) =>
+  todo.source === "Email"
+    ? board.emails.find((e) => e.done && e.title === todo.title)
+    : undefined;
+
+/** Undoing an accidental "Add to today": a task made from an email goes back
+ *  in the inbox as it was; anything else just comes off the day. */
+function sendBack(todo: Todo, board: Board, send: Send, day: string) {
+  const email = emailFor(todo, board);
+  if (!email) return park(todo, send, day);
+  send({ action: "deleteTodo", id: todo.id }, (b) => ({
+    ...b,
+    todos: b.todos.filter((t) => t.id !== todo.id),
+  }));
+  send({ action: "emailDone", id: email.id, done: false }, (b) => ({
+    ...b,
+    emails: b.emails.map((x) => (x.id === email.id ? { ...x, done: false } : x)),
+  }));
+}
+
+/** True while a to-do is being dragged anywhere on the page. */
+function useTodoDrag() {
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const start = (e: DragEvent) => {
+      if (Array.from(e.dataTransfer?.types ?? []).includes("text/todo-id"))
+        setTimeout(() => setDragging(true), 0);
+    };
+    const end = () => setDragging(false);
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, []);
+  return dragging;
+}
+
 /** Everything that ran late in one go: the day it missed is dropped and the
  *  deadline moves to the coming Monday, so the whole lot sits in the waiting
  *  pile ready to be dragged into the week instead of glaring in red. */
@@ -1816,6 +1888,31 @@ function DeepRow({
         <ChaseIt todo={todo} board={board} send={send} day={day} />
         <button
           type="button"
+          onClick={() => toCalendar(todo, send, day)}
+          title="It's an appointment: put it on today's calendar"
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          → calendar
+        </button>
+        <button
+          type="button"
+          onClick={() => reslot(todo, "quick", board, send, day)}
+          title="Move it to the quick batch"
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          → quick
+        </button>
+        {emailFor(todo, board) ? (
+          <button
+            type="button"
+            onClick={() => sendBack(todo, board, send, day)}
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            back to inbox
+          </button>
+        ) : null}
+        <button
+          type="button"
           onClick={() => park(todo, send, day)}
           className="shrink-0 text-[12px] text-muted transition hover:text-ink"
         >
@@ -1878,6 +1975,25 @@ function QuickRow({
         {locked ? null : (
           <ChaseIt todo={todo} board={board} send={send} day={day} />
         )}
+        {locked ? null : (
+          <button
+            type="button"
+            onClick={() => reslot(todo, "deep", board, send, day)}
+            title="Make it one of the day's deep tasks"
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            → deep
+          </button>
+        )}
+        {!locked && emailFor(todo, board) ? (
+          <button
+            type="button"
+            onClick={() => sendBack(todo, board, send, day)}
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            back to inbox
+          </button>
+        ) : null}
         {locked ? null : (
           <button
             type="button"
@@ -2011,6 +2127,239 @@ const eventTime = (e: CalendarEvent) =>
         .toLowerCase();
 
 /** Meetings and plans already on the day, above the work that fits around them. */
+const AGENDA_TIME = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i;
+
+/** Minutes past midnight of the time written in an appointment's title. */
+const agendaAt = (title: string) => {
+  const m = AGENDA_TIME.exec(title);
+  if (!m) return null;
+  const h = (Number(m[1]) % 12) + (m[3].toLowerCase() === "p" ? 12 : 0);
+  return h * 60 + Number(m[2] ?? 0);
+};
+
+/** The title without the time, which already sits in the time column. */
+const agendaLabel = (title: string) =>
+  title
+    .replace(
+      /\s*(?:at\s+)?\b\d{1,2}(?::\d{2})?\s*[aApP]\.?[mM]\b(?:\s+[A-Z]{1,3}T\b)?/,
+      "",
+    )
+    .replace(/[\s,·-]+$/, "")
+    .trim() || title;
+
+const clockOf = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "am" : "pm"}`;
+};
+
+/** Taking a task out of the day's piles and onto its calendar. */
+function toCalendar(todo: Todo, send: Send, day: string) {
+  send(
+    { action: "editTodo", id: todo.id, field: "slot", value: "calendar" },
+    (b) => ({
+      ...b,
+      todos: b.todos.filter((t) => t.id !== todo.id),
+      agenda: [
+        ...(b.agenda ?? []),
+        { ...todo, slot: null, plan: pickedOn(todo, day) ? todo.plan : day },
+      ],
+    }),
+  );
+  if (!pickedOn(todo, day))
+    send({ action: "editTodo", id: todo.id, field: "plan", value: day }, (b) => b);
+}
+
+/** The top of Today: whatever Google has booked plus appointments she keeps
+ *  in the tracker, in time order. None of it counts against the three. */
+function TodayCalendar({
+  board,
+  send,
+  day,
+  events,
+  connected,
+}: {
+  board: Board;
+  send: Send;
+  day: string;
+  events: CalendarEvent[];
+  connected: boolean;
+}) {
+  const [title, setTitle] = useState("");
+  const [time, setTime] = useState("");
+  const [over, setOver] = useState(false);
+  const mine = (board.agenda ?? []).filter((t) => pickedOn(t, day));
+  const rows = [
+    ...events.map((e) => ({
+      key: e.id,
+      at: e.allDay
+        ? -1
+        : new Date(e.start).getHours() * 60 + new Date(e.start).getMinutes(),
+      event: e,
+      todo: null as Todo | null,
+    })),
+    ...mine.map((t) => ({
+      key: t.id,
+      at: agendaAt(t.title) ?? 24 * 60,
+      event: null as CalendarEvent | null,
+      todo: t,
+    })),
+  ].sort((a, b) => a.at - b.at);
+
+  const patchAgenda = (id: string, f: (t: Todo) => Todo | null) => (b: Board) => ({
+    ...b,
+    agenda: (b.agenda ?? [])
+      .map((t) => (t.id === id ? f(t) : t))
+      .filter((t): t is Todo => t !== null),
+  });
+
+  const add = () => {
+    const text = title.trim();
+    if (!text) return;
+    const [h, m] = time.split(":").map(Number);
+    const full = time && agendaAt(text) === null ? `${text}, ${clockOf(h * 60 + m)}` : text;
+    send(
+      { action: "addTodo", title: full, plan: day, due: day, slot: "calendar" },
+      (b) => ({
+        ...b,
+        agenda: [...(b.agenda ?? []), { ...newTodo(full, "quick", day), slot: null }],
+      }),
+    );
+    setTitle("");
+    setTime("");
+  };
+
+  return (
+    <section
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("text/todo-id")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!over) setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+          setOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const todo = board.todos.find(
+          (t) => t.id === e.dataTransfer.getData("text/todo-id"),
+        );
+        if (todo && !isFixed(todo)) toCalendar(todo, send, day);
+      }}
+      className={`card card-cal px-5 py-4 transition ${over ? "pile-over" : ""}`}
+    >
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
+          <span className="badge">▦</span>
+          {day === TODAY ? "Calendar for today" : "Calendar"}
+        </h3>
+        {connected ? null : (
+          <a className="text-[11px] text-muted hover:text-ink" href={connectCalendarHref()}>
+            Pull in Google Calendar →
+          </a>
+        )}
+      </div>
+      <div className="mt-2">
+        {rows.length ? null : (
+          <p className="py-1.5 text-[13px] text-muted">
+            {over ? "Let go to put it on the calendar" : "Nothing booked."}
+          </p>
+        )}
+        {rows.map(({ key, event, todo }) => {
+          const when = event
+            ? eventTime(event)
+            : agendaAt(todo!.title) !== null
+              ? clockOf(agendaAt(todo!.title)!)
+              : "";
+          return (
+            <div
+              key={key}
+              className="group flex items-center gap-3 border-b border-line/60 py-2 last:border-none"
+            >
+              <span className="w-[52px] shrink-0 text-[12px] text-muted">{when}</span>
+              {todo ? (
+                <Box
+                  on={todo.done}
+                  onChange={(done) =>
+                    send(
+                      { action: "toggleTodo", id: todo.id, done },
+                      patchAgenda(todo.id, (t) => ({ ...t, done })),
+                    )
+                  }
+                />
+              ) : null}
+              {event?.link ? (
+                <a
+                  href={event.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate text-[15px] hover:text-accent-2"
+                >
+                  {event.title}
+                </a>
+              ) : (
+                <span
+                  className={`min-w-0 flex-1 truncate text-[15px] ${todo?.done ? "text-muted line-through" : ""}`}
+                >
+                  {event ? event.title : agendaLabel(todo!.title)}
+                </span>
+              )}
+              {todo ? (
+                <button
+                  type="button"
+                  aria-label="Remove from the calendar"
+                  onClick={() =>
+                    send(
+                      { action: "deleteTodo", id: todo.id },
+                      patchAgenda(todo.id, () => null),
+                    )
+                  }
+                  className="row-actions shrink-0 text-[13px] text-muted transition hover:text-bad"
+                >
+                  ×
+                </button>
+              ) : (
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-faint">
+                  Google
+                </span>
+              )}
+            </div>
+          );
+        })}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            add();
+          }}
+          className="flex items-center gap-3 pt-2"
+        >
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            aria-label="Time"
+            className="w-[92px] shrink-0 rounded-lg border border-line-2 bg-transparent px-1.5 py-1 text-[12px] text-muted outline-none"
+          />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="+ Add an appointment"
+            className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted"
+          />
+          {title.trim() ? (
+            <button type="submit" className="btn btn-accent shrink-0">
+              Add
+            </button>
+          ) : null}
+        </form>
+      </div>
+    </section>
+  );
+}
+
 function EventList({ events, big }: { events: CalendarEvent[]; big?: boolean }) {
   if (!events.length) return null;
   return (
@@ -2552,6 +2901,30 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     );
   });
 
+  const [overPile, setOverPile] = useState<"deep" | "quick" | null>(null);
+  const pileDrop = (slot: "deep" | "quick") => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("text/todo-id")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (overPile !== slot) setOverPile(slot);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+        setOverPile(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOverPile(null);
+      const todo = board.todos.find(
+        (t) => t.id === e.dataTransfer.getData("text/todo-id"),
+      );
+      if (!todo || isFixed(todo) || todo === emails) return;
+      if (pickedOn(todo, day) && todo.slot) reslot(todo, slot, board, send, day);
+      else pick(todo, slot, send, day);
+    },
+  });
+
   const dashes = (n: number, cap: number, blue?: boolean) =>
     Array.from({ length: cap }, (_, k) => (
       <span
@@ -2633,6 +3006,14 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </div>
         </div>
 
+        <TodayCalendar
+          board={board}
+          send={send}
+          day={day}
+          events={dayEvents}
+          connected={cal.connected !== false}
+        />
+
         <WeekGoals board={board} send={send} day={day} />
 
         {nudge ? (
@@ -2667,13 +3048,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
 
         <DueReminders board={board} send={send} day={day} />
 
-        {dayEvents.length ? (
-          <section className="card px-5 py-3">
-            <EventList events={dayEvents} big />
-          </section>
-        ) : null}
-
-        <section className="card card-deep px-5 py-4">
+        <section
+          {...pileDrop("deep")}
+          className={`card card-deep px-5 py-4 transition ${overPile === "deep" ? "pile-over" : ""}`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
               <span className="badge badge-accent">◎</span>
@@ -2727,7 +3105,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </div>
         </section>
 
-        <section className="card card-quick px-5 py-4">
+        <section
+          {...pileDrop("quick")}
+          className={`card card-quick px-5 py-4 transition ${overPile === "quick" ? "pile-over" : ""}`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
               <span className="badge badge-blue">⚡</span>
@@ -7692,17 +8073,20 @@ function FlightDay({
  *  is marked done so it leaves the inbox lists. */
 function emailToDay(
   e: EmailItem,
-  slot: "deep" | "quick",
+  slot: "deep" | "quick" | "calendar",
   day: string,
   send: Send,
 ) {
   const due = e.date ?? day;
+  const todo = { ...newTodo(e.title, slot === "deep" ? "deep" : "quick", day), due, source: "Email" };
   send(
     { action: "emailToTodo", id: e.id, title: e.title, due, plan: day, slot },
     (b) => ({
       ...b,
       emails: b.emails.map((x) => (x.id === e.id ? { ...x, done: true } : x)),
-      todos: [...b.todos, { ...newTodo(e.title, slot, day), due, source: "Email" }],
+      ...(slot === "calendar"
+        ? { agenda: [...(b.agenda ?? []), { ...todo, slot: null }] }
+        : { todos: [...b.todos, todo] }),
     }),
   );
 }
@@ -7810,14 +8194,41 @@ function EmailItems({
   send: Send;
   day: string;
 }) {
-  const [slotFor, setSlotFor] = useState<Record<string, "deep" | "quick">>({});
+  const [slotFor, setSlotFor] = useState<
+    Record<string, "deep" | "quick" | "calendar">
+  >({});
+  const dragging = useTodoDrag();
+  const [over, setOver] = useState(false);
   if (!board.dbs.emails && board.dbs.task !== "demo") return null;
   const items = board.emails.filter((e) => {
     if (e.done) return false;
     const on = e.date ?? e.created;
     return day >= TODAY ? on <= day : on === day;
   });
-  if (!items.length) return null;
+  if (!items.length && !dragging) return null;
+
+  // A task dragged back here was added by mistake: one made from an email
+  // returns to the inbox, anything else comes off the day.
+  const drop = {
+    onDragOver: (ev: React.DragEvent) => {
+      if (!ev.dataTransfer.types.includes("text/todo-id")) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+      if (!over) setOver(true);
+    },
+    onDragLeave: (ev: React.DragEvent) => {
+      if (!ev.currentTarget.contains(ev.relatedTarget as Node | null))
+        setOver(false);
+    },
+    onDrop: (ev: React.DragEvent) => {
+      ev.preventDefault();
+      setOver(false);
+      const todo = board.todos.find(
+        (t) => t.id === ev.dataTransfer.getData("text/todo-id"),
+      );
+      if (todo && !isFixed(todo)) sendBack(todo, board, send, day);
+    },
+  };
 
   const patch = (id: string, fields: Partial<EmailItem>) => (b: Board) => ({
     ...b,
@@ -7826,20 +8237,30 @@ function EmailItems({
   const setDate = (e: EmailItem, date: string | null) => {
     send({ action: "emailDate", id: e.id, date }, patch(e.id, { date }));
   };
-  const promote = (e: EmailItem, slot: "deep" | "quick") =>
+  const promote = (e: EmailItem, slot: "deep" | "quick" | "calendar") =>
     emailToDay(e, slot, day, send);
 
   return (
-    <section className="card card-inbox px-4 py-4">
+    <section
+      {...drop}
+      className={`card card-inbox px-4 py-4 transition ${dragging ? "inbox-drop" : ""} ${over ? "pile-over" : ""}`}
+    >
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
           <span className="badge badge-bad">✉</span>
           From your inbox
         </h3>
-        <span className="pill-late">
-          {items.length === 1 ? "1 new" : `${items.length} new`}
-        </span>
+        {items.length ? (
+          <span className="pill-late">
+            {items.length === 1 ? "1 new" : `${items.length} new`}
+          </span>
+        ) : null}
       </div>
+      {dragging ? (
+        <p className="mt-2 rounded-xl border border-dashed border-bad/40 px-3 py-3 text-center text-[13px] text-bad">
+          {over ? "Let go to send it back" : "Added by mistake? Drop it here"}
+        </p>
+      ) : null}
       <div className="mt-1">
         {items.map((e) => {
           const slot = slotFor[e.id] ?? "quick";
@@ -7888,6 +8309,13 @@ function EmailItems({
                     onClick={() => setSlotFor({ ...slotFor, [e.id]: "quick" })}
                   >
                     Quick
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={slot === "calendar"}
+                    onClick={() => setSlotFor({ ...slotFor, [e.id]: "calendar" })}
+                  >
+                    Calendar
                   </button>
                 </span>
                 <button
