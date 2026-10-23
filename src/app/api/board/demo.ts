@@ -51,6 +51,9 @@ export function demoBoard() {
       { id: "d9", title: "Batch 3 reels", done: false, due: iso(1), plan: iso(1), kind: "want", slot: "deep", minutes: 240, category: "Work", priority: null, link: null, source: "Manual", goal: null, deal: null, fixed: false, every: null, url: "#" },
       { id: "d10", title: "Stretch before bed", done: true, due: iso(0), plan: null, kind: null, slot: null, minutes: 10, category: "Health", priority: null, link: null, source: "Manual", goal: null, deal: null, fixed: false, every: null, url: "#" },
     ],
+    agenda: [
+      { id: "c1", title: "Brownie vet appointment at Roots, 3:00 PM CT", done: false, due: iso(0), plan: iso(0), kind: null, slot: null, minutes: null, category: null, priority: null, link: null, source: "Email", goal: null, deal: null, fixed: false, every: null, url: "#" },
+    ],
     agent: [
       { id: "a1", title: "Book car detailing for Saturday", details: "Interior + exterior, somewhere in Austin, under $200.", due: iso(2), status: "Working", result: "", url: "#" },
       { id: "a2", title: "Find a dentist that takes my insurance", details: "", due: null, status: "Queued", result: "", url: "#" },
