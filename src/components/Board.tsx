@@ -1189,6 +1189,78 @@ function park(todo: Todo, send: Send, day: string) {
     );
 }
 
+/** Moving a task between the day's two piles without taking it off the day. */
+function reslot(
+  todo: Todo,
+  slot: "deep" | "quick",
+  board: Board,
+  send: Send,
+  day: string,
+) {
+  if (todo.slot === slot) return;
+  const deepTaken = board.todos.filter(
+    (t) => t.slot === "deep" && !t.done && pickedOn(t, day),
+  ).length;
+  if (
+    slot === "deep" &&
+    deepTaken >= DEEP_CAP &&
+    !confirm(
+      `Today's three are already full. Make "${todo.title}" deep task number ${deepTaken + 1} anyway?`,
+    )
+  )
+    return;
+  send(
+    { action: "editTodo", id: todo.id, field: "slot", value: slot },
+    (b) => ({
+      ...b,
+      todos: b.todos.map((t) => (t.id === todo.id ? { ...t, slot } : t)),
+    }),
+  );
+}
+
+/** The email a to-do was made from, if it was: "Add to today" ticks the
+ *  inbox row off and copies its title onto a new task. */
+const emailFor = (todo: Todo, board: Board) =>
+  todo.source === "Email"
+    ? board.emails.find((e) => e.done && e.title === todo.title)
+    : undefined;
+
+/** Undoing an accidental "Add to today": a task made from an email goes back
+ *  in the inbox as it was; anything else just comes off the day. */
+function sendBack(todo: Todo, board: Board, send: Send, day: string) {
+  const email = emailFor(todo, board);
+  if (!email) return park(todo, send, day);
+  send({ action: "deleteTodo", id: todo.id }, (b) => ({
+    ...b,
+    todos: b.todos.filter((t) => t.id !== todo.id),
+  }));
+  send({ action: "emailDone", id: email.id, done: false }, (b) => ({
+    ...b,
+    emails: b.emails.map((x) => (x.id === email.id ? { ...x, done: false } : x)),
+  }));
+}
+
+/** True while a to-do is being dragged anywhere on the page. */
+function useTodoDrag() {
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const start = (e: DragEvent) => {
+      if (Array.from(e.dataTransfer?.types ?? []).includes("text/todo-id"))
+        setTimeout(() => setDragging(true), 0);
+    };
+    const end = () => setDragging(false);
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, []);
+  return dragging;
+}
+
 /** Everything that ran late in one go: the day it missed is dropped and the
  *  deadline moves to the coming Monday, so the whole lot sits in the waiting
  *  pile ready to be dragged into the week instead of glaring in red. */
@@ -1816,6 +1888,23 @@ function DeepRow({
         <ChaseIt todo={todo} board={board} send={send} day={day} />
         <button
           type="button"
+          onClick={() => reslot(todo, "quick", board, send, day)}
+          title="Move it to the quick batch"
+          className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+        >
+          → quick
+        </button>
+        {emailFor(todo, board) ? (
+          <button
+            type="button"
+            onClick={() => sendBack(todo, board, send, day)}
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            back to inbox
+          </button>
+        ) : null}
+        <button
+          type="button"
           onClick={() => park(todo, send, day)}
           className="shrink-0 text-[12px] text-muted transition hover:text-ink"
         >
@@ -1878,6 +1967,25 @@ function QuickRow({
         {locked ? null : (
           <ChaseIt todo={todo} board={board} send={send} day={day} />
         )}
+        {locked ? null : (
+          <button
+            type="button"
+            onClick={() => reslot(todo, "deep", board, send, day)}
+            title="Make it one of the day's deep tasks"
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            → deep
+          </button>
+        )}
+        {!locked && emailFor(todo, board) ? (
+          <button
+            type="button"
+            onClick={() => sendBack(todo, board, send, day)}
+            className="shrink-0 text-[12px] text-muted transition hover:text-ink"
+          >
+            back to inbox
+          </button>
+        ) : null}
         {locked ? null : (
           <button
             type="button"
@@ -2552,6 +2660,30 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
     );
   });
 
+  const [overPile, setOverPile] = useState<"deep" | "quick" | null>(null);
+  const pileDrop = (slot: "deep" | "quick") => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("text/todo-id")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (overPile !== slot) setOverPile(slot);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+        setOverPile(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOverPile(null);
+      const todo = board.todos.find(
+        (t) => t.id === e.dataTransfer.getData("text/todo-id"),
+      );
+      if (!todo || isFixed(todo) || todo === emails) return;
+      if (pickedOn(todo, day) && todo.slot) reslot(todo, slot, board, send, day);
+      else pick(todo, slot, send, day);
+    },
+  });
+
   const dashes = (n: number, cap: number, blue?: boolean) =>
     Array.from({ length: cap }, (_, k) => (
       <span
@@ -2673,7 +2805,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </section>
         ) : null}
 
-        <section className="card card-deep px-5 py-4">
+        <section
+          {...pileDrop("deep")}
+          className={`card card-deep px-5 py-4 transition ${overPile === "deep" ? "pile-over" : ""}`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
               <span className="badge badge-accent">◎</span>
@@ -2727,7 +2862,10 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
           </div>
         </section>
 
-        <section className="card card-quick px-5 py-4">
+        <section
+          {...pileDrop("quick")}
+          className={`card card-quick px-5 py-4 transition ${overPile === "quick" ? "pile-over" : ""}`}
+        >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
               <span className="badge badge-blue">⚡</span>
@@ -7811,13 +7949,38 @@ function EmailItems({
   day: string;
 }) {
   const [slotFor, setSlotFor] = useState<Record<string, "deep" | "quick">>({});
+  const dragging = useTodoDrag();
+  const [over, setOver] = useState(false);
   if (!board.dbs.emails && board.dbs.task !== "demo") return null;
   const items = board.emails.filter((e) => {
     if (e.done) return false;
     const on = e.date ?? e.created;
     return day >= TODAY ? on <= day : on === day;
   });
-  if (!items.length) return null;
+  if (!items.length && !dragging) return null;
+
+  // A task dragged back here was added by mistake: one made from an email
+  // returns to the inbox, anything else comes off the day.
+  const drop = {
+    onDragOver: (ev: React.DragEvent) => {
+      if (!ev.dataTransfer.types.includes("text/todo-id")) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+      if (!over) setOver(true);
+    },
+    onDragLeave: (ev: React.DragEvent) => {
+      if (!ev.currentTarget.contains(ev.relatedTarget as Node | null))
+        setOver(false);
+    },
+    onDrop: (ev: React.DragEvent) => {
+      ev.preventDefault();
+      setOver(false);
+      const todo = board.todos.find(
+        (t) => t.id === ev.dataTransfer.getData("text/todo-id"),
+      );
+      if (todo && !isFixed(todo)) sendBack(todo, board, send, day);
+    },
+  };
 
   const patch = (id: string, fields: Partial<EmailItem>) => (b: Board) => ({
     ...b,
@@ -7830,16 +7993,26 @@ function EmailItems({
     emailToDay(e, slot, day, send);
 
   return (
-    <section className="card card-inbox px-4 py-4">
+    <section
+      {...drop}
+      className={`card card-inbox px-4 py-4 transition ${dragging ? "inbox-drop" : ""} ${over ? "pile-over" : ""}`}
+    >
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-2.5 text-[13px] font-semibold">
           <span className="badge badge-bad">✉</span>
           From your inbox
         </h3>
-        <span className="pill-late">
-          {items.length === 1 ? "1 new" : `${items.length} new`}
-        </span>
+        {items.length ? (
+          <span className="pill-late">
+            {items.length === 1 ? "1 new" : `${items.length} new`}
+          </span>
+        ) : null}
       </div>
+      {dragging ? (
+        <p className="mt-2 rounded-xl border border-dashed border-bad/40 px-3 py-3 text-center text-[13px] text-bad">
+          {over ? "Let go to send it back" : "Added by mistake? Drop it here"}
+        </p>
+      ) : null}
       <div className="mt-1">
         {items.map((e) => {
           const slot = slotFor[e.id] ?? "quick";
