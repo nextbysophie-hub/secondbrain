@@ -8551,7 +8551,11 @@ function FloatingTrash({ board, send }: { board: Board; send: Send }) {
   useEffect(() => {
     const start = (e: DragEvent) => {
       const types = Array.from(e.dataTransfer?.types ?? []);
-      if (types.includes("text/todo-id") || types.includes("text/deal"))
+      if (
+        types.includes("text/todo-id") ||
+        types.includes("text/deal") ||
+        types.includes("text/hub-video")
+      )
         // Wait a tick: changing the page inside dragstart can cancel the drag.
         setTimeout(() => setDragging(true), 0);
     };
@@ -8584,9 +8588,19 @@ function FloatingTrash({ board, send }: { board: Board; send: Send }) {
     const deal = board.deals.find(
       (d) => d.id === e.dataTransfer.getData("text/deal"),
     );
-    if (!todo && !deal) return;
+    const video = board.hub?.videos?.find(
+      (v) => v.id === e.dataTransfer.getData("text/hub-video"),
+    );
+    if (!todo && !deal && !video) return;
     if (deal && !confirm(`Delete "${deal.brand}" from the tracker?`)) return;
-    const label = todo ? todo.title : (deal?.brand ?? "");
+    // Ideas go straight in; anything already scripted asks first.
+    if (
+      video &&
+      !["Idea", "Drafts", "Idea on Content Calendar", null].includes(video.status) &&
+      !confirm(`Delete "${video.title}" (${video.status}) from the Content Calendar?`)
+    )
+      return;
+    const label = todo ? todo.title : deal ? deal.brand : (video?.title ?? "");
     const r = can.current?.getBoundingClientRect();
     const tx = r ? r.left + r.width / 2 : e.clientX;
     const ty = r ? r.top + r.height * 0.3 : e.clientY;
@@ -8611,6 +8625,18 @@ function FloatingTrash({ board, send }: { board: Board; send: Send }) {
         ...b,
         deals: b.deals.filter((d) => d.id !== deal.id),
       }));
+    else if (video)
+      send({ action: "hubArchive", id: video.id }, (b) =>
+        b.hub
+          ? {
+              ...b,
+              hub: {
+                ...b.hub,
+                videos: b.hub.videos?.filter((v) => v.id !== video.id) ?? null,
+              },
+            }
+          : b,
+      );
   };
 
   const shown = dragging || toss !== null;
