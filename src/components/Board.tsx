@@ -2815,6 +2815,57 @@ function CountGoals({ board, send }: { board: Board; send: Send }) {
   );
 }
 
+/** Always there, however full the day is: deep while there's room, else quick. */
+function TypeToDay({
+  send,
+  day,
+  deepCount,
+}: {
+  send: Send;
+  day: string;
+  deepCount: number;
+}) {
+  const [draft, setDraft] = useState("");
+  const into = deepCount < DEEP_CAP ? "deep" : "quick";
+  const add = () => {
+    const title = draft.trim();
+    if (!title) return;
+    setDraft("");
+    send(
+      {
+        action: "addTodo",
+        title,
+        slot: into,
+        plan: day,
+        kind: into === "deep" ? "deadline" : "want",
+      },
+      (b) => ({ ...b, todos: [...b.todos, newTodo(title, into, day)] }),
+    );
+  };
+  return (
+    <div className="card flex items-center gap-3 px-4 py-2.5">
+      <span className="text-[18px] leading-none text-muted">+</span>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && add()}
+        enterKeyHint="done"
+        aria-label={`Type a task for ${day === TODAY ? "today" : dayStamp(day)}`}
+        placeholder={`Type a task for ${day === TODAY ? "today" : "this day"}, press Enter`}
+        className="min-w-0 flex-1 bg-transparent py-1 text-[15px] outline-none placeholder:text-muted"
+      />
+      <button
+        type="button"
+        onClick={add}
+        disabled={!draft.trim()}
+        className="btn shrink-0 disabled:opacity-40"
+      >
+        Add {into === "deep" ? "to the three" : "to quick batch"}
+      </button>
+    </div>
+  );
+}
+
 function TodayPane({ board, send }: { board: Board; send: Send }) {
   const [day, setDay] = useState(TODAY);
   const [hours, setHours] = useState("");
@@ -3047,6 +3098,8 @@ function TodayPane({ board, send }: { board: Board; send: Send }) {
         ) : null}
 
         <DueReminders board={board} send={send} day={day} />
+
+        <TypeToDay send={send} day={day} deepCount={deep.length} />
 
         <section
           {...pileDrop("deep")}
