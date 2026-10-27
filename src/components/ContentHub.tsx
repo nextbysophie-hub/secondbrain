@@ -911,6 +911,168 @@ function Assets({ hub, send }: { hub: Hub; send: Send }) {
   );
 }
 
+/* ------------------------------------------------------------ editors */
+
+/** Select options that say whether an editor is needed rather than who. */
+const NOT_A_PERSON = ["Yes", "No", "Editor"];
+const editorOf = (v: HubVideo) => (v.editor && !NOT_A_PERSON.includes(v.editor) ? v.editor : null);
+const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.id, s.label])) as Record<StageId, string>;
+
+/** Who is working on what: one column per editor plus the ideas nobody has yet. */
+export function EditorsHub({ board, send }: { board: Board; send: Send }) {
+  const hub = board.hub;
+  const [over, setOver] = useState<string | null>(null);
+  const [showPosted, setShowPosted] = useState(false);
+  const [added, setAdded] = useState<string[]>([]);
+  const [newName, setNewName] = useState("");
+  if (!hub) return <p className="py-10 text-center text-[14px] text-muted">Couldn&rsquo;t read the Content Hub from Notion. Try syncing again.</p>;
+  if (!hub.videos) return <NotShared name="Content Calendar" />;
+  const videos = hub.videos;
+  const people = [
+    ...new Set([
+      ...(hub.editors ?? []).filter((e) => !NOT_A_PERSON.includes(e)),
+      ...videos.map(editorOf).filter((e): e is string => !!e),
+      ...added,
+    ]),
+  ];
+  const live = (v: HubVideo) => showPosted || stageOf(v.status) !== "posted";
+  const assign = (id: string, editor: string | null) => {
+    const v = videos.find((x) => x.id === id);
+    if (!v || editorOf(v) === editor) return;
+    send({ action: "hubVideoEditor", id, editor }, patchVideo(id, { editor }));
+  };
+  const addIdea = (title: string, editor: string | null) =>
+    send({ action: "hubAddVideo", title, status: "Idea", editor }, (b) =>
+      withHub(b, (h) => ({
+        ...h,
+        videos: [
+          { id: `tmp-${Date.now()}`, title, status: "Idea", type: null, editor, format: null, film: null, post: null, turnIn: null, postUrl: null, url: "#" },
+          ...(h.videos ?? []),
+        ],
+      })),
+    );
+  const addPerson = () => {
+    const name = newName.trim().replace(/,/g, "");
+    if (!name) return;
+    setNewName("");
+    if (!people.includes(name)) setAdded([...added, name]);
+  };
+  const columns: { key: string; label: string; editor: string | null }[] = [
+    { key: "__none", label: "Unassigned", editor: null },
+    ...people.map((p) => ({ key: p, label: p, editor: p })),
+  ];
+  const byStage = (a: HubVideo, b: HubVideo) =>
+    RANK[stageOf(b.status)] - RANK[stageOf(a.status)] || (a.post ?? "9999").localeCompare(b.post ?? "9999");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13px] text-muted">Who is working on what. Drag a card onto an editor to hand it over, or tap it to pick one.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={`hub-pill ${showPosted ? "on" : ""}`} onClick={() => setShowPosted(!showPosted)}>
+            {showPosted ? "Hide posted" : "Show posted"}
+          </button>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addPerson()}
+            placeholder="+ Add an editor"
+            className="hub-input w-40"
+          />
+        </div>
+      </div>
+      <div className="hub-cols">
+        {columns.map((c) => {
+          const list = videos.filter((v) => editorOf(v) === c.editor && live(v)).sort(byStage);
+          const working = list.filter((v) => !["posted", "ready", "hold"].includes(stageOf(v.status))).length;
+          return (
+            <section
+              key={c.key}
+              className={`hub-col ${over === c.key ? "is-over" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOver(c.key);
+              }}
+              onDragLeave={() => setOver(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setOver(null);
+                const id = e.dataTransfer.getData("text/hub-video");
+                if (id) assign(id, c.editor);
+              }}
+            >
+              <header className="mb-2 flex items-center justify-between px-1">
+                <h3 className="text-[13px] font-semibold">{c.label}</h3>
+                <span className="text-[12px] text-muted">{c.editor ? `${working} in progress` : list.length}</span>
+              </header>
+              <div className="mb-2">
+                <AddLine placeholder={c.editor ? `New idea for ${c.label.split(" ")[0]}…` : "New idea…"} onAdd={(t) => addIdea(t, c.editor)} />
+              </div>
+              <div className="space-y-2">
+                {list.map((v) => (
+                  <EditorCard key={v.id} v={v} send={send} people={people} onAssign={assign} />
+                ))}
+                {!list.length ? <p className="px-1 py-3 text-[12.5px] text-faint">Drop a card here</p> : null}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EditorCard({
+  v,
+  send,
+  people,
+  onAssign,
+}: {
+  v: HubVideo;
+  send: Send;
+  people: string[];
+  onAssign: (id: string, editor: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const stage = stageOf(v.status);
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/hub-video", v.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onClick={() => setOpen(!open)}
+      className="hub-card cursor-pointer"
+    >
+      <p className="text-[13.5px] font-semibold leading-snug">{v.title}</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <span className={`ci-tag hub-st-${stage}`}>{STAGE_LABEL[stage]}</span>
+        {v.post ? <span className="ci-tag hub-tag-post">posts {short(v.post)}</span> : null}
+        {formatOf(v) ? <span className="ci-tag hub-tag-fmt">{formatOf(v)}</span> : null}
+      </div>
+      {open ? (
+        <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted">
+            Editor
+            {[...people, null].map((p) => (
+              <button
+                key={p ?? "none"}
+                type="button"
+                className={`hub-pill hub-pill-dark ${editorOf(v) === p ? "on" : ""}`}
+                onClick={() => onAssign(v.id, p)}
+              >
+                {p ?? "Nobody"}
+              </button>
+            ))}
+          </div>
+          <VideoDetail v={v} send={send} onClose={() => setOpen(false)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- pane */
 
 const VIEWS = [

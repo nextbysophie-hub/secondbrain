@@ -48,6 +48,8 @@ export type HubAsset = {
 export type Hub = {
   videos: HubVideo[] | null;
   statuses: string[];
+  /** Options of the Content Calendar's "Editor?" select. */
+  editors: string[];
   freebies: HubFreebie[] | null;
   assets: HubAsset[] | null;
   assetTypes: string[];
@@ -59,7 +61,8 @@ export type HubAction =
   | { action: "hubVideoStatus"; id: string; status: string }
   | { action: "hubVideoPost"; id: string; date: string | null }
   | { action: "hubVideoFormat"; id: string; format: string | null }
-  | { action: "hubAddVideo"; title: string; status: string }
+  | { action: "hubVideoEditor"; id: string; editor: string | null }
+  | { action: "hubAddVideo"; title: string; status: string; editor?: string | null }
   | {
       action: "hubFreebie";
       id: string;
@@ -145,10 +148,11 @@ async function options(token: string, dbId: string, prop: string): Promise<strin
 }
 
 async function readVideos(token: string, dbId: string | null) {
-  if (!dbId) return { videos: null, statuses: [] };
-  const [list, statuses] = await Promise.all([
+  if (!dbId) return { videos: null, statuses: [], editors: [] };
+  const [list, statuses, editors] = await Promise.all([
     rows(token, dbId, [{ timestamp: "created_time", direction: "descending" }]),
     options(token, dbId, "Status"),
+    options(token, dbId, "Editor?"),
   ]);
   const videos: HubVideo[] = list.map((r) => {
     const p = r.properties;
@@ -166,7 +170,7 @@ async function readVideos(token: string, dbId: string | null) {
       url: r.url,
     };
   });
-  return { videos: videos.filter((v) => v.title), statuses };
+  return { videos: videos.filter((v) => v.title), statuses, editors };
 }
 
 async function readFreebies(token: string, dbId: string | null): Promise<HubFreebie[] | null> {
@@ -209,7 +213,7 @@ async function readAssets(token: string, dbId: string | null) {
 export async function readHub(token: string): Promise<Hub> {
   const dbs = await hubDbs(token);
   const [v, freebies, a] = await Promise.all([
-    readVideos(token, dbs.calendar).catch(() => ({ videos: null, statuses: [] })),
+    readVideos(token, dbs.calendar).catch(() => ({ videos: null, statuses: [], editors: [] })),
     readFreebies(token, dbs.freebies).catch(() => null),
     readAssets(token, dbs.assets).catch(() => ({ assets: null, assetTypes: [] })),
   ]);
@@ -243,10 +247,14 @@ export async function applyHubAction(token: string, a: HubAction): Promise<void>
     case "hubVideoFormat":
       await update(token, a.id, { Format: { select: a.format ? { name: a.format } : null } });
       return;
+    case "hubVideoEditor":
+      await update(token, a.id, { "Editor?": { select: a.editor ? { name: a.editor } : null } });
+      return;
     case "hubAddVideo":
       await create(token, dbs.calendar, {
         "Content name": { title: [{ text: { content: a.title } }] },
         Status: { status: { name: a.status } },
+        ...(a.editor ? { "Editor?": { select: { name: a.editor } } } : {}),
       });
       return;
     case "hubFreebie": {
