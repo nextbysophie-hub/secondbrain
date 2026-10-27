@@ -61,6 +61,7 @@ export function demoBoard() {
     ],
     hub: {
       statuses: ["Drafts", "Idea", "Scripted", "Filming", "Editing", "Approved for publishing", "Scheduled", "Published", "On hold"],
+      editors: ["Yes", "No", "Editor", "Me", "Bernal", "Chandan Deshmukh", "Trial"],
       videos: [
         { id: "v1", title: "AI Agents for Dummies — Tokens Part 2", status: "Editing", type: "AI agents for dummies", editor: "Chandan Deshmukh", format: "Talking head", film: "2026-10-04", post: "2026-12-01", turnIn: null, postUrl: null, url: "#" },
         { id: "v2", title: "LLMs explained for dummies", status: "Approved for publishing", type: "AI agents for dummies", editor: "Bernal", format: "Yap", film: "2026-10-04", post: "2026-12-02", turnIn: null, postUrl: null, url: "#" },
