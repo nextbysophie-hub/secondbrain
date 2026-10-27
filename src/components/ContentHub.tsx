@@ -34,7 +34,7 @@ const isReady = (v: HubVideo) => RANK[stageOf(v.status)] >= RANK.ready;
  *  counting pieces that have reached at least that stage. */
 const FORMATS = [
   { id: "Carousel", label: "Carousels", who: "swipe posts", target: 10, steps: [["Written", "scripted"], ["Designed", "editing"], ["Approved", "ready"]] },
-  { id: "Yap", label: "Yaps", who: "Brent Cooper style · easy edit · Bernal", target: 10, steps: [["Scripted", "scripted"], ["Filmed", "editing"], ["Edited", "ready"]] },
+  { id: "Yap", label: "Yaps", who: "Brent Cooper style · easy edit", target: 10, steps: [["Scripted", "scripted"], ["Filmed", "editing"], ["Edited", "ready"]] },
   { id: "Talking head", label: "Talking heads", who: "fully edited · Chandan", target: 10, steps: [["Scripted", "scripted"], ["Filmed", "editing"], ["Edited", "ready"]] },
 ] as const;
 const WEIGHT: Record<StageId, number> = { idea: 0.1, scripted: 0.3, filming: 0.5, editing: 0.75, ready: 1, posted: 1, hold: 0 };
@@ -915,6 +915,8 @@ function Assets({ hub, send }: { hub: Hub; send: Send }) {
 
 /** Select options that say whether an editor is needed rather than who. */
 const NOT_A_PERSON = ["Yes", "No", "Editor"];
+/** The editors she works with now; anyone else's cards wait in Unassigned. */
+const TEAM = ["Chandan Deshmukh", "Muskan", "Momin"];
 const editorOf = (v: HubVideo) => (v.editor && !NOT_A_PERSON.includes(v.editor) ? v.editor : null);
 const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.id, s.label])) as Record<StageId, string>;
 
@@ -928,17 +930,15 @@ export function EditorsHub({ board, send }: { board: Board; send: Send }) {
   if (!hub) return <p className="py-10 text-center text-[14px] text-muted">Couldn&rsquo;t read the Content Hub from Notion. Try syncing again.</p>;
   if (!hub.videos) return <NotShared name="Content Calendar" />;
   const videos = hub.videos;
-  const people = [
-    ...new Set([
-      ...(hub.editors ?? []).filter((e) => !NOT_A_PERSON.includes(e)),
-      ...videos.map(editorOf).filter((e): e is string => !!e),
-      ...added,
-    ]),
-  ];
+  const people = [...new Set([...TEAM, ...added])];
+  const columnOf = (v: HubVideo) => {
+    const e = editorOf(v);
+    return e && people.includes(e) ? e : null;
+  };
   const live = (v: HubVideo) => showPosted || stageOf(v.status) !== "posted";
   const assign = (id: string, editor: string | null) => {
     const v = videos.find((x) => x.id === id);
-    if (!v || editorOf(v) === editor) return;
+    if (!v || columnOf(v) === editor) return;
     send({ action: "hubVideoEditor", id, editor }, patchVideo(id, { editor }));
   };
   const addIdea = (title: string, editor: string | null) =>
@@ -959,7 +959,7 @@ export function EditorsHub({ board, send }: { board: Board; send: Send }) {
   };
   const columns: { key: string; label: string; editor: string | null }[] = [
     { key: "__none", label: "Unassigned", editor: null },
-    ...people.map((p) => ({ key: p, label: p, editor: p })),
+    ...people.map((p) => ({ key: p, label: p.split(" ")[0], editor: p })),
   ];
   const byStage = (a: HubVideo, b: HubVideo) =>
     RANK[stageOf(b.status)] - RANK[stageOf(a.status)] || (a.post ?? "9999").localeCompare(b.post ?? "9999");
@@ -983,7 +983,7 @@ export function EditorsHub({ board, send }: { board: Board; send: Send }) {
       </div>
       <div className="hub-cols">
         {columns.map((c) => {
-          const list = videos.filter((v) => editorOf(v) === c.editor && live(v)).sort(byStage);
+          const list = videos.filter((v) => columnOf(v) === c.editor && live(v)).sort(byStage);
           const working = list.filter((v) => !["posted", "ready", "hold"].includes(stageOf(v.status))).length;
           return (
             <section
@@ -1006,7 +1006,7 @@ export function EditorsHub({ board, send }: { board: Board; send: Send }) {
                 <span className="text-[12px] text-muted">{c.editor ? `${working} in progress` : list.length}</span>
               </header>
               <div className="mb-2">
-                <AddLine placeholder={c.editor ? `New idea for ${c.label.split(" ")[0]}…` : "New idea…"} onAdd={(t) => addIdea(t, c.editor)} />
+                <AddLine placeholder={c.editor ? `New idea for ${c.label}…` : "New idea…"} onAdd={(t) => addIdea(t, c.editor)} />
               </div>
               <div className="space-y-2">
                 {list.map((v) => (
@@ -1048,6 +1048,7 @@ function EditorCard({
       <p className="text-[13.5px] font-semibold leading-snug">{v.title}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <span className={`ci-tag hub-st-${stage}`}>{STAGE_LABEL[stage]}</span>
+        {editorOf(v) && !people.includes(editorOf(v) as string) ? <span className="ci-tag">was {editorOf(v)}</span> : null}
         {v.post ? <span className="ci-tag hub-tag-post">posts {short(v.post)}</span> : null}
         {formatOf(v) ? <span className="ci-tag hub-tag-fmt">{formatOf(v)}</span> : null}
       </div>
@@ -1062,7 +1063,7 @@ function EditorCard({
                 className={`hub-pill hub-pill-dark ${editorOf(v) === p ? "on" : ""}`}
                 onClick={() => onAssign(v.id, p)}
               >
-                {p ?? "Nobody"}
+                {p ? p.split(" ")[0] : "Nobody"}
               </button>
             ))}
           </div>
