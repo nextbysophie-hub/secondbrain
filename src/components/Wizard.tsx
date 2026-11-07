@@ -5,6 +5,7 @@ import { Explain } from "@/components/Explain";
 import { HelperChat } from "@/components/HelperChat";
 import {
   Databases,
+  DevinDashboard,
   Done,
   HostedLink,
   HostingChoice,
@@ -50,6 +51,7 @@ const SLIDE_TINTS: [string, string][] = [
   ["rgba(176, 144, 111, 0.30)", "rgba(255, 199, 60, 0.34)"], // tan + yellow
   ["rgba(134, 158, 237, 0.28)", "rgba(137, 46, 26, 0.14)"], // periwinkle + rust
   ["rgba(255, 199, 60, 0.40)", "rgba(134, 158, 237, 0.30)"], // yellow + periwinkle
+  ["rgba(176, 144, 111, 0.32)", "rgba(134, 158, 237, 0.30)"], // tan + periwinkle
   ["rgba(255, 199, 60, 0.44)", "rgba(255, 199, 60, 0.30)"], // finish line: all yellow
 ];
 
@@ -57,6 +59,7 @@ const TAIL_STEPS: Step[] = [
   { id: "shortcut-idea", kicker: "Step 5", title: "Build the “Capture Idea” shortcut", Body: ShortcutIdea },
   { id: "shortcut-task", kicker: "Step 6", title: "Build the “Capture To-do” shortcut", Body: ShortcutTask },
   { id: "test", kicker: "Step 7", title: "Test it", Body: TestIt },
+  { id: "devin-dashboard", kicker: "Bonus", title: "Build your own dashboard in Devin", Body: DevinDashboard },
   { id: "done", kicker: "You're done", title: "Your second brain is live", Body: Done },
 ];
 
