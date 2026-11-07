@@ -312,7 +312,7 @@ const EXPLAINERS: Record<string, { question: string; body: ReactNode }> = {
         </p>
         <p>
           Your dashboard reads the same two Notion tables Siri writes into, so anything you say out loud shows up
-          there too. Want a change later? Just tell Devin. That&apos;s how my own dashboard got built.
+          there too. Want a change later? Just tell Devin. That&apos;s how I built my own.
         </p>
       </>
     ),

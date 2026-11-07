@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useState } from "react";
 import { Button, Callout, Copyable, Field, NumberedStep, Spinner } from "./ui";
 import { LogicForDummies } from "./Explain";
-import { Copy } from "./GuideKit";
 import { PhoneHandoff } from "./PhoneHandoff";
 import { SHORTCUT_LINKS, WizardState, captureUrl, vercelDeployUrl } from "@/lib/wizard";
 
@@ -952,107 +951,42 @@ export function TestIt({ s, set, next, origin }: StepProps) {
   );
 }
 
-function devinPrompt(s: WizardState): string {
-  return [
-    "Build me a personal dashboard website for my second brain. It reads and writes my two Notion databases:",
-    `- Content Ideas (database ID: ${s.contentDb?.id ?? "paste it here"})`,
-    `- To-dos (database ID: ${s.taskDb?.id ?? "paste it here"})`,
-    "My Notion key is saved in your secrets as NOTION_TOKEN and my Vercel key as VERCEL_TOKEN.",
-    "",
-    "What I want on it:",
-    "1. A Today list with my to-dos. Ticking one off marks it done in Notion.",
-    "2. My idea inbox, newest first, with a button to move an idea out of Inbox.",
-    "3. A box at the top to type a quick to-do or idea.",
-    "4. Clean and simple, great on my phone, warm colors (cream, brown, mustard).",
-    "",
-    "Keep my Notion key on the server, never in the page. Save the code in a new GitHub repo for me, put it live on Vercel behind a private link only I know, then send me the link and tell me in plain English how to add it to my iPhone home screen.",
-  ].join("\n");
-}
+export const DEVIN_WAITLIST_URL = "https://nextbysophie.com/devin-dashboard";
 
-const DEVIN_TWEAKS = [
-  "Add a habit tracker with three habits I tick every day: water, walk, read.",
-  "Add a weekly view so I can drag to-dos onto the day I'll do them.",
-  "Make the Today list show only my top 3, and hide the rest under a 'later' button.",
-];
-
-export function DevinDashboard({ s, next }: StepProps) {
+export function DevinDashboard({ next }: StepProps) {
   return (
     <div className="space-y-7">
       <p className="text-[17px] leading-relaxed text-ink/80">
-        Siri fills your Notion. Now give yourself somewhere nice to look at it. Devin is an AI engineer: you tell it
-        what you want in plain English, it writes the code and puts it online.{" "}
-        <strong className="text-ink">You don&apos;t touch any code.</strong> Do this part on your laptop.
+        Siri fills your Notion. Next comes somewhere nice to look at it: your own dashboard, built with Devin, an AI
+        engineer you talk to in plain English. <strong className="text-ink">You don&apos;t touch any code.</strong>
       </p>
 
-      <ol className="space-y-4">
-        <NumberedStep n={1}>
-          Go to{" "}
-          <a className="text-accent-2 underline" href="https://app.devin.ai" target="_blank" rel="noreferrer">
-            app.devin.ai
-          </a>{" "}
-          and sign up. Signing in with Google is fastest.
-        </NumberedStep>
-        <NumberedStep n={2}>
-          Connect GitHub so Devin has somewhere to save your dashboard: in Devin, click <strong>Settings</strong> →{" "}
-          <strong>Integrations</strong> → <strong>GitHub</strong> → <strong>Connect</strong>. No GitHub account? Make
-          one free at{" "}
-          <a className="text-accent-2 underline" href="https://github.com/signup" target="_blank" rel="noreferrer">
-            github.com/signup
-          </a>
-          .
-        </NumberedStep>
-        <NumberedStep n={3}>
-          Make a Vercel key so Devin can put the site online: open{" "}
-          <a
-            className="text-accent-2 underline"
-            href="https://vercel.com/account/settings/tokens"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Vercel → Tokens
-          </a>
-          , click <strong>Create</strong>, name it <span className="font-mono">devin</span>, and copy the key it shows
-          you. If you skipped Vercel earlier, sign up there first. It&apos;s free.
-        </NumberedStep>
-        <NumberedStep n={4}>
-          Give Devin your two keys: open{" "}
-          <a
-            className="text-accent-2 underline"
-            href="https://app.devin.ai/settings/secrets"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Devin → Secrets
-          </a>{" "}
-          and click <strong>Add secret</strong> twice. Name the first one <span className="font-mono">NOTION_TOKEN</span>{" "}
-          and paste your Notion key. Name the second one <span className="font-mono">VERCEL_TOKEN</span> and paste the
-          Vercel key.
-        </NumberedStep>
-        <NumberedStep n={5}>
-          Go back to Devin&apos;s home page, paste the prompt below into the box, and hit send. Grab a coffee. Devin
-          messages you with your link when it&apos;s done.
-        </NumberedStep>
-      </ol>
-
-      {s.token ? <Copyable label="Your Notion key (for NOTION_TOKEN)" value={s.token} /> : null}
-
-      <Callout tone="warn" title="Keys go on the Secrets page, never in the chat">
-        The Secrets page keeps them locked away. Anything you type in the chat box gets saved as a normal message.
-      </Callout>
-
-      <Copy label="Your prompt, ready to paste (your database IDs are already in it)" text={devinPrompt(s)} />
-
-      <div className="space-y-4">
-        <div className="text-sm font-semibold">Then make it yours</div>
-        <p className="text-[14px] leading-relaxed text-muted">
-          Once it&apos;s live, reply to Devin in the same chat with whatever you want next. A few to steal:
-        </p>
-        {DEVIN_TWEAKS.map((t) => (
-          <Copy key={t} text={t} />
-        ))}
+      <div className="rounded-2xl border border-line bg-panel-2 p-5">
+        <div className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted">What you&apos;ll build</div>
+        <ul className="space-y-3 text-[15px] text-ink/85">
+          <li className="flex gap-3">
+            <span aria-hidden>✅</span> <span>A Today list of your to-dos. Tick one off and it&apos;s done in Notion too</span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden>💡</span> <span>Your idea inbox, with everything you told Siri</span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden>📱</span> <span>On your phone&apos;s home screen, in your own colors</span>
+          </li>
+        </ul>
       </div>
 
-      <Button onClick={next}>Next →</Button>
+      <p className="text-[15px] leading-relaxed text-ink/80">
+        I&apos;m putting the step-by-step build together now. Join the waitlist and you&apos;ll be first to get it.
+      </p>
+
+      <Button full href={DEVIN_WAITLIST_URL}>
+        Join the waitlist →
+      </Button>
+
+      <Button variant="ghost" onClick={next}>
+        Next →
+      </Button>
     </div>
   );
 }
