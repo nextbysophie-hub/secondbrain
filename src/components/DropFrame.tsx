@@ -9,7 +9,7 @@ export const SEEN_KEY = "nbs-drop01-joined";
 export const JOINED_EVENT = "nbs-drop01-joined";
 export const OPEN_EVENT = "nbs-drop01-open-signup";
 
-function post(path: string, body: unknown) {
+export function post(path: string, body: unknown) {
   return fetch(`${WORLD}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

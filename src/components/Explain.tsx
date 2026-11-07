@@ -302,6 +302,21 @@ const EXPLAINERS: Record<string, { question: string; body: ReactNode }> = {
       </>
     ),
   },
+  "devin-dashboard": {
+    question: "Wait, what's Devin?",
+    body: (
+      <>
+        <p>
+          Think of it as a developer you hire by the job. You describe the page you want like you&apos;d text a
+          friend, it builds it, puts it online, and sends you the link.
+        </p>
+        <p>
+          Your dashboard reads the same two Notion tables Siri writes into, so anything you say out loud shows up
+          there too. Want a change later? Just tell Devin. That&apos;s how I built my own.
+        </p>
+      </>
+    ),
+  },
   done: {
     question: "What just happened, in one paragraph?",
     body: (

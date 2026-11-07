@@ -890,7 +890,7 @@ export function TestIt({ s, set, next, origin }: StepProps) {
               See it in Notion →
             </Button>
           ) : null}
-          <Button onClick={next}>Finish →</Button>
+          <Button onClick={next}>Next →</Button>
         </>
       ) : (
         <>
@@ -947,6 +947,46 @@ export function TestIt({ s, set, next, origin }: StepProps) {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+export const DEVIN_WAITLIST_URL = "https://nextbysophie.com/devin-dashboard";
+
+export function DevinDashboard({ next }: StepProps) {
+  return (
+    <div className="space-y-7">
+      <p className="text-[17px] leading-relaxed text-ink/80">
+        Siri fills your Notion. Next comes somewhere nice to look at it: your own dashboard, built with Devin, an AI
+        engineer you talk to in plain English. <strong className="text-ink">You don&apos;t touch any code.</strong>
+      </p>
+
+      <div className="rounded-2xl border border-line bg-panel-2 p-5">
+        <div className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted">What you&apos;ll build</div>
+        <ul className="space-y-3 text-[15px] text-ink/85">
+          <li className="flex gap-3">
+            <span aria-hidden>✅</span> <span>A Today list of your to-dos. Tick one off and it&apos;s done in Notion too</span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden>💡</span> <span>Your idea inbox, with everything you told Siri</span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden>📱</span> <span>On your phone&apos;s home screen, in your own colors</span>
+          </li>
+        </ul>
+      </div>
+
+      <p className="text-[15px] leading-relaxed text-ink/80">
+        I&apos;m putting the step-by-step build together now. Join the waitlist and you&apos;ll be first to get it.
+      </p>
+
+      <Button full href={DEVIN_WAITLIST_URL}>
+        Join the waitlist →
+      </Button>
+
+      <Button variant="ghost" onClick={next}>
+        Next →
+      </Button>
     </div>
   );
 }
