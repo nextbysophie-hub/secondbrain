@@ -7517,21 +7517,26 @@ function Earnings({ deals }: { deals: Deal[] }) {
   );
 }
 
-/** The one number that matters most: every dollar that has actually landed
- *  with her, ever, after the manager's share. */
+/** The one number that matters most: every dollar she has earned from brand
+ *  deals, ever, after the manager's share. Delivered work counts — the job is
+ *  done, the money is just still on its way. */
 function Pocketed({ deals }: { deals: Deal[] }) {
-  const paid = deals.filter((d) => isPaid(d) && (d.fee ?? 0) > 0);
-  const pocketed = paid.reduce((n, d) => n + net(d), 0);
-  const gross = paid.reduce((n, d) => n + (d.fee ?? 0), 0);
-  const first = paid
+  const delivered = (d: Deal) => !isPaid(d) && laneFor(d)?.id === "delivered";
+  const counted = deals.filter(
+    (d) => (isPaid(d) || delivered(d)) && (d.fee ?? 0) > 0,
+  );
+  const pocketed = counted.reduce((n, d) => n + net(d), 0);
+  const gross = counted.reduce((n, d) => n + (d.fee ?? 0), 0);
+  const owed = counted.filter(delivered).reduce((n, d) => n + net(d), 0);
+  const first = counted
     .map(earnedOn)
     .filter((d): d is string => !!d)
     .sort()[0];
   const year = TODAY.slice(0, 4);
-  const thisYear = paid
+  const thisYear = counted
     .filter((d) => earnedOn(d)?.startsWith(year))
     .reduce((n, d) => n + net(d), 0);
-  const avg = paid.length ? Math.round(pocketed / paid.length) : 0;
+  const avg = counted.length ? Math.round(pocketed / counted.length) : 0;
   return (
     <section className="rounded-[22px] bg-ink px-5 py-4 text-accent-ink">
       <p className="text-[11px] uppercase tracking-wide opacity-70">
@@ -7541,8 +7546,11 @@ function Pocketed({ deals }: { deals: Deal[] }) {
         {money(pocketed)}
       </p>
       <p className="mt-2 text-[12px] opacity-80">
-        {paid.length} paid deal{paid.length === 1 ? "" : "s"}
+        {counted.length} deal{counted.length === 1 ? "" : "s"} paid or delivered
         {first ? ` since ${monthName(first.slice(0, 7))}` : ""}
+        {owed
+          ? ` · ${money(pocketed - owed)} paid + ${money(owed)} delivered`
+          : ""}
         {avg ? ` · ${money(avg)} avg per deal` : ""}
         {` · ${money(thisYear)} in ${year}`}
         {gross > pocketed
