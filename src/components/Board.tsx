@@ -7517,6 +7517,50 @@ function Earnings({ deals }: { deals: Deal[] }) {
   );
 }
 
+/** The one number that matters most: every dollar she has earned from brand
+ *  deals, ever, after the manager's share. Delivered work counts — the job is
+ *  done, the money is just still on its way. */
+function Pocketed({ deals }: { deals: Deal[] }) {
+  const delivered = (d: Deal) => !isPaid(d) && laneFor(d)?.id === "delivered";
+  const counted = deals.filter(
+    (d) => (isPaid(d) || delivered(d)) && (d.fee ?? 0) > 0,
+  );
+  const pocketed = counted.reduce((n, d) => n + net(d), 0);
+  const gross = counted.reduce((n, d) => n + (d.fee ?? 0), 0);
+  const owed = counted.filter(delivered).reduce((n, d) => n + net(d), 0);
+  const first = counted
+    .map(earnedOn)
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  const year = TODAY.slice(0, 4);
+  const thisYear = counted
+    .filter((d) => earnedOn(d)?.startsWith(year))
+    .reduce((n, d) => n + net(d), 0);
+  const avg = counted.length ? Math.round(pocketed / counted.length) : 0;
+  return (
+    <section className="rounded-[22px] bg-ink px-5 py-4 text-accent-ink">
+      <p className="text-[11px] uppercase tracking-wide opacity-70">
+        Lifetime pocketed from brand deals
+      </p>
+      <p className="mt-1 text-[34px] font-medium leading-none">
+        {money(pocketed)}
+      </p>
+      <p className="mt-2 text-[12px] opacity-80">
+        {counted.length} deal{counted.length === 1 ? "" : "s"} paid or delivered
+        {first ? ` since ${monthName(first.slice(0, 7))}` : ""}
+        {owed
+          ? ` · ${money(pocketed - owed)} paid + ${money(owed)} delivered`
+          : ""}
+        {avg ? ` · ${money(avg)} avg per deal` : ""}
+        {` · ${money(thisYear)} in ${year}`}
+        {gross > pocketed
+          ? ` · ${money(gross)} gross, ${money(gross - pocketed)} to the manager`
+          : ""}
+      </p>
+    </section>
+  );
+}
+
 /** The wall: the making of the content plus the money at the end of it,
  *  everything else about the deal left in Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
@@ -7547,6 +7591,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
 
   return (
     <div className="space-y-4">
+      <Pocketed deals={board.deals} />
       <Panel
         title="Production hub"
         right={
