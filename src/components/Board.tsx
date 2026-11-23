@@ -7567,11 +7567,14 @@ function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
   const [brand, setBrand] = useState("");
   const [fee, setFee] = useState("");
   // Only the columns her tracker has a stage for, so a new card always lands
-  // on the wall; Paid rides on the Delivered stage.
+  // on the wall; Paid is the payment checkbox, so it's always there.
   const lanes = LANES.filter(
-    (l) => stageFor(l.id === "paid" ? LANES[3] : l, stages) !== null,
+    (l) => l.id === "paid" || stageFor(l, stages) !== null,
   );
-  const [lane, setLane] = useState<Lane["id"]>(lanes[0]?.id ?? "script");
+  const [picked, setLane] = useState<Lane["id"]>(lanes[0]?.id ?? "script");
+  const lane = lanes.some((l) => l.id === picked)
+    ? picked
+    : (lanes[0]?.id ?? "script");
   const submit = () => {
     const name = brand.trim();
     if (!name) return;
@@ -7579,8 +7582,9 @@ function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
     const amount =
       Math.round(
         (Number(fee.replace(/[^0-9.]/g, "")) || 0) *
-          (/k\s*$/i.test(fee) ? 1000 : 1),
-      ) || null;
+          (/k\s*$/i.test(fee) ? 1000 : 1) *
+          100,
+      ) / 100 || null;
     const paid = lane === "paid";
     // Paid isn't a stage in her tracker: a paid deal sits on Delivered with
     // the payment box ticked.
