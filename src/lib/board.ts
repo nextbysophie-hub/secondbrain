@@ -1878,6 +1878,8 @@ export type Action =
       due?: string | null;
       contact?: string;
       link?: string | null;
+      paid?: boolean;
+      paidOn?: string | null;
     }
   | {
       action: "editDeal";
@@ -2410,6 +2412,15 @@ export async function applyAction(
         // Everything signed from here on goes through the manager, so a new
         // deal starts with their 20% assumed and can be unticked on the card.
         ...dealProps(deals, "cut", "on"),
+        // An old deal added straight into Paid counts towards the lifetime
+        // total from the moment it's added.
+        ...(body.paid
+          ? {
+              ...dealProps(deals, "paid", "on"),
+              ...dealProps(deals, "paidOn", body.paidOn ?? null),
+              ...(await paidStatus(token, deals, "", true)),
+            }
+          : {}),
       });
       return;
     case "editDeal": {

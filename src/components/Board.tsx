@@ -7561,6 +7561,105 @@ function Pocketed({ deals }: { deals: Deal[] }) {
   );
 }
 
+/** A new deal goes in with its fee and where it's at, so the lifetime
+ *  totals move the moment it's added instead of waiting on a card edit. */
+function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
+  const [brand, setBrand] = useState("");
+  const [fee, setFee] = useState("");
+  const [lane, setLane] = useState<Lane["id"]>("script");
+  const submit = () => {
+    const name = brand.trim();
+    if (!name) return;
+    const amount = Number(fee.replace(/[^0-9.]/g, "")) || null;
+    const paid = lane === "paid";
+    // Paid isn't a stage in her tracker: a paid deal sits on Delivered with
+    // the payment box ticked.
+    const target = paid
+      ? LANES[3]
+      : (LANES.find((l) => l.id === lane) ?? LANES[0]);
+    const stage = stageFor(target, stages) ?? stages[0] ?? null;
+    const paidOn = paid ? TODAY : null;
+    send(
+      {
+        action: "addDeal",
+        brand: name,
+        ...(stage ? { stage } : {}),
+        fee: amount,
+        ...(paid ? { paid: true, paidOn } : {}),
+      },
+      (b) => ({
+        ...b,
+        deals: [
+          ...b.deals,
+          {
+            id: `tmp-${Date.now()}`,
+            brand: name,
+            stage,
+            status: null,
+            fee: amount,
+            due: null,
+            contact: "",
+            link: null,
+            notes: "",
+            invoiced: false,
+            paid,
+            paidOn,
+            cut: true,
+            cutPct: null,
+            keep: null,
+            waiting: false,
+            url: "#",
+          },
+        ],
+      }),
+    );
+    setBrand("");
+    setFee("");
+    setLane("script");
+  };
+  const box =
+    "rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[14px] outline-none transition placeholder:text-muted focus:border-ink/30 focus:bg-panel-2";
+  return (
+    <div className="flex flex-wrap gap-2">
+      <input
+        value={brand}
+        onChange={(e) => setBrand(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        placeholder="New signed deal — the brand's name…"
+        className={`min-w-[180px] flex-1 ${box}`}
+      />
+      <input
+        value={fee}
+        inputMode="decimal"
+        onChange={(e) => setFee(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        placeholder="Fee $"
+        aria-label="New deal fee"
+        className={`w-28 ${box}`}
+      />
+      <select
+        value={lane}
+        aria-label="Where it's at"
+        onChange={(e) => setLane(e.target.value as Lane["id"])}
+        className={box}
+      >
+        {LANES.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={submit}
+        className="shrink-0 rounded-xl bg-accent px-4 text-[14px] font-medium text-brand-cream transition hover:opacity-85"
+      >
+        Add
+      </button>
+    </div>
+  );
+}
+
 /** The wall: the making of the content plus the money at the end of it,
  *  everything else about the deal left in Notion where her manager keeps it. */
 function DealsPane({ board, send }: { board: Board; send: Send }) {
@@ -7671,36 +7770,7 @@ function DealsPane({ board, send }: { board: Board; send: Send }) {
           })}
         </div>
         <div className="mt-3">
-          <AddRow
-            placeholder="New signed deal — the brand's name…"
-            onAdd={(brand) =>
-              send({ action: "addDeal", brand, stage: stages[0] }, (b) => ({
-                ...b,
-                deals: [
-                  ...b.deals,
-                  {
-                    id: `tmp-${Date.now()}`,
-                    brand,
-                    stage: stages[0] ?? null,
-                    status: null,
-                    fee: null,
-                    due: null,
-                    contact: "",
-                    link: null,
-                    notes: "",
-                    invoiced: false,
-                    paid: false,
-                    paidOn: null,
-                    cut: true,
-                    cutPct: null,
-                    keep: null,
-                    waiting: false,
-                    url: "#",
-                  },
-                ],
-              }))
-            }
-          />
+          <AddDeal stages={stages} send={send} />
         </div>
       </Panel>
 
