@@ -7566,11 +7566,21 @@ function Pocketed({ deals }: { deals: Deal[] }) {
 function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
   const [brand, setBrand] = useState("");
   const [fee, setFee] = useState("");
-  const [lane, setLane] = useState<Lane["id"]>("script");
+  // Only the columns her tracker has a stage for, so a new card always lands
+  // on the wall; Paid rides on the Delivered stage.
+  const lanes = LANES.filter(
+    (l) => stageFor(l.id === "paid" ? LANES[3] : l, stages) !== null,
+  );
+  const [lane, setLane] = useState<Lane["id"]>(lanes[0]?.id ?? "script");
   const submit = () => {
     const name = brand.trim();
     if (!name) return;
-    const amount = Number(fee.replace(/[^0-9.]/g, "")) || null;
+    // "$1,200" and "1.2k" both mean twelve hundred.
+    const amount =
+      Math.round(
+        (Number(fee.replace(/[^0-9.]/g, "")) || 0) *
+          (/k\s*$/i.test(fee) ? 1000 : 1),
+      ) || null;
     const paid = lane === "paid";
     // Paid isn't a stage in her tracker: a paid deal sits on Delivered with
     // the payment box ticked.
@@ -7615,7 +7625,7 @@ function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
     );
     setBrand("");
     setFee("");
-    setLane("script");
+    setLane(lanes[0]?.id ?? "script");
   };
   const box =
     "rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[14px] outline-none transition placeholder:text-muted focus:border-ink/30 focus:bg-panel-2";
@@ -7643,7 +7653,7 @@ function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
         onChange={(e) => setLane(e.target.value as Lane["id"])}
         className={box}
       >
-        {LANES.map((l) => (
+        {lanes.map((l) => (
           <option key={l.id} value={l.id}>
             {l.label}
           </option>
