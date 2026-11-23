@@ -7567,9 +7567,9 @@ function AddDeal({ stages, send }: { stages: string[]; send: Send }) {
   const [brand, setBrand] = useState("");
   const [fee, setFee] = useState("");
   // Only the columns her tracker has a stage for, so a new card always lands
-  // on the wall; Paid is the payment checkbox, so it's always there.
+  // on the wall; Paid rides on the Delivered stage.
   const lanes = LANES.filter(
-    (l) => l.id === "paid" || stageFor(l, stages) !== null,
+    (l) => stageFor(l.id === "paid" ? LANES[3] : l, stages) !== null,
   );
   const [picked, setLane] = useState<Lane["id"]>(lanes[0]?.id ?? "script");
   const lane = lanes.some((l) => l.id === picked)
