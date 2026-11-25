@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GuideSpec } from "@/components/Guide";
 import { Checklist, Copy, Go, Note, Ref, Taps } from "@/components/GuideKit";
 
@@ -71,25 +71,38 @@ function clean(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function isHyper(avatar: string, place: string, offer: string) {
-  return (
-    avatar.toLowerCase() === HYPER.avatar &&
-    place.toLowerCase() === HYPER.place.toLowerCase() &&
-    offer.toLowerCase() === HYPER.offer
-  );
-}
-
 function cap(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function doors(avatar: string, place: string, offer: string) {
-  if (isHyper(avatar, place, offer)) return HYPER_LINES;
+function doors(avatar: string, place: string, offer: string, sample: boolean) {
+  if (sample) return HYPER_LINES;
   return [
     `If you're one of the ${avatar} in ${place}, this is for you.`,
-    `I'm giving a few ${avatar} in ${place} ${offer}.`,
+    `I'm doing ${offer} for ${avatar} in ${place}.`,
     `${cap(avatar)} in ${place}, I want to take you from this… to ${offer}.`,
   ];
+}
+
+const DRAFT_KEY = "nbs-drop10-doors";
+
+type Draft = { avatar: string; place: string; offer: string; sample: boolean };
+
+function readDraft(): Draft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Draft>;
+    if (typeof parsed.avatar !== "string") return null;
+    return {
+      avatar: parsed.avatar,
+      place: typeof parsed.place === "string" ? parsed.place : "",
+      offer: typeof parsed.offer === "string" ? parsed.offer : "",
+      sample: Boolean(parsed.sample),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function morePrompt(avatar: string, place: string, offer: string, lines: string[]) {
@@ -133,15 +146,24 @@ const PARTS: { name: string; moves: boolean; text: string }[] = [
 
 /** Avatar, place, and offer in — three call-out lines and a prompt for more. */
 function Builder() {
-  const [avatar, setAvatar] = useState("");
-  const [place, setPlace] = useState("");
-  const [offer, setOffer] = useState("");
+  const [seed] = useState(readDraft);
+  const [avatar, setAvatar] = useState(seed?.avatar ?? "");
+  const [place, setPlace] = useState(seed?.place ?? "");
+  const [offer, setOffer] = useState(seed?.offer ?? "");
+  const [sample, setSample] = useState(seed?.sample ?? false);
+  useEffect(() => {
+    try {
+      const draft: Draft = { avatar, place, offer, sample };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      /* private mode */
+    }
+  }, [avatar, place, offer, sample]);
   const who = clean(avatar);
   const where = clean(place);
   const what = clean(offer);
   const ready = Boolean(who && where && what);
-  const mine = ready && isHyper(who, where, what);
-  const lines = ready ? doors(who, where, what) : [];
+  const lines = ready ? doors(who, where, what, sample) : [];
   const field =
     "w-full rounded-xl border border-line bg-white/70 px-4 py-3 text-[15px] text-ink outline-none placeholder:text-muted/70 focus:border-accent";
   return (
@@ -155,6 +177,7 @@ function Builder() {
           setAvatar(HYPER.avatar);
           setPlace(HYPER.place);
           setOffer(HYPER.offer);
+          setSample(true);
         }}
         className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition hover:border-accent hover:text-ink"
       >
@@ -165,7 +188,10 @@ function Builder() {
         <input
           className={`${field} mt-1`}
           value={avatar}
-          onChange={(e) => setAvatar(e.target.value)}
+          onChange={(e) => {
+            setAvatar(e.target.value);
+            setSample(false);
+          }}
           placeholder="dog owners with a high-energy dog"
           autoComplete="off"
         />
@@ -175,7 +201,10 @@ function Builder() {
         <input
           className={`${field} mt-1`}
           value={place}
-          onChange={(e) => setPlace(e.target.value)}
+          onChange={(e) => {
+            setPlace(e.target.value);
+            setSample(false);
+          }}
           placeholder="Austin"
           autoComplete="off"
         />
@@ -185,7 +214,10 @@ function Builder() {
         <input
           className={`${field} mt-1`}
           value={offer}
-          onChange={(e) => setOffer(e.target.value)}
+          onChange={(e) => {
+            setOffer(e.target.value);
+            setSample(false);
+          }}
           placeholder="a full yard redesign"
           autoComplete="off"
         />
@@ -193,7 +225,7 @@ function Builder() {
       {ready ? (
         <>
           <p className="text-[12.5px] leading-relaxed text-muted">
-            {mine
+            {sample
               ? "These are the three I’m actually testing on my hyper dog owner. Same person, three doors."
               : "A first pass from what you typed. Same person, three doors. Ask for more, then pick four."}
           </p>
